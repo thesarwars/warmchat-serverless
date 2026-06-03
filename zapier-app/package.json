@@ -1,0 +1,16 @@
+{
+  "name": "warmchats-zapier",
+  "version": "1.0.0",
+  "description": "WarmChats CRM integration for Zapier - triggers and actions over the /api/integrations/v1 API.",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "zapier-platform-core": "^16.0.0"
+  },
+  "devDependencies": {
+    "zapier-platform-cli": "^16.0.0"
+  }
+}

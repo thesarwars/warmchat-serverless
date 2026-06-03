@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "ignore": [
+    "scripts/**",
+    "unused/**",
+    "dist/**",
+    "functions/**",
+    "workers/**",
+    "zapier-app/**",
+    "public/**",
+    "gateway-worker/**",
+    ".github/**",
+    ".agent/**",
+    ".vscode/**",
+    ".cursor/**",
+    "docs/**"
+  ],
+  "ignoreDependencies": [
+    "tailwindcss-animate",
+    "wrangler",
+    "jose"
+  ],
+  "workspaces": {
+    "default": {
+      "project": [
+        "./src/**/*.{ts,tsx}"
+      ]
+    }
+  }
+}

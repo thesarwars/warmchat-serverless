@@ -1,0 +1,13 @@
+# Cloudflare Pages routing rules. Existing static files are served first; these
+# only apply when no file matches the request.
+#
+# A request for a missing /assets/ chunk must return a real 404 - NOT the SPA
+# fallback (index.html, HTTP 200). Serving 200-HTML for a .js URL is what lets
+# a browser cache the wrong body as the chunk's content and then fail every
+# dynamic import until a hard refresh. A 404 is never stored as the module, so
+# the vite:preloadError reload below can recover cleanly.
+/assets/*  /index.html  404
+
+# Everything else is the single-page app: serve index.html so client routing
+# (react-router) can take over.
+/*  /index.html  200

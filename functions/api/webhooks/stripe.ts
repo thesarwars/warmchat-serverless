@@ -1,0 +1,246 @@
+/// <reference types="@cloudflare/workers-types" />
+import type { Env } from "../../_shared/env.ts";
+import { json, error } from "../../_shared/http.ts";
+import { execute, queryFirst } from "../../_shared/db.ts";
+import { planFromPriceId } from "../../_shared/billing.ts";
+import { notify } from "../../_shared/notify.ts";
+
+/**
+ * POST /api/webhooks/stripe - subscription state sync.
+ *
+ * Stripe is the source of truth; we mirror status + plan onto `organization`
+ * so the app can gate features without a round-trip. Handlers are idempotent
+ * (write-the-final-state UPDATEs) so duplicate deliveries from Stripe's retry
+ * pipeline are harmless and no event-id dedupe table is needed.
+ *
+ * Subscribed events (configure in Stripe dashboard):
+ *   - checkout.session.completed
+ *   - customer.subscription.updated
+ *   - customer.subscription.deleted
+ *   - invoice.payment_failed
+ */
+export const onRequestPost: PagesFunction<Env> = async (context) => {
+  const { request, env } = context;
+  if (!env.STRIPE_WEBHOOK_SECRET) return error("Stripe webhook secret not configured", 503);
+
+  const raw = await request.text();
+  const sigHeader = request.headers.get("Stripe-Signature") || "";
+  const verified = await verifyStripeSignature(env.STRIPE_WEBHOOK_SECRET, raw, sigHeader);
+  if (!verified) return error("Invalid signature", 400);
+
+  let event: StripeEvent;
+  try {
+    event = JSON.parse(raw) as StripeEvent;
+  } catch {
+    return error("Malformed JSON body", 400);
+  }
+
+  switch (event.type) {
+    case "checkout.session.completed":
+      await handleCheckoutCompleted(env, event.data.object as CheckoutSession);
+      break;
+    case "customer.subscription.updated":
+      await handleSubscriptionUpdated(env, event.data.object as StripeSubscription);
+      break;
+    case "customer.subscription.deleted":
+      await handleSubscriptionDeleted(env, event.data.object as StripeSubscription);
+      break;
+    case "invoice.payment_failed":
+      await handleInvoicePaymentFailed(env, event.data.object as StripeInvoice);
+      break;
+    default:
+      // 200 so Stripe stops retrying; we just don't care about this event.
+      break;
+  }
+
+  return json({ received: true });
+};
+
+// ---------- Event payload types (subset of fields we read) ----------
+
+type StripeEvent = {
+  id: string;
+  type: string;
+  data: { object: Record<string, unknown> };
+};
+
+type CheckoutSession = {
+  payment_status?: string;
+  status?: string;
+  subscription?: string | null;
+  customer?: string | null;
+  metadata?: Record<string, string> | null;
+};
+
+type StripeSubscription = {
+  id: string;
+  status: string;
+  customer: string;
+  items?: { data?: Array<{ price?: { id?: string } }> };
+};
+
+type StripeInvoice = {
+  customer?: string | null;
+  subscription?: string | null;
+};
+
+// ---------- Event handlers ----------
+
+async function handleCheckoutCompleted(env: Env, sess: CheckoutSession): Promise<void> {
+  const orgIdMeta = Number(sess.metadata?.org_id);
+  const planId = sess.metadata?.plan_id ?? null;
+  const paid = sess.payment_status === "paid" || sess.status === "complete";
+  if (!paid || !planId || !Number.isInteger(orgIdMeta)) return;
+
+  await execute(
+    env.D1DB,
+    `UPDATE organization SET plan = ?, subscription_status = 'active',
+            plan_started_at = COALESCE(plan_started_at, CURRENT_TIMESTAMP),
+            stripe_customer_id = COALESCE(stripe_customer_id, ?),
+            stripe_subscription_id = COALESCE(?, stripe_subscription_id)
+      WHERE id = ?`,
+    planId, sess.customer ?? null, sess.subscription ?? null, orgIdMeta,
+  );
+}
+
+async function handleSubscriptionUpdated(env: Env, sub: StripeSubscription): Promise<void> {
+  if (!sub.customer) return;
+  const org = await orgByCustomer(env, sub.customer);
+  if (!org) return;
+
+  const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+  const plan = planFromPriceId(env, priceId);
+
+  // Always sync status. Only overwrite plan when we recognize the price id -
+  // an unknown price means an out-of-band Stripe edit we shouldn't second-guess.
+  if (plan) {
+    await execute(
+      env.D1DB,
+      `UPDATE organization SET subscription_status = ?, plan = ?, stripe_subscription_id = ?,
+              plan_started_at = COALESCE(plan_started_at, CASE WHEN ? = 'active' THEN CURRENT_TIMESTAMP END)
+        WHERE id = ?`,
+      sub.status, plan, sub.id, sub.status, org.id,
+    );
+  } else {
+    await execute(
+      env.D1DB,
+      `UPDATE organization SET subscription_status = ?, stripe_subscription_id = ? WHERE id = ?`,
+      sub.status, sub.id, org.id,
+    );
+  }
+}
+
+async function handleSubscriptionDeleted(env: Env, sub: StripeSubscription): Promise<void> {
+  if (!sub.customer) return;
+  const org = await orgByCustomer(env, sub.customer);
+  if (!org) return;
+
+  await execute(
+    env.D1DB,
+    `UPDATE organization SET subscription_status = 'canceled', plan = 'free_channel',
+                             plan_started_at = NULL, stripe_subscription_id = NULL
+      WHERE id = ?`,
+    org.id,
+  );
+  if (org.owner_id) {
+    try {
+      await notify(env, {
+        userId: org.owner_id,
+        orgId: org.id,
+        kind: "subscription_changed",
+        channel: "system",
+        severity: "warning",
+        title: "Subscription canceled",
+        body: "Your plan has been downgraded to the free tier.",
+        data: { path: "/settings?tab=billing" },
+      });
+    } catch (err) {
+      console.warn("[stripe-notify] subscription_changed failed", err);
+    }
+  }
+}
+
+async function handleInvoicePaymentFailed(env: Env, inv: StripeInvoice): Promise<void> {
+  if (!inv.customer) return;
+  const org = await orgByCustomer(env, inv.customer);
+  if (!org) return;
+
+  await execute(
+    env.D1DB,
+    `UPDATE organization SET subscription_status = 'past_due' WHERE id = ?`,
+    org.id,
+  );
+  if (org.owner_id) {
+    try {
+      await notify(env, {
+        userId: org.owner_id,
+        orgId: org.id,
+        kind: "payment_failed",
+        channel: "system",
+        severity: "error",
+        title: "Payment failed",
+        body: "Update your payment method to avoid service interruption.",
+        data: { path: "/settings?tab=billing" },
+      });
+    } catch (err) {
+      console.warn("[stripe-notify] payment_failed failed", err);
+    }
+  }
+}
+
+async function orgByCustomer(env: Env, customerId: string): Promise<{ id: number; owner_id: number | null } | null> {
+  return queryFirst<{ id: number; owner_id: number | null }>(
+    env.D1DB,
+    `SELECT id, owner_id FROM organization WHERE stripe_customer_id = ? LIMIT 1`,
+    customerId,
+  );
+}
+
+// ---------- Signature verification ----------
+
+const MAX_SKEW_SECONDS = 300;
+
+async function verifyStripeSignature(secret: string, rawBody: string, header: string): Promise<boolean> {
+  if (!header) return false;
+
+  let timestamp: string | null = null;
+  const v1Sigs: string[] = [];
+  for (const part of header.split(",")) {
+    const [k, v] = part.split("=", 2);
+    if (!k || !v) continue;
+    if (k === "t") timestamp = v;
+    else if (k === "v1") v1Sigs.push(v);
+  }
+  if (!timestamp || v1Sigs.length === 0) return false;
+
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts)) return false;
+  if (Math.abs(Math.floor(Date.now() / 1000) - ts) > MAX_SKEW_SECONDS) return false;
+
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${timestamp}.${rawBody}`));
+  const expected = bytesToHex(new Uint8Array(mac));
+
+  // Constant-time compare against each v1 signature offered.
+  return v1Sigs.some((sig) => timingSafeEqualHex(sig, expected));
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}

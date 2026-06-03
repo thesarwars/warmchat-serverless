@@ -1,0 +1,12 @@
+{
+    "recommendations": [
+        "Anthropic.claude-code",
+        "tamasfe.even-better-toml",
+        "ritwickdey.LiveServer",
+        "stylelint.vscode-stylelint",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next",
+        "ms-python.python",
+        "bradlc.vscode-tailwindcss"
+    ]
+}

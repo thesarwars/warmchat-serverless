@@ -1,0 +1,18 @@
+# Cloudflare Pages response headers.
+#
+# The app shell must always revalidate so each deploy's freshly hashed asset
+# names are picked up on a normal reload (no-cache means "revalidate before
+# use", not "never store" - with etags it is a cheap 304).
+/*
+  Cache-Control: no-cache
+
+# Build assets revalidate too - deliberately NOT immutable. During a deploy a
+# tab still on the old index.html can request a chunk the live deployment no
+# longer has; Pages answers that miss with the SPA fallback (index.html, HTTP
+# 200) under this same /assets/ path. A long max-age would pin that wrong
+# HTML-as-JS body for hours and the import keeps failing ("Failed to fetch
+# dynamically imported module") until a hard refresh. no-cache forces a
+# revalidation on every use so a bad body can never persist past one load.
+# (Filenames are content-hashed, so revalidation is a 304 when unchanged.)
+/assets/*
+  Cache-Control: no-cache

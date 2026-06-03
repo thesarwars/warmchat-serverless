@@ -1,0 +1,144 @@
+#:schema node_modules/wrangler/config-schema.json
+# WarmChats - Cloudflare Pages backend (D1 + Functions).
+#
+# Values in [vars] are pushed to the Pages PRODUCTION environment on
+# `pnpm upload` / `wrangler pages deploy dist`. For local dev `wrangler pages
+# dev` reads .dev.vars instead (overrides anything here).
+#
+# SECURITY NOTE: every value below ends up in your git history. If you'd
+# rather keep secrets out of the repo, blank them here and run:
+#   wrangler pages secret put KEY_NAME --project-name warmchats
+# That stores them encrypted on Cloudflare's side; they still appear at
+# runtime as `env.KEY_NAME` to your Functions.
+
+name = "warmchats"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-05-22"
+# compatibility_flags = ["nodejs_compat"]
+
+# ---- D1 database binding (warmchats-db) ----
+[[d1_databases]]
+binding = "D1DB"
+database_name = "warmchats-db"
+database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
+# preview_database_id = "DB" # Required for Pages local development
+
+# [observability.logs]
+# invocation_logs = true
+
+# =============================================================================
+# Production variables (also serve preview unless overridden in [env.preview.vars])
+# =============================================================================
+[vars]
+ENV = "prod"
+
+MOCK_SEND_APIS = "1"
+# ---- App identity / URLs ----
+FRONTEND_URL = "https://www.warmchats.com"
+PUBLIC_SITE_URL = "https://www.warmchats.com"
+PUBLIC_BASE_URL = "https://www.warmchats.com"
+REPLY_DOMAIN = "mail.warmchats.com"
+SUPPORT_EMAIL = "hello@warmchats.com"
+
+# ---- Auth ----
+# Strong random; rotate via `wrangler pages secret put JWT_SECRET` if it leaks.
+JWT_SECRET = "***REMOVED***"
+EMAIL_UNSUB_SIGNING_KEY = "***REMOVED***"
+FERNET_KEY = "***REMOVED***"
+
+# ---- Cloudflare Turnstile (bot protection on public forms) ----
+# Pairs with VITE_TURNSTILE_SITE_KEY in the frontend (.env). Treated as a
+# secret; prefer rotating via `wrangler pages secret put TURNSTILE_SECRET_KEY`.
+TURNSTILE_SECRET_KEY = "***REMOVED***"
+
+# ---- Google OAuth (login) & Gmail OAuth ----
+GOOGLE_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
+GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
+GMAIL_OAUTH_CLIENT_SECRET = "***REMOVED***"
+GMAIL_OAUTH_REDIRECT_URI = "https://www.warmchats.com/api/gmail/oauth/callback"
+GMAIL_PUBSUB_TOPIC_FULL_NAME = "projects/warmchats-496922/topics/gmail-replies"
+
+# ---- AI provider (OpenAI) ----
+OPENAI_API_KEY = "***REMOVED***"
+
+# ---- Billing (Stripe) ----
+STRIPE_SECRET_KEY = "***REMOVED***"
+STRIPE_WEBHOOK_SECRET = "***REMOVED***"
+# Plan id (frontend / org.plan column) -> Stripe price id. Leave blank to disable a plan.
+# Live:
+# STRIPE_PRICE_FREE    = "price_1TZJ11Fk4wccBvlX81QWgw7x"
+# STRIPE_PRICE_STARTER = "price_1TZJ0UFk4wccBvlXMBZhRYKv"
+# STRIPE_PRICE_GROWTH  = "price_1TZJ0oFk4wccBvlXse5j4Okr"
+# Sandbox:
+STRIPE_PRICE_FREE = "price_1TatIwFk4wccBvlXdQb2JZIe"
+STRIPE_PRICE_STARTER = "price_1TatIdFk4wccBvlXxo4ESlZW"
+STRIPE_PRICE_GROWTH = "price_1TatIoFk4wccBvlXzmTA3Bzi"
+
+
+# ---- SMS: Telnyx (current 10DLC) ----
+TELNYX_API_KEY = "***REMOVED***"
+TELNYX_PUBLIC_KEY = "x4JTjmM2mUkbTAd8t/QI/OjqKUKEr2Ga9dpi1p01TK0="
+
+# ---- Voice: Telnyx Call Control + WebRTC (fill from Telnyx portal) ----
+TELNYX_CONNECTION_ID = "2967333494394455952"             # Voice > Call Control App connection id
+TELNYX_CREDENTIAL_CONNECTION_ID = "***REMOVED***"  # Voice > SIP Connections (credential) id for WebRTC
+TELNYX_SIP_DOMAIN = "sip.telnyx.com"                     # default; change if a custom SIP subdomain is set on the SIP Connection
+TELNYX_VOICE_PROFILE_ID = "2967335036212217826"          # optional outbound voice profile
+# 10DLC "ISV Platform Umbrella" - ONE shared profile/campaign/brand for ALL
+# agents. New numbers are assigned to these; we never register per-client
+# brands/campaigns.
+TELNYX_MESSAGING_PROFILE_ID = "40019e49-4441-4395-875c-b5be0ffceb82"
+TELNYX_MASTER_CAMPAIGN_ID = "4b30019d-b165-ecc2-aff0-fedd0df37d98"
+TELNYX_MASTER_BRAND_ID = "4b20019d-a98b-a4e7-1a00-357bf2aca97d"  # Warmchats LLC (TCR BGS5W5V) - owns the master campaign
+
+# ---- Email: ElasticEmail (SMTP + API + inbound) ----
+ELASTIC_SENDER_NAME = "WarmChats"
+ELASTIC_SENDER_EMAIL = "hello@warmchats.com"
+ELASTIC_EMAIL_API_KEY = "***REMOVED***"
+ELASTIC_WEBHOOK_URL = "https://www.warmchats.com/api/elastic/inbound"
+
+# ---- Web Push (VAPID) ----
+VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"
+VAPID_PRIVATE_KEY = "***REMOVED***"
+VAPID_CONTACT_EMAIL = "hello@warmchats.com"
+
+# =============================================================================
+# Preview environment overrides (optional; applies to non-production branch deploys)
+# =============================================================================
+# [env.preview.vars]
+# ENV = "preview"
+# FRONTEND_URL = "https://preview.www.warmchats.com"
+
+# =============================================================================
+# Calling sidecar Worker bindings
+# =============================================================================
+# Service binding: lets Pages Functions call into the gateway Worker (which hosts
+# the Durable Objects). The Worker is deployed separately from gateway-worker/.
+[[services]]
+binding = "GATEWAY"
+service = "warmchats-calling-gateway"
+
+# Durable Object bindings re-exported through the gateway Worker's script. Pages
+# Functions don't instantiate DOs directly - they go through GATEWAY.fetch(...) -
+# but declaring them documents the wiring and keeps the binding names stable.
+[[durable_objects.bindings]]
+name = "USER_SOCKET"
+class_name = "UserSocketDO"
+script_name = "warmchats-calling-gateway"
+
+[[durable_objects.bindings]]
+name = "CALL_ACTOR"
+class_name = "CallActorDO"
+script_name = "warmchats-calling-gateway"
+
+# =============================================================================
+# Other bindings
+# =============================================================================
+[[r2_buckets]]                # attachments / media (Phase 8 - inbox uploads)
+binding = "ATTACHMENTS"
+bucket_name = "warmchats-attachments"
+# preview_bucket_name = "warmchats-attachments-preview"
+
+# [[kv_namespaces]]            # short-lived caches (e.g. OAuth state)
+# binding = "KV"
+# id = "<namespace-id>"
