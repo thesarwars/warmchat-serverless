@@ -1,0 +1,25 @@
+// Client mirror of functions/_shared/aiLimits.ts - keep both in sync. Used for
+// maxLength + character counters so AI inputs (knowledge base, AI settings,
+// responders) cannot bloat the system prompt or exhaust resources.
+export const AI_LIMITS = {
+  faqQuestion: 200,
+  faqAnswer: 500,
+  faqMaxEntries: 50,
+  qualificationQuestion: 200,
+  qualificationGuidance: 300,
+  qualificationMaxEntries: 50,
+  ruleItem: 80,
+  ruleMaxItems: 25,
+  responderName: 60,
+  responderTrigger: 60,
+  responderKeywords: 200,
+  responderTone: 40,
+  responderMessage: 480,
+  responderMaxCount: 30,
+  profileShort: 200,
+  profileLong: 600,
+  personaJson: 3000,
+  agentDisplayName: 60,
+  agentTone: 80,
+  agentSystemPrompt: 1500,
+} as const;

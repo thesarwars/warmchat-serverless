@@ -1,0 +1,80 @@
+#:schema node_modules/wrangler/config-schema.json
+# WarmChats cron Worker - runs background jobs (sequence dispatcher, scheduled
+# messages, OAuth token refresh). This is a SEPARATE Worker from the Pages
+# Functions because Cloudflare Pages does NOT support cron triggers - only
+# standalone Workers do. The two share the same D1 database binding.
+#
+# Deploy: `pnpm upload-cron`  (or `cd workers/cron && wrangler deploy`)
+# Dev:    `pnpm dev-cron` then `pnpm cron:trigger`.
+#   IMPORTANT: run via `pnpm dev-cron` (from the repo ROOT). That script passes
+#   `--persist-to .wrangler/state` so the cron shares the SAME local D1 that
+#   `pnpm db` seeds and the Vite `/api` plugin uses. Do NOT `cd workers/cron &&
+#   wrangler dev` - wrangler then persists local state next to THIS config
+#   (workers/cron/.wrangler), a separate EMPTY DB -> "no such table" errors.
+
+name = "warmchats-cron"
+main = "index.ts"
+compatibility_date = "2025-05-18"
+
+# No public URL. This Worker runs ONLY from its cron triggers (fired internally
+# by Cloudflare's scheduler), so it never needs a *.workers.dev or preview URL.
+preview_urls = false
+workers_dev = false
+
+# Workers Paid: lift the per-invocation CPU ceiling well above the 30s default so
+# a busy queue-draining tick (the scheduled-message + sequence dispatchers run
+# many D1 round-trips) is never killed mid-pass. A Cron Trigger invocation may
+# use up to 15 min of CPU; D1/network waits don't count against CPU time.
+[limits]
+cpu_ms = 300_000
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Same D1 instance the Pages Functions use.
+[[d1_databases]]
+binding = "D1DB"
+database_name = "warmchats-db"
+database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
+
+# Service binding to the gateway Worker so cron-fired notifications (e.g. an AI
+# reply the cron sends after a natural delay) emit a LIVE in-app toast over the
+# user's WebSocket - the same path the Pages Functions use via notify()/emitLive.
+# Without this, notify() from the cron can only persist + web-push, so the live
+# toast never fires (this is why a cron-sent AI reply showed no in-app
+# notification). Optional binding (env.GATEWAY?) so local dev still boots when the
+# gateway Worker isn't running.
+[[services]]
+binding = "GATEWAY"
+service = "warmchats-calling-gateway"
+
+[triggers]
+# Every minute. Per-second provider caps are enforced in D1 by
+# functions/_shared/sendRateLimiter.ts, so even at the minute boundary we
+# can't exceed (e.g.) 49 SMS/sec/phone. A 60s cadence keeps the queue
+# draining promptly without the rate limiter ever needing to refuse.
+crons = ["* * * * *"]
+
+# Vars / secrets are loaded from .dev.vars locally; in production, set with
+# `wrangler secret put NAME --name warmchats-cron`. Mirror the keys you put on
+# the Pages project so the same Telnyx / ElasticEmail credentials work here.
+[vars]
+ENV = "prod"
+MOCK_SEND_APIS=1
+
+TELNYX_API_KEY = "KEY019C64663B1E047E5FF99CF11E8F170B_cQMW9hDU1HZKGAMeweNom0"
+ELASTIC_EMAIL_API_KEY = "DA6A4DEB6E9FBD22E54914823B4B0423AC17A1F0A2AD07F8974B5F19B3BCBC7E87B96F5F376ADAF334DAD8EE28AE8A13"
+ELASTIC_SENDER_EMAIL = "hello@warmchats.com"
+ELASTIC_SENDER_NAME = "WarmChats"
+EMAIL_UNSUB_SIGNING_KEY = "9ad1c55c33d55b83b551e62ce400f2f69f24dc9f0bb0bf2f71d5e9b4cf71ed81"
+FERNET_KEY = "lWPNdUL_iG672PKUtYNOGAceD5VocxeMeAKW3vpAM2c="
+GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
+GMAIL_OAUTH_CLIENT_SECRET = "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"
+FRONTEND_URL = "https://www.warmchats.com"
+PUBLIC_BASE_URL = "https://www.warmchats.com"
+
+# ---- Web Push (VAPID) ----
+VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"
+VAPID_PRIVATE_KEY = "DuK8drmkCoGaNiC0DwMwX91mHsdA6O3Ysxh3A0tZfos"
+VAPID_CONTACT_EMAIL = "hello@warmchats.com"

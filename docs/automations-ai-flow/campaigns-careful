@@ -1,0 +1,18 @@
+when I launch a automation the messages are added as queued and you dont use scheduled_message like in the cron you used sms_message to queue the message so now it shows in the ui as queued but the cron never runs, also add scripts to run the cron in the package.json and update the readme.md with the new scripts I added too, also the emails 
+
+also http://localhost:5173/api/automations/1/details never resolves
+and make sure the email is also queued and sent via the cron, and abide by some rate limits, write down in the ui how long you estimate it will take, we need like 14 mms per second per phone 49 sms per second per phone
+the cron will need to be smarter
+and use d1 to count not kv
+
+and lets mock all the elastic and telnyx and gmail send apis in both the cron and the servers and make a /admin/debug page that lets me view the logs for this mock api and keep logs from it so I can see just the attempts to send email or sms to it the timestamp to who and the msg just to test and make sure that we are not sending too many messages, the goal is to make this follow the acceptable limits and if we mock the sending apis we will be able to make sure it's not sending too much and also debug their time zones and other automation settings that can help spot an issue before we make a real test you know because I dont want to test and just sms to 50 people to test it it will be absurd right, and we need to follow by people time zones and make sure we are not spamming anyone who write STOP and follow the law and have like unsubscribe option, I think this is already built into telnyx and elastic some where but I'm not sure make sure we make it proper and maybe add some explanation about it some where in the ui where you make the automations
+
+and make jo tester the admin user and add to the sidebar when you are an admin this page and protect its routes
+
+make the logs on the admin page of all the messages show the newest from the top and have pagination and auto refresh toggle every 5s so we can debug and a counter of how many messages there are of different kinds
+
+where did you add the option to configure the allowed sending hours I can't find it you were suppose to make sure the cron follows this and make sure it follows the global is mock settings too
+
+I'm not even sure why you used the built in roles to control the admin access and also an env to control mock like you meant for the agents to enable or disable that but then its globally defined, not good, it needs to literally check if the user is admin and make just jo tester admin in the seed and the users table and only for him it should show the mocks and admin page and the auto refresh option needs to be a toggle I said and add a refresh button too there
+
+so the rate limits should be per user or globally I'm not sure but I know the debug screen just shows global per second and per minute but this is wrong we need per number

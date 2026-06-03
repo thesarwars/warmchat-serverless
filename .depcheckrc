@@ -1,0 +1,3 @@
+ignores: ["cross-env", "tailwindcss-animate", "tailwindcss", "eslint-import-resolver-typescript", "wrangler", "react-icons", "functions", "@progress/kendo-svg-icons", "knip", "depcheck", "zapier-platform-core", "zapier-platform-cli"]
+ignore-patterns:
+  - zapier-app

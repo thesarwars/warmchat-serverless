@@ -1,0 +1,67 @@
+
+-- ── Calendar demo leads + appointments ────────────────────────────────────────
+-- Real-estate leads for the Calendar page. Ids 100+ to avoid clashing with the
+-- existing demo lead (id 1). The appointments below all use starts_at expressed
+-- relative to the current week's Monday so the Calendar always shows a populated
+-- Mon-Sun grid regardless of when the seed runs.
+--
+-- Monday-of-this-week =
+--   datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days')
+-- Then add days/hours/minutes per appointment.
+
+-- INSERT OR IGNORE INTO lead (id, name, first_name, last_name, email, phone, status,
+--                             source, area, price_range, notes,
+--                             email_notifications_enabled, sms_notifications_enabled,
+--                             sms_consent_status, lead_type, intent, ai_status,
+--                             owner_id, org_id) VALUES
+--   (100, 'Sarah Johnson',     'Sarah',   'Johnson',  'sarah@example.com',   '+13105551001', 'Hot',  'Website Form', 'Beverly Hills',   '$1.0M-$1.5M', 'Pre-approved up to $1.2M. Wants modern with a view.',                  1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (101, 'Mark Chen',         'Mark',    'Chen',     'mark@example.com',    '+13105551002', 'Warm', 'Referral',     'West Hollywood',  '$800k-$1.0M', 'Investor profile. Inbound from website.',                              1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (102, 'Linda Park',        'Linda',   'Park',     'linda@example.com',   '+13105551003', 'Cold', 'Cold Outreach','Pasadena',        '$700k-$900k', 'Hasn''t responded to last 2 emails. Worth a call.',                    1, 1, 'opted_in', 'buyer',  'Passive', 'active', 1, 1),
+--   (103, 'Tom & Maya Reyes',  'Tom',     'Reyes',    'reyes@example.com',   '+13105551004', 'Warm', 'Open House',   'West Hills',      '$900k-$1.1M', 'Touring 3 properties.',                                                1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (104, 'First Pacific',     'First',   'Pacific',  'desk@firstpac.com',   '+13105551005', 'New',  'Partner',      'N/A',             'N/A',         'Lender - pre-approval extension for Chen file.',                       1, 1, 'opted_in', 'partner','Active',  'active', 1, 1),
+--   (105, 'Michael Brown',     'Michael', 'Brown',    'michael@example.com', '+13105551006', 'Warm', 'Referral',     'Sunset',          '$1.2M+',      'Final paperwork for the Sunset listing.',                              1, 1, 'opted_in', 'seller', 'Active',  'active', 1, 1),
+--   (106, 'Aisha Patel',       'Aisha',   'Patel',    'aisha@example.com',   '+13105551007', 'Warm', 'Website Form', 'Downtown',        '$600k-$800k', 'Showing condos downtown.',                                             1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (107, 'Jessica Lee',       'Jessica', 'Lee',      'jessica@example.com', '+13105551008', 'Hot',  'Relocation',   'Santa Monica',    '$900k-$1.2M', 'Relocating from SF. Tight 2-week timeline.',                           1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (108, 'Brown family',      'Brown',   'Family',   'browns@example.com',  '+13105551009', 'Warm', 'Repeat',       'Sunset',          '$1.2M+',      'Pricing strategy review.',                                             1, 1, 'opted_in', 'seller', 'Active',  'active', 1, 1),
+--   (109, 'Carlos Vega',       'Carlos',  'Vega',     'carlos@example.com',  '+13105551010', 'Warm', 'Cold Outreach','Echo Park',       '$550k-$750k', 'First showing - single property.',                                     1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (110, 'Nina Alvarez',      'Nina',    'Alvarez',  'nina@example.com',    '+13105551011', 'Hot',  'Referral',     'Silver Lake',     '$850k-$1.1M', 'Repeat client - looking to upgrade.',                                  1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (111, 'Sunset open-house', 'Sunset',  'Listing',  'leads@sunset.com',    '+13105551012', 'New',  'Open House',   'Sunset',          'Multi',       'Open-house attendees needing follow-up.',                              1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (112, 'Joseph & Anne',     'Joseph',  'Williams', 'jw@example.com',      '+13105551013', 'Warm', 'Referral',     'Burbank',         '$700k-$900k', 'Buyer consult - couple looking to upsize.',                            1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (113, 'Tyler Brooks',      'Tyler',   'Brooks',   'tyler@example.com',   '+13105551014', 'Warm', 'Cold Outreach','Glendale',        '$650k-$850k', 'New account kickoff.',                                                 1, 1, 'opted_in', 'buyer',  'Active',  'active', 1, 1),
+--   (114, 'Emma Walsh',        'Emma',    'Walsh',    'emma@example.com',    '+13105551015', 'Cold', 'Website Form', 'Long Beach',      '$500k-$700k', 'Moved from Tuesday. Wants to negotiate annual discount.',              1, 1, 'opted_in', 'buyer',  'Passive', 'active', 1, 1);
+
+-- Appointments. lead_id matches above; org_id=1 (Demo Realty); user=1 (Joseph).
+-- starts_at: datetime('now', 'start of day', '-D days from today to Monday', '+N days', '+H hours', '+M minutes')
+-- INSERT OR IGNORE INTO lead_appointment
+--   (id, lead_id, org_id, appointment_type, starts_at, meeting_type, status, notes, created_by_user_id) VALUES
+--   -- Monday
+--   (1001, 100, 1, 'Buyer Consult',       datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+0 days','+9 hours'),                'in_person',   'confirmed', 'First-time buyer, pre-approved up to $1.2M. Wants modern with a view.',         1),
+--   (1002, 101, 1, 'Discovery Call',      datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+0 days','+11 hours','+30 minutes'), 'phone',       'confirmed', 'Inbound from website. Investor profile.',                                       1),
+--   (1003, 102, 1, 'Follow-up',           datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+0 days','+14 hours'),               'phone',       'proposed',  'Hasn''t responded to last 2 emails. Worth a call.',                             1),
+--   -- Tuesday
+--   (1004, 103, 1, 'Showing',             datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+1 days','+10 hours'),               'in_person',   'confirmed', 'Touring 3 properties in West Hills.',                                           1),
+--   (1005, 104, 1, 'Lender call',         datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+1 days','+13 hours'),               'phone',       'confirmed', 'Discuss pre-approval extension for the Chen file.',                             1),
+--   (1006, 101, 1, 'Post-tour follow-up', datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+1 days','+15 hours','+30 minutes'), 'phone',       'proposed',  'Check his interest after Tuesday tour.',                                        1),
+--   -- Wednesday
+--   (1007, 105, 1, 'Listing appointment', datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+2 days','+11 hours'),               'in_person',   'confirmed', 'Final paperwork for the Sunset listing.',                                       1),
+--   (1008, 106, 1, 'Follow-up call',      datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+2 days','+13 hours'),               'phone',       'confirmed', 'Check-in batch.',                                                               1),
+--   (1009, 106, 1, 'Showing',             datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+2 days','+15 hours'),               'in_person',   'confirmed', 'Showing 2 condos downtown.',                                                    1),
+--   -- Thursday
+--   (1010, 107, 1, 'Buyer Consult',       datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+3 days','+9 hours'),                'in_person',   'confirmed', 'Relocating from SF. Tight 2-week timeline.',                                    1),
+--   (1011, 111, 1, 'Open House',          datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+3 days','+10 hours'),               'in_person',   'confirmed', 'Sunset listing - promoted on IG + Zillow.',                                     1),
+--   (1012, 108, 1, 'Listing strategy',    datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+3 days','+11 hours'),               'google_meet', 'confirmed', 'Pricing strategy review.',                                                      1),
+--   (1013, 109, 1, 'Showing',             datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+3 days','+15 hours'),               'in_person',   'confirmed', 'First showing - single property.',                                              1),
+--   (1014, 113, 1, 'Check-in call',       datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+3 days','+16 hours'),               'phone',       'confirmed', 'Routine touchpoint.',                                                           1),
+--   -- Friday
+--   (1015, 110, 1, 'Showing',             datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+4 days','+11 hours'),               'in_person',   'confirmed', 'Repeat client - looking to upgrade.',                                           1),
+--   (1016, 104, 1, 'Vendor call',         datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+4 days','+14 hours'),               'phone',       'confirmed', 'Inspector schedule.',                                                           1),
+--   (1017, 111, 1, 'Follow-up',           datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+4 days','+16 hours'),               'phone',       'proposed',  'Reach out to open-house attendees.',                                            1),
+--   -- Saturday
+--   (1018, 112, 1, 'Buyer Consult',       datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+5 days','+10 hours'),               'in_person',   'confirmed', 'Couple looking to upsize.',                                                     1),
+--   (1019, 106, 1, 'Showing',             datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+5 days','+13 hours'),               'in_person',   'confirmed', 'Encore tour of downtown condos.',                                               1),
+--   (1020, 109, 1, 'Quick call',          datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+5 days','+15 hours'),               'phone',       'confirmed', 'Quick check-in.',                                                               1),
+--   -- Sunday (today in the design)
+--   (1021, 113, 1, 'Client check-in',     datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+6 days','+16 hours','+30 minutes'), 'phone',       'confirmed', 'Routine touchpoint.',                                                           1),
+--   (1022, 100, 1, 'Follow-up - text',    datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+6 days','+17 hours'),               'phone',       'proposed',  'She replied 12m ago. Re-engage with Beverly Hills listings.',                   1),
+--   -- Bonus: next-Monday confirmation (Sarah's 9 AM consult mentioned in the AI brief)
+--   (1023, 100, 1, 'Buyer Consult',       datetime('now','start of day','-' || ((strftime('%w','now') + 6) % 7) || ' days','+7 days','+9 hours'),                'in_person',   'proposed',  'Beverly Hills tour. Confirm 24h ahead.',                                        1);

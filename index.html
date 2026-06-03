@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WarmChats | AI Workspace for Real Estate Agents & Brokerages</title>
+  <meta name="description" content="WarmChats is the AI workspace for real estate agents and brokerages. Send hyper-personalized SMS, email and calls, automate follow-ups, and turn cold leads into warm conversations from one inbox." />
+  <meta name="author" content="WarmChats" />
+  <meta name="keywords" content="real estate CRM, AI workspace for realtors, real estate lead follow-up, real estate agent software, brokerage CRM, AI text messaging real estate, real estate sales automation" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://www.warmchats.com/" />
+  <meta property="og:title" content="WarmChats | AI Workspace for Real Estate Agents & Brokerages" />
+  <meta property="og:description" content="The AI workspace for real estate agents and brokerages. Send hyper-personalized SMS, email and calls, automate follow-ups, and turn cold leads into warm conversations from one inbox." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.warmchats.com/" />
+  <meta property="og:site_name" content="WarmChats" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@warmchats" />
+  <meta name="twitter:title" content="WarmChats | AI Workspace for Real Estate Agents & Brokerages" />
+  <meta name="twitter:description" content="The AI workspace for real estate agents and brokerages. Send hyper-personalized SMS, email and calls, automate follow-ups, and turn cold leads into warm conversations from one inbox." />
+  <meta name="twitter:image" content="https://www.warmchats.com/og.png" />
+  <meta name="twitter:image:alt" content="WarmChats - AI workspace for real estate agents and brokerages" />
+  <link rel="icon" href="/new-favicon.ico">
+  <link rel="icon" type="image/png" href="/new-favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/new-favicon.svg" />
+  <link rel="shortcut icon" href="/new-favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="WarmChats" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#FF6B35" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <meta property="og:image" content="https://www.warmchats.com/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="WarmChats - AI workspace for real estate agents and brokerages" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "WarmChats",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Real Estate CRM",
+      "operatingSystem": "Web, iOS, Android",
+      "url": "https://www.warmchats.com/",
+      "description": "The AI workspace for real estate agents and brokerages. Send hyper-personalized SMS, email and calls, automate follow-ups, and turn cold leads into warm conversations from one inbox.",
+      "image": "https://www.warmchats.com/og.png",
+      "offers": {
+        "@type": "Offer",
+        "category": "SaaS"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "WarmChats",
+        "url": "https://www.warmchats.com/",
+        "logo": "https://www.warmchats.com/icon.png"
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <!-- Fonts for the AI/Workspace v2 prototype pages (.wcv2 scope). -->
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>
+    // Capture `beforeinstallprompt` synchronously, before the Vite module
+    // bundle loads. Chrome only fires this event once and very early - if no
+    // listener is attached at that exact moment the event is lost forever
+    // and the in-app Install buttons can't open the native dialog. We stash
+    // the deferred event on `window` so utils/pwaInstall.ts can pick it up
+    // when its module finally executes.
+    (function () {
+      var persisted = false;
+      try { persisted = localStorage.getItem("wc_pwa_installed") === "1"; } catch (_) {}
+      window.__wcPwa = { event: null, installed: persisted };
+      window.addEventListener("beforeinstallprompt", function (e) {
+        e.preventDefault();
+        window.__wcPwa.event = e;
+        // Chrome only fires this when the PWA is INSTALLABLE - i.e. not
+        // currently installed. If our persistent flag still says "installed"
+        // the user uninstalled outside the page. Clear it so the UI stops
+        // showing the stale "Open the app" view.
+        window.__wcPwa.installed = false;
+        try { localStorage.removeItem("wc_pwa_installed"); } catch (_) {}
+        window.dispatchEvent(new CustomEvent("wc:pwa-prompt-ready"));
+      });
+      window.addEventListener("appinstalled", function () {
+        window.__wcPwa.installed = true;
+        window.__wcPwa.event = null;
+        try { localStorage.setItem("wc_pwa_installed", "1"); } catch (_) {}
+        window.dispatchEvent(new CustomEvent("wc:pwa-installed"));
+      });
+    })();
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

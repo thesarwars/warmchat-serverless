@@ -1,0 +1,1179 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "WarmChats API",
+    "version": "1.0.0",
+    "description": "Generated from Cloudflare Pages Functions in functions/api. For Cloudflare API Shield endpoint validation."
+  },
+  "servers": [
+    {
+      "url": "https://www.warmchats.com"
+    }
+  ],
+  "paths": {
+    "/api/admin/blocked-numbers": {
+      "get": {
+        "operationId": "get_api_admin_blocked_numbers",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_admin_blocked_numbers",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_blocked_numbers",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/admin/mock-inbound": {
+      "post": {
+        "operationId": "post_api_admin_mock_inbound",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/admin/mock-inbound/accounts": {
+      "get": {
+        "operationId": "get_api_admin_mock_inbound_accounts",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/admin/mock-logs": {
+      "get": {
+        "operationId": "get_api_admin_mock_logs",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_admin_mock_logs",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/admin/mock-toggle": {
+      "get": {
+        "operationId": "get_api_admin_mock_toggle",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_admin_mock_toggle",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/accept-invite": {
+      "post": {
+        "operationId": "post_api_auth_accept_invite",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/account": {
+      "delete": {
+        "operationId": "delete_api_auth_account",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/confirm-email": {
+      "get": {
+        "operationId": "get_api_auth_confirm_email",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "operationId": "post_api_auth_forgot_password",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/google-login": {
+      "post": {
+        "operationId": "post_api_auth_google_login",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/invite": {
+      "post": {
+        "operationId": "post_api_auth_invite",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "post_api_auth_login",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "post_api_auth_logout",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/profile/me": {
+      "get": {
+        "operationId": "get_api_auth_profile_me",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "post_api_auth_refresh",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "post_api_auth_register",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/registerOwner_Manager": {
+      "post": {
+        "operationId": "post_api_auth_registerOwner_Manager",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/resend-confirmation": {
+      "post": {
+        "operationId": "post_api_auth_resend_confirmation",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "operationId": "post_api_auth_reset_password",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/roles": {
+      "get": {
+        "operationId": "get_api_auth_roles",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/users": {
+      "get": {
+        "operationId": "get_api_auth_users",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/users/{userId}/org": {
+      "put": {
+        "operationId": "put_api_auth_users_userId_org",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/users/{userId}/role": {
+      "put": {
+        "operationId": "put_api_auth_users_userId_role",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/auth/users/{userId}/role/onboarding": {
+      "put": {
+        "operationId": "put_api_auth_users_userId_role_onboarding",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/confirm-payment": {
+      "post": {
+        "operationId": "post_api_billing_confirm_payment",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/create-checkout-session": {
+      "post": {
+        "operationId": "post_api_billing_create_checkout_session",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/portal-session": {
+      "post": {
+        "operationId": "post_api_billing_portal_session",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/status": {
+      "get": {
+        "operationId": "get_api_billing_status",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/stripe/attach-payment-method": {
+      "post": {
+        "operationId": "post_api_billing_stripe_attach_payment_method",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/billing/stripe/setup-intent": {
+      "get": {
+        "operationId": "get_api_billing_stripe_setup_intent",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_billing_stripe_setup_intent",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/bootstrap/me": {
+      "get": {
+        "operationId": "get_api_bootstrap_me",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "operationId": "get_api_conversations",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/conversations/by-lead/{leadId}": {
+      "get": {
+        "operationId": "get_api_conversations_by_lead_leadId",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}": {
+      "get": {
+        "operationId": "get_api_conversations_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/deals": {
+      "post": {
+        "operationId": "post_api_deals",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/deals/org/{orgId}": {
+      "get": {
+        "operationId": "get_api_deals_org_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/deals/{id}": {
+      "patch": {
+        "operationId": "patch_api_deals_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_deals_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "get_api_health",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads": {
+      "post": {
+        "operationId": "post_api_leads",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/delete": {
+      "post": {
+        "operationId": "post_api_leads_delete",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/delete/{id}": {
+      "delete": {
+        "operationId": "delete_api_leads_delete_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/filter-options": {
+      "get": {
+        "operationId": "get_api_leads_filter_options",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/filters/{orgId}": {
+      "get": {
+        "operationId": "get_api_leads_filters_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/import-automap/{orgId}": {
+      "post": {
+        "operationId": "post_api_leads_import_automap_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/import/{orgId}": {
+      "post": {
+        "operationId": "post_api_leads_import_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/import/{orgId}/apply-ai": {
+      "post": {
+        "operationId": "post_api_leads_import_orgId_apply_ai",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/summary/{orgId}": {
+      "get": {
+        "operationId": "get_api_leads_summary_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/{orgId}": {
+      "get": {
+        "operationId": "get_api_leads_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_api_leads_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_leads_orgId",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/leads/{orgId}/ai-analysis": {
+      "get": {
+        "operationId": "get_api_leads_orgId_ai_analysis",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/messages/send": {
+      "post": {
+        "operationId": "post_api_messages_send",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs": {
+      "post": {
+        "operationId": "post_api_orgs",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/all": {
+      "get": {
+        "operationId": "get_api_orgs_all",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/{id}": {
+      "get": {
+        "operationId": "get_api_orgs_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_orgs_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/{id}/deal-defaults": {
+      "get": {
+        "operationId": "get_api_orgs_id_deal_defaults",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_orgs_id_deal_defaults",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/{id}/kpi-goals": {
+      "get": {
+        "operationId": "get_api_orgs_id_kpi_goals",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_api_orgs_id_kpi_goals",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/{id}/quiet-hours": {
+      "get": {
+        "operationId": "get_api_orgs_id_quiet_hours",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_api_orgs_id_quiet_hours",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/orgs/{id}/timezone": {
+      "get": {
+        "operationId": "get_api_orgs_id_timezone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_api_orgs_id_timezone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/profile/change-password": {
+      "post": {
+        "operationId": "post_api_profile_change_password",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/profile/me": {
+      "get": {
+        "operationId": "get_api_profile_me",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_profile_me",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/profile/phone-number": {
+      "get": {
+        "operationId": "get_api_profile_phone_number",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_profile_phone_number",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/public/agents/{slug}": {
+      "get": {
+        "operationId": "get_api_public_agents_slug",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/sms/consent": {
+      "post": {
+        "operationId": "post_api_sms_consent",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "get": {
+        "operationId": "get_api_sms_consent",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/sms/opt-in-request": {
+      "post": {
+        "operationId": "post_api_sms_opt_in_request",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/support": {
+      "post": {
+        "operationId": "post_api_support",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/calling/telnyx/inbound": {
+      "post": {
+        "operationId": "post_api_webhooks_calling_telnyx_inbound",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/calling/telnyx/sms": {
+      "post": {
+        "operationId": "post_api_webhooks_calling_telnyx_sms",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/calling/telnyx/status": {
+      "post": {
+        "operationId": "post_api_webhooks_calling_telnyx_status",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/elastic": {
+      "get": {
+        "operationId": "get_api_webhooks_elastic",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_api_webhooks_elastic",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_webhooks_elastic",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/stripe": {
+      "post": {
+        "operationId": "post_api_webhooks_stripe",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/telnyx/calls": {
+      "post": {
+        "operationId": "post_api_webhooks_telnyx_calls",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/telnyx/events": {
+      "post": {
+        "operationId": "post_api_webhooks_telnyx_events",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/telnyx/inbound": {
+      "post": {
+        "operationId": "post_api_webhooks_telnyx_inbound",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    },
+    "/api/webhooks/telnyx/status": {
+      "post": {
+        "operationId": "post_api_webhooks_telnyx_status",
+        "responses": {
+          "default": {
+            "description": "Response"
+          }
+        }
+      }
+    }
+  }
+}

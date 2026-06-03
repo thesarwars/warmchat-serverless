@@ -1,0 +1,82 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Gateway/WS worker (:8789)",
+      "type": "shell",
+      "command": "pnpm dev-ws",
+      "isBackground": true,
+      "presentation": {
+        "group": "warmchats-dev",
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": {
+        "owner": "warmchats-ws",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on https?://"
+        }
+      }
+    },
+    {
+      "label": "Dev: Frontend + backend (:5173)",
+      "type": "shell",
+      "command": "pnpm dev",
+      "isBackground": true,
+      "presentation": {
+        "group": "warmchats-dev",
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": {
+        "owner": "warmchats-vite",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "(ready in|Local:\\s+https?://)"
+        }
+      }
+    },
+    {
+      "label": "Dev: Cron worker (:8788)",
+      "type": "shell",
+      "command": "pnpm dev-cron",
+      "isBackground": true,
+      "presentation": {
+        "group": "warmchats-dev",
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": {
+        "owner": "warmchats-cron",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on https?://"
+        }
+      }
+    },
+    {
+      "label": "Dev: Start all servers",
+      "dependsOn": [
+        "Dev: Gateway/WS worker (:8789)",
+        "Dev: Frontend + backend (:5173)",
+        "Dev: Cron worker (:8788)"
+      ],
+      "dependsOrder": "parallel",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+#:schema node_modules/wrangler/config-schema.json
+# Sidecar Worker for the WarmChats calling system.
+# Hosts two Durable Object classes:
+#   - UserSocketDO (1 per user) - holds the user's WebSocket(s) using the
+#     hibernation API; broadcasts call_state / incoming_call / etc.
+#   - CallActorDO  (1 per live call) - single-writer coordinator for the
+#     fork-leg race + the call's in-flight state.
+#
+# Pages Functions in the main `warmchats` project call into this Worker via
+# the [[services]] binding declared in ../wrangler.toml - they do NOT bind
+# the DO namespaces directly. That keeps the DOs single-source-of-truth.
+
+name = "warmchats-calling-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-05-22"
+
+# No public URL. This Worker is reached ONLY via the Pages service binding
+# (env.GATEWAY, name-based RPC - unaffected by these flags) and its own cron
+# triggers. The fetch handler is an unauthenticated /do/<class>/... router, so
+# exposing it on *.workers.dev would let anyone poke Durable Object state.
+preview_urls = false
+workers_dev = false
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Same D1 instance as the Pages project so the cron retry sweep can read
+# webhook_logs / write usage_records without a cross-service round-trip.
+[[d1_databases]]
+binding = "D1DB"
+database_name = "warmchats-db"
+database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
+
+# R2 bucket for call-recording / voicemail storage (same bucket as the Pages
+# project's ATTACHMENTS). The processCallInsights cron job downloads recordings
+# from Telnyx and stores them here.
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "warmchats-attachments"
+
+# Durable Object classes hosted by this Worker.
+[[durable_objects.bindings]]
+name = "USER_SOCKET"
+class_name = "UserSocketDO"
+
+[[durable_objects.bindings]]
+name = "CALL_ACTOR"
+class_name = "CallActorDO"
+
+# Required for first-time deploy of new DO classes. `new_sqlite_classes` gives
+# each DO instance the modern SQLite-backed storage (cheaper, supports
+# transactions, free-tier-eligible) instead of the older KV-style DO storage.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserSocketDO", "CallActorDO"]
+
+# Cron sweep: webhook_logs retries (every minute) + billing-cycle rollover
+# (daily at 00:00 UTC). Both fan in to src/index.ts -> scheduled().
+[triggers]
+crons = ["* * * * *", "0 0 * * *"]
+
+[vars]
+ENV = "prod"
+
+MOCK_SEND_APIS = "1"
+OPENAI_API_KEY = "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"
+TELNYX_API_KEY = "KEY019C64663B1E047E5FF99CF11E8F170B_cQMW9hDU1HZKGAMeweNom0"
