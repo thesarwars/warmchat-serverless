@@ -1,4 +1,6 @@
-# CLAUDE.md
+# README.md
+
+__Project discontinued, Reason: Client was too focused on output and forgot the input as we agreed__
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
