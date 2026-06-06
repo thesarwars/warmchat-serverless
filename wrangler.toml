@@ -80,14 +80,14 @@ TELNYX_API_KEY = "KEY019E30AEC51AC035976EE495E06CED80_HzKDZ0l8opHq6yStnpa0R6"
 TELNYX_PUBLIC_KEY = "x4JTjmM2mUkbTAd8t/QI/OjqKUKEr2Ga9dpi1p01TK0="
 
 # ---- Voice: Telnyx Call Control + WebRTC (fill from Telnyx portal) ----
-TELNYX_CONNECTION_ID = "2967333494394455952"             # Voice > Call Control App connection id
-TELNYX_CREDENTIAL_CONNECTION_ID = "2967341151037687059"  # Voice > SIP Connections (credential) id for WebRTC
+TELNYX_CONNECTION_ID = "2976504018823546696"             # Sandbox Cloudflare Warmchats Calling (Voice API app)
+TELNYX_CREDENTIAL_CONNECTION_ID = "2976498419679364456"  # cloudflare-warmchats-sandbox (credential SIP connection for WebRTC)
 TELNYX_SIP_DOMAIN = "sip.telnyx.com"                     # default; change if a custom SIP subdomain is set on the SIP Connection
-TELNYX_VOICE_PROFILE_ID = "2967335036212217826"          # optional outbound voice profile
+TELNYX_VOICE_PROFILE_ID = "2976506312185087973"          # Sandbox-Cloudflare-Warmchat-Outbound
 # 10DLC "ISV Platform Umbrella" - ONE shared profile/campaign/brand for ALL
 # agents. New numbers are assigned to these; we never register per-client
 # brands/campaigns.
-TELNYX_MESSAGING_PROFILE_ID = "40019e49-4441-4395-875c-b5be0ffceb82"
+TELNYX_MESSAGING_PROFILE_ID = "40019e9e-7040-4235-9aa6-cf7047d4c3ac"  # Sandbox WarmChats Messaging (webhook -> warmchats-700.pages.dev)
 TELNYX_MASTER_CAMPAIGN_ID = "4b30019d-b165-ecc2-aff0-fedd0df37d98"
 TELNYX_MASTER_BRAND_ID = "4b20019d-a98b-a4e7-1a00-357bf2aca97d"  # Warmchats LLC (TCR BGS5W5V) - owns the master campaign
 
