@@ -20,7 +20,7 @@ compatibility_date = "2026-05-22"
 [[d1_databases]]
 binding = "D1DB"
 database_name = "warmchats-db"
-database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
+database_id = "06ed8724-2cd2-494e-8d2a-2074135b5f49"
 # preview_database_id = "DB" # Required for Pages local development
 
 # [observability.logs]
@@ -34,9 +34,9 @@ ENV = "prod"
 
 MOCK_SEND_APIS = "0"
 # ---- App identity / URLs ----
-FRONTEND_URL = "https://www.warmchats.com"
-PUBLIC_SITE_URL = "https://www.warmchats.com"
-PUBLIC_BASE_URL = "https://www.warmchats.com"
+FRONTEND_URL = "https://warmchats-700.pages.dev"
+PUBLIC_SITE_URL = "https://warmchats-700.pages.dev"
+PUBLIC_BASE_URL = "https://warmchats-700.pages.dev"
 REPLY_DOMAIN = "mail.warmchats.com"
 SUPPORT_EMAIL = "hello@warmchats.com"
 
@@ -49,13 +49,13 @@ FERNET_KEY = "lWPNdUL_iG672PKUtYNOGAceD5VocxeMeAKW3vpAM2c="
 # ---- Cloudflare Turnstile (bot protection on public forms) ----
 # Pairs with VITE_TURNSTILE_SITE_KEY in the frontend (.env). Treated as a
 # secret; prefer rotating via `wrangler pages secret put TURNSTILE_SECRET_KEY`.
-TURNSTILE_SECRET_KEY = "0x4AAAAAADXLGpF-ArSXikCfpx_N7JPyb54"
+TURNSTILE_SECRET_KEY = "0x4AAAAAADf3B5i5a4vem9iWqvG-U-uT5yk"
 
 # ---- Google OAuth (login) & Gmail OAuth ----
 GOOGLE_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
 GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
 GMAIL_OAUTH_CLIENT_SECRET = "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"
-GMAIL_OAUTH_REDIRECT_URI = "https://www.warmchats.com/api/gmail/oauth/callback"
+GMAIL_OAUTH_REDIRECT_URI = "https://warmchats-700.pages.dev/api/gmail/oauth/callback"
 GMAIL_PUBSUB_TOPIC_FULL_NAME = "projects/warmchats-496922/topics/gmail-replies"
 
 # ---- AI provider (OpenAI) ----
@@ -95,7 +95,7 @@ TELNYX_MASTER_BRAND_ID = "4b20019d-a98b-a4e7-1a00-357bf2aca97d"  # Warmchats LLC
 ELASTIC_SENDER_NAME = "WarmChats"
 ELASTIC_SENDER_EMAIL = "hello@warmchats.com"
 ELASTIC_EMAIL_API_KEY = "C4FD5465ED15E3B4C2AA757E5E5654A662A3D0B50854C87D04790EE5DE88FA4DFA559040F96A384B5C8589C17ACBE5D3"
-ELASTIC_WEBHOOK_URL = "https://www.warmchats.com/api/elastic/inbound"
+ELASTIC_WEBHOOK_URL = "https://warmchats-700.pages.dev/api/elastic/inbound"
 
 # ---- Web Push (VAPID) ----
 VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"

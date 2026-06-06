@@ -30,7 +30,7 @@ invocation_logs = true
 [[d1_databases]]
 binding = "D1DB"
 database_name = "warmchats-db"
-database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
+database_id = "06ed8724-2cd2-494e-8d2a-2074135b5f49"
 
 # R2 bucket for call-recording / voicemail storage (same bucket as the Pages
 # project's ATTACHMENTS). The processCallInsights cron job downloads recordings
