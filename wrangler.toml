@@ -32,7 +32,7 @@ database_id = "0b04e966-f093-4a68-9951-ce54958d09b3"
 [vars]
 ENV = "prod"
 
-MOCK_SEND_APIS = "1"
+MOCK_SEND_APIS = "0"
 # ---- App identity / URLs ----
 FRONTEND_URL = "https://www.warmchats.com"
 PUBLIC_SITE_URL = "https://www.warmchats.com"
