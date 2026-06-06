@@ -21,12 +21,15 @@ compatibility_date = "2025-05-18"
 preview_urls = false
 workers_dev = false
 
-# Workers Paid: lift the per-invocation CPU ceiling well above the 30s default so
-# a busy queue-draining tick (the scheduled-message + sequence dispatchers run
-# many D1 round-trips) is never killed mid-pass. A Cron Trigger invocation may
-# use up to 15 min of CPU; D1/network waits don't count against CPU time.
-[limits]
-cpu_ms = 300_000
+# NOTE: On the Workers FREE plan the per-invocation CPU ceiling cannot be raised
+# above the plan default, so the paid-only `[limits] cpu_ms = 300_000` block was
+# removed. If you later upgrade to Workers Paid and a busy queue-draining tick
+# (the scheduled-message + sequence dispatchers do many D1 round-trips) gets
+# killed mid-pass, restore it:
+#   [limits]
+#   cpu_ms = 300_000
+# (D1/network waits don't count against CPU time; a Cron Trigger may use up to
+# 15 min of CPU on paid.)
 
 [observability.logs]
 enabled = true
