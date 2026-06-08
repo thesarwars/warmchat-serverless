@@ -83,12 +83,20 @@ export function ActiveCallWindow() {
 
   const onWeb =
     activeCall?.answeredVia === "web" || activeCall?.origin === "web";
-  const playOutboundRingback = Boolean(
-    activeCall &&
-      onWeb &&
-      activeCall.direction === "OUTBOUND" &&
-      activeCall.status === "RINGING",
-  );
+  // Telnyx provides the network ringback for outbound web calls (SIP connection
+  // Outbound -> "Enable Instant Ringback (180)"), played through the remote
+  // audio element. We previously ALSO played a local synthetic ringback as a
+  // fallback for when Telnyx is silent, but with network ringback enabled that
+  // produced a double ring. Local ringback is disabled; restore the condition
+  // below if Telnyx ringback is ever turned off.
+  const playOutboundRingback =
+    false &&
+    Boolean(
+      activeCall &&
+        onWeb &&
+        activeCall.direction === "OUTBOUND" &&
+        activeCall.status === "RINGING",
+    );
   useOutboundRingback(playOutboundRingback);
 
   useEffect(() => {

@@ -12,6 +12,9 @@
 # runtime as `env.KEY_NAME` to your Functions.
 
 name = "warmchats"
+# NOTE: Pages config does NOT support `account_id` (Workers do). To keep deploys
+# on the monsieur.sarwar account and never the client's (velasquez) account,
+# deploy with the env var set: CLOUDFLARE_ACCOUNT_ID=d402791d04565670e13364b7c7343649
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-05-22"
 # compatibility_flags = ["nodejs_compat"]

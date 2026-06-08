@@ -1,0 +1,112 @@
+/* Tasks page (final design) - classes from the design bundle (tasks.css) that
+   are not already in prototype.css. Shared base classes (.wc-primary, .wc-page,
+   .wc-ghostbtn, .wc-seg, .wc-modal*, .wc-tbtn, .wc-prio, .wc-check, .wc-reptable,
+   .wc-tasksec, .wc-goalrow-agent, .wc-band-d, .wc-mono, .wc-panel-card,
+   .wc-linkbtn) live in prototype.css. */
+
+/* specificity bump (.wc-tbtn.wc-tbtn-text) so width:auto beats .wc-tbtn{width:36px}
+   regardless of stylesheet load order - otherwise "Open" overflows the 36px box. */
+.wc-tbtn.wc-tbtn-text{width:auto;min-width:0;padding:0 14px;font-size:13px;font-weight:650;color:var(--ink-2)}
+.wc-tbtn-box{width:34px;height:34px}
+.wc-tbtn-box.is-done{background:#E8F8ED;border-color:#16A34A;color:#16A34A}
+.wc-tbtn-box.wc-tbtn-done:hover{background:#E8F8ED;border-color:#16A34A;color:#16A34A}
+
+/* How Tasks Work modal */
+.wc-howsteps{display:flex;flex-direction:column;gap:16px}
+.wc-howstep{display:flex;gap:13px;align-items:flex-start}
+.wc-howstep-ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex:none}
+.wc-howstep-t{font-size:14.5px;font-weight:700;color:var(--ink);margin-bottom:3px}
+.wc-howstep-d{font-size:13px;line-height:1.5;color:var(--ink-2)}
+
+/* split Add Task button */
+.wc-split{position:relative}
+.wc-split-div{width:1px;height:16px;background:rgba(255,255,255,.4);margin:0 2px}
+
+/* stats row */
+.wc-task-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+@media(max-width:900px){.wc-task-stats{grid-template-columns:repeat(2,1fr)}}
+.wc-task-stat{display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px 18px;box-shadow:var(--shadow-sm)}
+.wc-task-stat-ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;flex:none}
+.wc-task-stat-v{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1;color:var(--ink)}
+.wc-task-stat-l{font-size:13px;font-weight:600;color:var(--ink-2);margin-top:5px}
+
+/* AI Priorities */
+.wc-aip-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.wc-aip-head-ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;color:#7C5CFC;background:#EEEAFE}
+.wc-aip-head-title{font-size:17px;font-weight:800;letter-spacing:-.02em;color:var(--ink)}
+.wc-aip-head-sub{font-size:13px;color:var(--ink-3);font-weight:500}
+.wc-aip-viewall{margin-left:auto;display:inline-flex;align-items:center;gap:3px;flex:none}
+.wc-aip-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:1100px){.wc-aip-row{grid-template-columns:1fr}}
+.wc-aip{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column}
+.wc-aip-top{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.wc-aip-ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;flex:none}
+.wc-aip-score{display:flex;flex-direction:column;font-size:12.5px;color:var(--ink-3);font-weight:600;line-height:1.3}
+.wc-aip-score b{font-size:15px;font-weight:800;color:#0E9F6E}
+.wc-aip-title{font-size:17px;font-weight:800;letter-spacing:-.02em;color:var(--ink);margin-bottom:8px}
+.wc-aip-tag{align-self:flex-start;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:99px;margin-bottom:11px}
+.wc-aip-why{font-size:13px;line-height:1.5;color:var(--ink-2);margin:0 0 13px}
+.wc-aip-why strong{color:var(--ink);font-weight:700}
+.wc-aip-rec{background:var(--line-soft);border-radius:12px;padding:11px 12px;margin-bottom:14px}
+.wc-aip-rec-h{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.03em;color:var(--accent-strong);margin-bottom:5px}
+.wc-aip-rec-t{font-size:12.5px;line-height:1.45;color:var(--ink-2)}
+.wc-aip-acts{display:flex;align-items:center;gap:8px;margin-top:auto}
+.wc-aip-acts .wc-primary{flex:0 0 auto}
+.wc-aip-endacts{display:flex;align-items:center;gap:8px;margin-left:auto}
+.wc-aip-endacts .wc-tbtn-done:hover{background:#E8F8ED;border-color:#16A34A;color:#16A34A}
+
+/* My Tasks header / filters */
+.wc-mytasks-head{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.wc-mytasks-l{display:flex;align-items:center;gap:10px}
+.wc-mytasks-l .wc-tasksec-title{font-size:17px;font-weight:800;letter-spacing:-.02em}
+.wc-mytasks-view{flex:none}
+.wc-mytasks-view button{display:inline-flex;align-items:center;gap:6px}
+.wc-mytasks-r{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}
+.wc-pills{display:flex;gap:5px;background:var(--line-soft);border-radius:11px;padding:4px}
+.wc-pill{font-size:12.5px;font-weight:700;color:var(--ink-2);padding:7px 14px;border-radius:8px;transition:.12s}
+.wc-pill:hover{color:var(--ink)}
+.wc-pill.is-on{background:var(--accent);color:#fff;box-shadow:var(--shadow-sm)}
+
+/* table */
+.wc-tasktbl-sub{font-size:12px;color:var(--ink-3);margin-top:3px;font-weight:500}
+.wc-tasktbl-title{font-size:13.5px;font-weight:700}
+.wc-tasktbl-type{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:99px}
+.wc-tasktbl-acts{display:flex;gap:6px}
+.wc-check-head{cursor:default}
+.wc-tacts-col{text-align:right}
+.wc-overdue{color:#DC2626!important;font-weight:700}
+.wc-taskrow-done{opacity:.5}
+.wc-taskrow-done .wc-tasktbl-title{text-decoration:line-through}
+.wc-loadmore{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:14px;font-size:13px;font-weight:700;color:var(--ink-2);border-top:1px solid var(--line-soft)}
+.wc-loadmore:hover{background:var(--line-soft);color:var(--ink)}
+/* My Tasks list - force LTR/left alignment (overrides numeric reptable right-align) */
+.wc-tasktable{table-layout:fixed}
+.wc-tasktable th,.wc-tasktable td{text-align:left!important;white-space:normal;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.wc-tasktable th:first-child,.wc-tasktable td:first-child{width:44px;padding-right:6px}
+.wc-tasktable th:nth-child(2),.wc-tasktable td:nth-child(2){width:26%}
+.wc-tasktable th:nth-child(3),.wc-tasktable td:nth-child(3){width:18%}
+.wc-tasktable th:nth-child(4),.wc-tasktable td:nth-child(4){width:13%}
+.wc-tasktable th:nth-child(5),.wc-tasktable td:nth-child(5){width:11%}
+.wc-tasktable th:nth-child(6),.wc-tasktable td:nth-child(6){width:13%}
+.wc-tasktable th:nth-child(7),.wc-tasktable td:nth-child(7){width:9%}
+.wc-tasktable th:last-child,.wc-tasktable td:last-child{width:148px;white-space:nowrap;padding-left:12px;padding-right:12px}
+.wc-tasktable .wc-tasktbl-acts{justify-content:flex-start;gap:6px}
+
+/* board view */
+.wc-taskboard{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.wc-taskboard{grid-template-columns:1fr}}
+.wc-taskcol{display:flex;flex-direction:column;gap:10px}
+.wc-taskcol-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-3)}
+.wc-taskcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow-sm)}
+.wc-taskcard-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.wc-taskcard-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:11px}
+
+/* completed today */
+.wc-done-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:1100px){.wc-done-row{grid-template-columns:1fr}}
+.wc-donecard{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm)}
+.wc-donecard-ic{color:#0E9F6E;flex:none}
+.wc-donecard-b{flex:1;min-width:0}
+.wc-donecard-t{font-size:13.5px;font-weight:700;color:var(--ink-2)}
+.wc-donecard-l{font-size:12px;color:var(--ink-3);margin-top:2px}
+.wc-donecard-time{font-size:12px;font-weight:600;color:var(--ink-3);flex:none}

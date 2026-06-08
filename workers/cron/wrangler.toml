@@ -13,6 +13,8 @@
 #   (workers/cron/.wrangler), a separate EMPTY DB -> "no such table" errors.
 
 name = "warmchats-cron"
+# Pin to the monsieur.sarwar account (token can see the velasquez account too).
+account_id = "d402791d04565670e13364b7c7343649"
 main = "index.ts"
 compatibility_date = "2025-05-18"
 
@@ -64,7 +66,7 @@ crons = ["* * * * *"]
 # the Pages project so the same Telnyx / ElasticEmail credentials work here.
 [vars]
 ENV = "prod"
-MOCK_SEND_APIS=1
+MOCK_SEND_APIS=0
 
 TELNYX_API_KEY = "***REMOVED***"
 ELASTIC_EMAIL_API_KEY = "***REMOVED***"
