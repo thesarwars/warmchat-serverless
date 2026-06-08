@@ -133,11 +133,15 @@ const TOOLS: ChatToolDef[] = [
     type: "function",
     function: {
       name: "create_task",
-      description: "Create a follow-up task for the agent.",
+      description: "Create a follow-up task for the agent when a human is needed. Always include a short `why` (why it matters / the opportunity) and a `recommendation` (the concrete next action) - these are shown to the agent on the AI Recommended cards.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string" },
+          why: { type: "string", description: "One sentence: why this matters / the conversion opportunity." },
+          recommendation: { type: "string", description: "One sentence: the recommended next action for the agent." },
+          score: { type: "string", description: "Conversion likelihood as a short string, e.g. \"92%\"." },
+          score_label: { type: "string", description: "Short caption for the score, e.g. \"Likely to convert\" or \"Needs response\"." },
           due_at: { type: "string", description: "Optional ISO-8601 due time." },
           priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
           type: { type: "string", description: "call | email | showing | followup | cma | task" },
@@ -450,6 +454,10 @@ async function executeTool(
       await createTask(env, {
         orgId, userId: lead.owner_id ?? userId, leadId: lead.id,
         title: String(args.title || "Follow up"), type: args.type ? String(args.type) : "followup",
+        why: args.why ? String(args.why) : null,
+        recommendation: args.recommendation ? String(args.recommendation) : null,
+        score: args.score ? String(args.score) : null,
+        scoreLabel: args.score_label ? String(args.score_label) : null,
         priority: args.priority ? String(args.priority) : "normal",
         dueAt: args.due_at ? String(args.due_at) : null, source: "ai",
       });

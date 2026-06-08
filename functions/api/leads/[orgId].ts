@@ -132,7 +132,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const includeMeta = url.searchParams.get("include_meta") === "1" || url.searchParams.get("include_meta") === "true";
   const searchQuery = (url.searchParams.get("q") || "").trim();
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
-  const pageSize = Math.min(500, Math.max(1, Number(url.searchParams.get("page_size")) || 0));
+  // No page_size -> return all matching leads (paginate only when explicitly asked).
+  // Guard: Math.max(1, 0) used to force pageSize=1, so callers without ?page_size
+  // (e.g. fetchOrgLeads for the Tasks/Deals lead pickers) got a single lead.
+  const pageSizeRaw = Number(url.searchParams.get("page_size")) || 0;
+  const pageSize = pageSizeRaw > 0 ? Math.min(500, pageSizeRaw) : 0;
   const usePagination = pageSize > 0;
 
   const where: string[] = [`org_id = ?`];

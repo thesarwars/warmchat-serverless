@@ -81,9 +81,9 @@ export async function dispatchOutboundEmail(
 
   // ---- Resolve sender ----
   const senderType = (input.senderType || "").toLowerCase();
-  const elasticConn = await queryFirst<{ email_address: string | null; elastic_from_email: string | null }>(
+  const elasticConn = await queryFirst<{ id: number; email_address: string | null; elastic_from_email: string | null }>(
     env.D1DB,
-    `SELECT email_address, elastic_from_email FROM inbox_connection
+    `SELECT id, email_address, elastic_from_email FROM inbox_connection
       WHERE user_id = ? AND provider = 'elastic'
         AND (status IS NULL OR status IN ('verified', 'active'))
       ORDER BY id DESC LIMIT 1`,
@@ -140,13 +140,21 @@ export async function dispatchOutboundEmail(
   // ---- Dispatch ----
   if (channel === "business") {
     const fromEmail = (elasticConn!.elastic_from_email || elasticConn!.email_address || "").trim();
+    // Route replies to our inbound-parsing domain so the lead's reply reaches
+    // /api/elastic/inbound instead of the agent's human From mailbox (which may
+    // be hosted elsewhere, e.g. Hostinger). The connection id in the local-part
+    // lets the inbound webhook resolve the exact connection/org. Requires an
+    // ElasticEmail inbound route on REPLY_DOMAIN (mail.warmchats.com, whose
+    // MX -> mx.inbound.elasticemail.com).
+    const replyDomain = (env.REPLY_DOMAIN || "mail.warmchats.com").trim();
+    const replyTo = `inbound+${elasticConn!.id}@${replyDomain}`;
     const result = await mockElasticSendEmail(env, {
       to,
       subject,
       body: htmlBody,
       isHtml: true,
       transactional: true,
-      ...(fromEmail ? { fromEmail, replyTo: fromEmail } : {}),
+      ...(fromEmail ? { fromEmail, replyTo } : {}),
       ...(senderName ? { fromName: senderName } : {}),
       ...(attachmentParts.length ? { attachments: attachmentParts } : {}),
     }, { leadId: input.leadId ?? null });

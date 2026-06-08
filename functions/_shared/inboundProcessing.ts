@@ -409,9 +409,22 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   if (!to) return { ok: false, ignored: "missing to" };
 
   // Resolve the recipient connection for the org (and the audit row's FK).
-  const conn = await queryFirst<{ id: number; user_id: number }>(
-    env.D1DB, `SELECT id, user_id FROM inbox_connection WHERE LOWER(email_address) = ? LIMIT 1`, to,
-  );
+  // Replies are addressed to inbound+<connId>@<reply-domain> (see
+  // dispatchOutboundEmail), so resolve that connection id directly. Fall back to
+  // matching the recipient against a connection's email_address for any mail
+  // still sent straight to a verified business address.
+  let conn: { id: number; user_id: number } | null = null;
+  const tokenMatch = to.match(/^inbound\+(\d+)@/);
+  if (tokenMatch) {
+    conn = await queryFirst<{ id: number; user_id: number }>(
+      env.D1DB, `SELECT id, user_id FROM inbox_connection WHERE id = ? LIMIT 1`, Number(tokenMatch[1]),
+    );
+  }
+  if (!conn) {
+    conn = await queryFirst<{ id: number; user_id: number }>(
+      env.D1DB, `SELECT id, user_id FROM inbox_connection WHERE LOWER(email_address) = ? LIMIT 1`, to,
+    );
+  }
   // Webhook contract: an unknown recipient is ignored. The admin tool bypasses
   // this by supplying orgId directly.
   if (!conn && input.orgId == null) return { ok: true, ignored: "unknown recipient" };

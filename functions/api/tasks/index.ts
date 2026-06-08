@@ -9,6 +9,10 @@ interface Body {
   org_id?: number;
   title?: string;
   description?: string | null;
+  why?: string | null;
+  recommendation?: string | null;
+  score?: string | null;
+  score_label?: string | null;
   type?: string | null;
   priority?: string | null;
   due_at?: string | null;
@@ -43,7 +47,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const ownerId = Number.isInteger(Number(body.assigned_to)) ? Number(body.assigned_to) : user.id;
   const id = await createTask(env, {
     orgId, userId: ownerId, title,
-    description: body.description ?? null, type: body.type ?? null,
+    description: body.description ?? null, why: body.why ?? null, recommendation: body.recommendation ?? null,
+    score: body.score ?? null, scoreLabel: body.score_label ?? null,
+    type: body.type ?? null,
     priority: body.priority ?? "normal", dueAt: body.due_at ?? null,
     leadId: body.lead_id ?? null, dealId: body.deal_id ?? null,
     source: "manual", createdByUserId: user.id,

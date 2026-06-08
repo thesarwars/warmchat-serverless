@@ -213,6 +213,20 @@ export const createDeal = (data: Record<string, unknown>) => post(`/deals`, data
 export const updateDeal = (id: number, data: Record<string, unknown>) => patch(`/deals/${id}`, data, {}, true);
 export const deleteDeal = (id: number) => del(`/deals/${id}`, {}, true);
 
+// Tasks (task table; manual + AI-created). list joins the lead + owner name in.
+export type TaskRecord = {
+  id: number; title: string; description: string | null; why: string | null; recommendation: string | null;
+  score: string | null; score_label: string | null;
+  type: string | null;
+  priority: string; due_at: string | null; status: string; source: string;
+  lead_id: number | null; deal_id: number | null; user_id: number;
+  lead_name: string | null; owner_name: string | null; created_at: string; updated_at: string;
+};
+export const fetchOrgTasks = (orgId: number | string, params: Record<string, unknown> = {}) =>
+  get(`/tasks/org/${orgId}`, params) as Promise<{ tasks: TaskRecord[] }>;
+export const createTask = (data: Record<string, unknown>) => post(`/tasks`, data, {}, true, true);
+export const updateTask = (id: number, data: Record<string, unknown>) => patch(`/tasks/${id}`, data, {}, true);
+
 // Existing automations for the org (the Outbound agent's Automations tab).
 export const fetchOrgAutomations = (orgId: number | string, params: Record<string, unknown> = {}) =>
   get(`/automations/org/${orgId}`, params);

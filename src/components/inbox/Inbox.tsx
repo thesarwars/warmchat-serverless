@@ -625,6 +625,14 @@ export default function Inbox() {
     loadNotifPrefs(),
   );
   const [showAiAssistModal, setShowAiAssistModal] = useState(false);
+  // When opened via the Tasks "Send Draft" deep-link (?aidraft=1), the AI panel
+  // applies its first draft straight to the composer instead of showing options.
+  const [aiDraftAuto, setAiDraftAuto] = useState(false);
+  // Latched from the initial URL so the inbox's own ?lead= cleanup can't drop the
+  // request before the thread finishes loading.
+  const [aiDraftPending, setAiDraftPending] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("aidraft") === "1",
+  );
   const [showSendLaterModal, setShowSendLaterModal] = useState(false);
   const [showDeleteLeadConfirm, setShowDeleteLeadConfirm] = useState(false);
   const unreadBaselineRef = useRef<Map<
@@ -849,6 +857,20 @@ export default function Inbox() {
     selectedContact && selectedContact.id === selectedLeadId
       ? selectedContact
       : selectedSummary;
+
+  // Tasks "Send Draft" deep-link (?aidraft=1). Latch the request if the param
+  // appears (e.g. navigating while already on the inbox), then once the lead's
+  // contact is loaded, open the AI panel (which auto-applies a draft to the
+  // composer). The latch survives the inbox's own ?lead= URL cleanup.
+  useEffect(() => {
+    if (searchParams.get("aidraft") === "1") setAiDraftPending(true);
+  }, [searchParams]);
+  useEffect(() => {
+    if (!aiDraftPending || !contactForView) return;
+    setAiDraftAuto(true);
+    setShowAiAssistModal(true);
+    setAiDraftPending(false);
+  }, [aiDraftPending, contactForView]);
 
   // Open the rich Edit Lead modal for the selected contact. The contact IS a
   // lead, so we edit it with the same modal the Leads page uses. Prefer the full
@@ -3574,12 +3596,14 @@ export default function Inbox() {
                               message={composeBody}
                               leadData={contactForView ? [contactForView] : []}
                               persona="Real Estate Agent"
-                              onClose={() => setShowAiAssistModal(false)}
+                              autoApply={aiDraftAuto}
+                              onClose={() => { setShowAiAssistModal(false); setAiDraftAuto(false); }}
                               onApply={(text, focusComposer) => {
                                 const el = bodyRef.current;
                                 if (el) el.textContent = text;
                                 setComposeBody(text);
                                 setShowAiAssistModal(false);
+                                setAiDraftAuto(false);
                                 if (focusComposer && el) {
                                   el.focus();
                                   const r = document.createRange();

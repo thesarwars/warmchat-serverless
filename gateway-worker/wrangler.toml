@@ -11,6 +11,8 @@
 # the DO namespaces directly. That keeps the DOs single-source-of-truth.
 
 name = "warmchats-calling-gateway"
+# Pin to the monsieur.sarwar account (token can see the velasquez account too).
+account_id = "d402791d04565670e13364b7c7343649"
 main = "src/index.ts"
 compatibility_date = "2026-05-22"
 
@@ -63,6 +65,6 @@ crons = ["* * * * *", "0 0 * * *"]
 [vars]
 ENV = "prod"
 
-MOCK_SEND_APIS = "1"
+MOCK_SEND_APIS = "0"
 OPENAI_API_KEY = "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"
 TELNYX_API_KEY = "KEY019C64663B1E047E5FF99CF11E8F170B_cQMW9hDU1HZKGAMeweNom0"

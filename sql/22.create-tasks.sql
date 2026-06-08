@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS task (
     deal_id            INTEGER REFERENCES deal (id) ON DELETE SET NULL,
     title              TEXT NOT NULL,
     description        TEXT,
+    why                TEXT,                                -- AI: why this task matters (AI Recommended cards)
+    recommendation     TEXT,                                -- AI: recommended next action (AI Recommended cards)
+    score              TEXT,                                -- AI: conversion score, e.g. "92%" / "+87%"
+    score_label        TEXT,                                -- AI: score caption, e.g. "Likely to convert"
     type               TEXT,                                -- call | email | showing | followup | cma | task | ...
     priority           TEXT NOT NULL DEFAULT 'normal',      -- low | normal | high | urgent
     due_at             TEXT,

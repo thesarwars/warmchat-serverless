@@ -12,6 +12,9 @@ interface AiSuggestionPanelProps {
   message: string;
   leadData?: unknown[];
   persona?: string;
+  /** When true, the first generated draft is applied straight to the composer
+   *  (used by the Tasks "Send Draft" deep-link) instead of showing options. */
+  autoApply?: boolean;
   onClose: () => void;
   onApply: (text: string, focusComposer: boolean) => void;
 }
@@ -23,6 +26,7 @@ const AiSuggestionPanel: React.FC<AiSuggestionPanelProps> = ({
   message,
   leadData = [],
   persona = "Real Estate Agent",
+  autoApply = false,
   onClose,
   onApply,
 }) => {
@@ -50,6 +54,11 @@ const AiSuggestionPanel: React.FC<AiSuggestionPanelProps> = ({
           result.improved_message,
           ...(result.suggestions ?? []),
         ].filter(Boolean);
+        if (autoApply) {
+          if (all.length) { onApply(all[0] as string, true); return; }
+          setError("AI couldn't generate a draft. Use Generate AI to retry.");
+          return;
+        }
         setOptions(all.slice(0, 3));
       } catch (err: unknown) {
         setError(
@@ -59,7 +68,7 @@ const AiSuggestionPanel: React.FC<AiSuggestionPanelProps> = ({
         setLoading(false);
       }
     },
-    [token, message, channel, persona, leadData],
+    [token, message, channel, persona, leadData, autoApply, onApply],
   );
 
   useEffect(() => {
