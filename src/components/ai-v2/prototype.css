@@ -863,6 +863,8 @@
 .wc-admin-narrow{max-width:760px}
 .wc-admincard{padding:18px 20px}
 .wc-admincard-h{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:800;letter-spacing:-.01em;margin-bottom:14px}
+/* Admin card header sub-row: caption left, action button right (users-card-prompt §4) */
+.wc-admincard-h2-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .wc-admincard-ic{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent-strong);display:grid;place-items:center;flex:none}
 .wc-notlist{display:flex;flex-direction:column}
 .wc-notrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line-soft)}
@@ -1045,7 +1047,11 @@ a.wc-support-card:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
 .wc-orgtab:hover{border-color:#D9D5CE;background:var(--line-soft)}
 .wc-orgtab.is-on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(249,115,22,.28)}
 .wc-orgtab.is-on .wc-icon{color:#fff}
-.wc-orgtable-wrap{border:1px solid var(--line);border-radius:13px;overflow:hidden}
+/* horizontal scroll wrapper — table (min-width 980px) is wider than the card (users-card-prompt §4) */
+.wc-orgtable-wrap{border:1px solid var(--line);border-radius:13px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.wc-orgtable-wrap .wc-reptable{min-width:980px}
+.wc-orgtable-wrap .wc-reptable th,
+.wc-orgtable-wrap .wc-reptable td{white-space:nowrap}
 .wc-orgtable-wrap .wc-reptable td{vertical-align:middle}
 .wc-orggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .wc-orgitem{border:1px solid var(--line);border-radius:14px;padding:15px}

@@ -6,6 +6,7 @@ import { checkQuietHours } from "./quietHours.ts";
 import { isPhoneSuppressed } from "./suppression.ts";
 import { appendComplianceFooter, type ComplianceFooterKind } from "./smsCompliance.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
+import { checkAiSmsPace } from "./aiSendPace.ts";
 
 /**
  * The single compliant outbound-SMS path for AI-initiated lead messages
@@ -86,6 +87,20 @@ export async function sendLeadSms(
       channel: "sms", toAddress: lead.phone, body,
       scheduledAt: new Date(Date.now() + 60_000).toISOString(),
       sentByAi: true,
+    });
+    return { sent: false, queued: true };
+  }
+
+  // Per-number pacing: never burst AI texts to one handset (carrier 40002 spam
+  // filter). If this number is over-paced, hold the reply for the cron at the
+  // next allowed time instead of sending inline - it is delayed, never dropped.
+  const pace = await checkAiSmsPace(env.D1DB, lead.org_id, lead.phone);
+  if (!pace.ok && pace.nextAtIso) {
+    await queueScheduledMessage(env, {
+      leadId: lead.id, orgId: lead.org_id,
+      userId: lead.owner_id ?? settings.user_id,
+      channel: "sms", toAddress: lead.phone, body,
+      scheduledAt: pace.nextAtIso, sentByAi: true,
     });
     return { sent: false, queued: true };
   }

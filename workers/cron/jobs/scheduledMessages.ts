@@ -22,6 +22,7 @@ import {
 } from "../_shared/sendRateLimiter.ts";
 import { isMockSendsEnabled } from "../_shared/appSettings.ts";
 import { isAiMasterEnabled, isAgentEnabled } from "../_shared/aiGate.ts";
+import { checkAiSmsPace } from "../_shared/aiSendPace.ts";
 import { appendCanSpamFooter, makeUnsubscribeToken, unsubscribeUrl } from "../_shared/emailCompliance.ts";
 import { notify } from "../_shared/notify.ts";
 
@@ -184,7 +185,7 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
     }),
   ]);
 
-  let sent = 0, failed = 0, skippedQuiet = 0, cancelledOptOut = 0, rateLimited = 0, errored = 0, skippedPaused = 0, skippedAiOff = 0;
+  let sent = 0, failed = 0, skippedQuiet = 0, cancelledOptOut = 0, rateLimited = 0, errored = 0, skippedPaused = 0, skippedAiOff = 0, pacedDeferred = 0;
 
   const processRow = async (row: DueRow): Promise<void> => {
     try {
@@ -255,6 +256,21 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         await logSendActivity(env, row, { event: "message.failed", status: "error", reason: "Sender business address required for marketing email (set in Account settings)" });
         console.log(`[cron:scheduledMessages] msg=${row.id} email -> failed (missing sender business_address)`);
         return;
+      }
+
+      // Per-number pacing for AI SMS: never burst AI texts to one handset
+      // (carrier 40002 spam filter). Over-paced rows are deferred - we bump
+      // scheduled_at to the next allowed time and leave them 'scheduled', so a
+      // later tick sends them once the number cools down. Never dropped.
+      if (row.channel === "sms" && row.sent_by_ai === 1) {
+        const pace = await checkAiSmsPace(env.D1DB, row.org_id, row.to_address);
+        if (!pace.ok && pace.nextAtIso) {
+          await env.D1DB.prepare(
+            `UPDATE scheduled_message SET scheduled_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          ).bind(pace.nextAtIso, row.id).run();
+          pacedDeferred++;
+          return;
+        }
       }
 
       // Sender key for the rate limiter (resolved up front). SMS keys on the
@@ -375,7 +391,7 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
   // single-threaded, so `sent++` etc. never interleave.
   await mapPool(due, PROCESS_CONCURRENCY, processRow);
 
-  console.log(`[cron:scheduledMessages] summary: sent=${sent} failed=${failed} skippedQuiet=${skippedQuiet} skippedPaused=${skippedPaused} skippedAiOff=${skippedAiOff} cancelledOptOut=${cancelledOptOut} rateLimited=${rateLimited} errored=${errored}`);
+  console.log(`[cron:scheduledMessages] summary: sent=${sent} failed=${failed} skippedQuiet=${skippedQuiet} skippedPaused=${skippedPaused} skippedAiOff=${skippedAiOff} cancelledOptOut=${cancelledOptOut} rateLimited=${rateLimited} pacedDeferred=${pacedDeferred} errored=${errored}`);
 }
 
 /** Look up the 10DLC phone (SMS) or sending domain (email) for rate keying. */

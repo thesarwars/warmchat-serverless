@@ -788,7 +788,7 @@ function ProfileCard() {
   );
 }
 
-function NotificationsCard() {
+export function NotificationsCard() {
   const { q } = useBoot();
   const serverSettings = q.data?.notification_settings as Partial<NotificationSettings> | undefined;
   const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_NOTIF);
@@ -970,7 +970,7 @@ function InstallAppCard() {
   );
 }
 
-function PasswordCard() {
+export function PasswordCard() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const m = useMutation({
@@ -1106,7 +1106,7 @@ function DeleteAccountCard() {
   );
 }
 
-function EmailChannelCard({ email, busy, run, token }: {
+export function EmailChannelCard({ email, busy, run, token }: {
   email: EmailCard | null;
   busy: string | null;
   run: (key: string, fn: () => Promise<unknown>) => Promise<void>;
@@ -1226,7 +1226,7 @@ function SendingAddressCard() {
   );
 }
 
-function SmsChannelCard({ sms, busy, run, token }: {
+export function SmsChannelCard({ sms, busy, run, token }: {
   sms: SmsCard | null;
   busy: string | null;
   run: (key: string, fn: () => Promise<unknown>) => Promise<void>;
@@ -1300,7 +1300,7 @@ function DefaultsCard({ data, token, onSaved }: { data: ConnectedAccountsPayload
   );
 }
 
-function TimezoneCard({ orgId, canManage }: { orgId: number | null; canManage: boolean }) {
+export function TimezoneCard({ orgId, canManage }: { orgId: number | null; canManage: boolean }) {
   const qc = useQueryClient();
   const tzQ = useQuery({ queryKey: ["org-timezone", orgId], queryFn: () => fetchOrgTimezone(orgId ?? 0), enabled: Boolean(orgId) });
   const [tz, setTz] = useState("");
@@ -1438,7 +1438,8 @@ function WorkspaceTab() {
   );
 }
 
-function BillingTab() {
+// Exported so the Admin control center can render the SAME wired billing tab.
+export function BillingTab() {
   const { q, profile, billing } = useBoot();
   const planName = resolvePlanName(billing?.plan ?? null, profile?.org?.plan ?? undefined, localStorage.getItem("selectedPlan"));
   const limits = PLAN_LIMITS[planName] || PLAN_LIMITS.free_channel;

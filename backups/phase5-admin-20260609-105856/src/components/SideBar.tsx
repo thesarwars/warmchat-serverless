@@ -187,14 +187,8 @@ function SideBar({ isOpen, toggleSidebar, floatingOnDesktop }: SideBarProps) {
   const settingsNavItems = (
     <Section title="Workspace">
       <NavItem to="/deals" icon={Tag} text="Deals" />
-      {/* Site admins get the Admin control center (Settings folded into its Users
-          tab) - one unified entry, no separate Settings link. Non-admin users
-          keep the standalone Settings page since they have no Admin access. */}
-      {typeof window !== "undefined" && localStorage.getItem("is_admin") === "1" ? (
-        <NavItem to="/admin" icon={BarChart3} text="Admin" />
-      ) : (
-        <NavItem to="/settings" icon={Settings} text="Settings" />
-      )}
+      <NavItem to="/reporting" icon={BarChart3} text="Reporting" />
+      <NavItem to="/settings" icon={Settings} text="Admin" />
       {/* <NavItem to="/dashboard/support" icon={LifeBuoy} text="Support" /> */}
     </Section>
   );
