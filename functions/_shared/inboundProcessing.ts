@@ -36,11 +36,14 @@ export interface InboundSmsInput {
   text: string;
   /** Provider-reported receive time; defaults to now. */
   receivedAt?: string | null;
+  /** Provider message id - idempotency key so webhook retries don't double-process. */
+  providerMessageId?: string | null;
 }
 
 export interface InboundSmsResult {
   ok: boolean;
   ignored?: string;
+  deduped?: boolean;
   dispatched?: string;
   opted_out?: boolean;
   lead_id?: number;
@@ -96,6 +99,18 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   );
   if (!m) return { ok: true, ignored: "user not in org" };
 
+  // Idempotency: Telnyx retries the webhook if our (slow, LLM-driven) response
+  // times out, which previously re-ran the agent and sent a SECOND reply. If we
+  // already recorded this provider message id, stop now - before any send.
+  if (input.providerMessageId) {
+    const seen = await queryFirst<{ id: number }>(
+      env.D1DB,
+      `SELECT id FROM sms_message WHERE provider_message_sid = ? AND direction = 'inbound' LIMIT 1`,
+      input.providerMessageId,
+    );
+    if (seen) return { ok: true, deduped: true, ignored: "duplicate webhook" };
+  }
+
   let contact = await queryFirst<{ id: number }>(
     env.D1DB,
     `SELECT id FROM sms_contact WHERE org_id = ? AND phone_number_e164 = ? LIMIT 1`,
@@ -124,9 +139,9 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   }
   await execute(
     env.D1DB,
-    `INSERT INTO sms_message (org_id, conversation_id, direction, body, status, created_at)
-     VALUES (?, ?, 'inbound', ?, 'received', ?)`,
-    m.org_id, conv.id, messageText, input.receivedAt || nowIso(),
+    `INSERT INTO sms_message (org_id, conversation_id, direction, body, status, provider_message_sid, created_at)
+     VALUES (?, ?, 'inbound', ?, 'received', ?, ?)`,
+    m.org_id, conv.id, messageText, input.providerMessageId ?? null, input.receivedAt || nowIso(),
   );
   await execute(env.D1DB,
     `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`, nowIso(), conv.id);
@@ -428,6 +443,15 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   // Webhook contract: an unknown recipient is ignored. The admin tool bypasses
   // this by supplying orgId directly.
   if (!conn && input.orgId == null) return { ok: true, ignored: "unknown recipient" };
+
+  // Idempotency: ElasticEmail can retry the inbound webhook; if we already
+  // recorded this provider message id, stop before re-threading + re-replying.
+  if (input.messageId) {
+    const seen = await queryFirst<{ id: number }>(
+      env.D1DB, `SELECT id FROM inbound_messages WHERE provider_message_id = ? LIMIT 1`, input.messageId,
+    );
+    if (seen) return { ok: true, ignored: "duplicate webhook" };
+  }
 
   let orgId = input.orgId ?? null;
   if (orgId == null && conn) {

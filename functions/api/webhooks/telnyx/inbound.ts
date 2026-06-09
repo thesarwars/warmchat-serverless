@@ -56,6 +56,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     toNumber: inner.to?.[0]?.phone_number || "",
     text,
     receivedAt: inner.received_at || null,
+    // Idempotency key: on a retry (our LLM reply can be slow enough to time out
+    // Telnyx's webhook), processInboundSms sees this id already recorded and
+    // returns without sending a second reply.
+    providerMessageId: inner.id || null,
   });
   return json(result);
 };

@@ -28,7 +28,6 @@ const Waitlist = lazy(() => import("./components/Waitlist"));
 const ConnectAccount = lazy(() => import("./components/ConnectAccount"));
 const ConnectedAccountsPage = lazy(() => import("./components/connected-accounts/ConnectedAccountsPage"));
 const AdminHome = lazy(() => import("./components/admin/AdminHome"));
-const AdminPage = lazy(() => import("./components/admin/AdminPage"));
 const DebugSendLogs = lazy(() => import("./components/admin/DebugSendLogs"));
 const BlockedPhoneNumbers = lazy(() => import("./components/admin/BlockedPhoneNumbers"));
 const AgentV2Page = lazy(() => import("./components/ai-v2/AgentV2Page"));
@@ -643,21 +642,10 @@ const App: React.FC = () => {
             }
           />
 
-          {/* Admin business control center (6 tabs). Linked from the sidebar for
-              site admins only. Gated on user.is_admin like the rest of /admin/*. */}
+          {/* Site-admin hub. Not linked from the sidebar - reachable only by
+              typing /admin. Gated on user.is_admin like the rest of /admin/*. */}
           <Route
             path="/admin"
-            element={
-              <AdminProtectedRoute>
-                <AdminPage />
-              </AdminProtectedRoute>
-            }
-          />
-
-          {/* Legacy site-admin tools launcher (Debug logs, Blocked numbers).
-              Kept reachable so the debug/test utilities stay one click away. */}
-          <Route
-            path="/admin/tools"
             element={
               <AdminProtectedRoute>
                 <AdminHome />

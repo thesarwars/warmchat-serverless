@@ -17,6 +17,7 @@ import { upsertDealForLead, type DealUpsert } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { advanceQualification } from "./qualificationFlow.ts";
+import { classifyReplyText } from "./intentClassifier.ts";
 import { notify } from "./notify.ts";
 import { STAGE_OPTIONS, normalizeStage } from "./leadStage.ts";
 
@@ -446,9 +447,36 @@ async function executeTool(
       const reason = String(args.reason || "Lead needs the agent");
       await openEscalation(env, { orgId, leadId: lead.id, ownerId: lead.owner_id, reason, detail: reason });
       await notifyAgent(env, lead, "AI escalated a lead", `${label}: ${reason}`);
+      // Surface every escalation as an actionable TASK so the agent sees it in the
+      // Tasks action center (an escalation alone only notifies). Infer the task
+      // type/title from the reason; dedupe against an existing open task of the
+      // same type for this lead so repeated asks don't stack duplicates.
+      const lower = reason.toLowerCase();
+      const isCall = /\b(call|phone|call ?back|speak|talk)\b/.test(lower);
+      const isShowing = /\b(show|showing|tour|visit|see the)\b/.test(lower);
+      const taskType = isCall ? "call" : isShowing ? "showing" : "followup";
+      const taskTitle = isCall
+        ? `Call back ${label}`
+        : isShowing ? `Schedule a showing for ${label}` : `Follow up with ${label}`;
+      const dup = await queryFirst<{ id: number }>(
+        env.D1DB,
+        `SELECT id FROM task WHERE lead_id = ? AND type = ? AND status = 'open' LIMIT 1`,
+        lead.id, taskType,
+      );
+      if (!dup) {
+        await createTask(env, {
+          orgId, userId: lead.owner_id ?? userId, leadId: lead.id,
+          title: taskTitle, type: taskType, why: reason,
+          recommendation: isCall
+            ? "Call the lead - they asked to speak with the agent."
+            : "Reach out to the lead to move this forward.",
+          scoreLabel: "Needs response", priority: "high", source: "ai",
+        }).catch(() => {});
+        await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "task.created", leadId: lead.id, leadLabel: label, detail: taskTitle, status: "ok" });
+      }
       state.escalated = true;
       await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "lead.escalated", leadId: lead.id, leadLabel: label, detail: reason, status: "warn" });
-      return "Escalated to the agent.";
+      return "Escalated to the agent and created a follow-up task.";
     }
     case "create_task": {
       await createTask(env, {
@@ -681,6 +709,22 @@ export async function runInboundAgent(
     );
   } else {
     await execute(env.D1DB, `UPDATE lead SET last_reply_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, nowIso(), leadId);
+  }
+
+  // Deterministic lead_type backstop: the spec requires intent detection to SET
+  // lead_type (buyer/seller/both) on the lead. LLMs don't reliably fire the
+  // update_lead tool on the same turn they reply, so when the type is still
+  // unknown and the reply clearly signals one, persist it here - before the agent
+  // loop reads the profile - so the type-scoped qualification questions apply and
+  // the CRM reflects intent regardless of the model's tool choices.
+  if (!lead.lead_type || lead.lead_type === "unknown") {
+    try {
+      const c = await classifyReplyText(env, replyText, lead.lead_type);
+      if (c.lead_type_signal) {
+        await execute(env.D1DB, `UPDATE lead SET lead_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, c.lead_type_signal, leadId);
+        lead.lead_type = c.lead_type_signal;
+      }
+    } catch { /* non-fatal - the agent can still set it via update_lead */ }
   }
 
   const replySubject = channel === "email" ? buildReplySubject(opts.subject) : "";

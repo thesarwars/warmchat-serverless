@@ -43,9 +43,14 @@ const BOOKING_WORDS = [
   "book", "schedule", "meet", "viewing", "visit",
 ];
 
+// Genuine disinterest only -> "cold" (the lead is dropped/Lost). Per the spec's
+// intent system, vague/exploring replies ("just browsing", "just looking",
+// "not sure") are UNKNOWN (ask a clarifying question + keep nurturing), NOT cold -
+// so they are intentionally NOT in this list. STOP/unsubscribe are handled by the
+// compliance layer upstream, before classification.
 const COLD_WORDS = [
-  "just browsing", "just looking", "later", "not interested", "not sure",
-  "stop", "unsubscribe", "leave me alone", "don't text",
+  "not interested", "leave me alone", "don't text", "do not text",
+  "stop texting", "no thanks", "not looking to",
 ];
 
 const BUYER_WORDS = ["buy", "buying", "looking to buy", "purchase", "homes", "house hunting"];
@@ -156,8 +161,9 @@ Output schema (strict):
 
 Rules:
 - intent "booking" only if the lead is asking to schedule/tour/call.
-- intent "cold" if disengaged ("not interested", "just browsing", "stop").
-- intent "warm" for positive engagement; "unknown" only when truly ambiguous.
+- intent "cold" ONLY when genuinely not interested ("not interested", "stop", "leave me alone").
+- intent "unknown" for vague/exploring replies ("just browsing", "just looking", "maybe", "not sure") - we will ask a clarifying question, not drop them.
+- intent "warm" for positive engagement.
 - Only fill an extracted field when the reply states it explicitly.
 - Never invent values. Use null if unsure.`;
 

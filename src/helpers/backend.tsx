@@ -46,6 +46,11 @@ export const fetchDashboardHotLeads = (id: number | string) => get(`/dashboard/o
 export const fetchDashboardPerformance = (id: number | string, params: Record<string, unknown>) =>
   get(`/dashboard/org/${id}/performance`, params);
 export const fetchDashboardPriroty = (id: number | string) => get(`/dashboard/org/${id}/priority-actions`);
+export const fetchAdminOverview = (id: number | string) => get(`/dashboard/org/${id}/overview`);
+export const fetchAdminMessaging = (id: number | string) => get(`/dashboard/org/${id}/messaging`);
+export const fetchAdminGoals = (id: number | string, year: number) => get(`/dashboard/org/${id}/goals`, { year });
+export const setAdminGoal = (id: number | string, data: { user_id: number; year: number; commission_goal: number }) =>
+  put(`/dashboard/org/${id}/goals`, data, {}, true);
 
 export type OrgKpiGoals = {
   goal_pipeline_value: number;
@@ -133,6 +138,8 @@ export const fetchComplianceSummary = () => get(`/compliance/summary`);
 // Organization tab (Custom Brokerage). Users + Teams are read-only here (full
 // management lives on the dedicated /team/* pages); Offices is a small CRUD.
 export const fetchOrgUsers = () => get(`/auth/users`);
+export const inviteUser = (data: { email: string; role: string }) =>
+  post(`/auth/invite`, data, {}, true, true);
 export const fetchOrgTeams = (orgId: number | string) => get(`/teams`, { org_id: orgId });
 export const fetchOffices = (orgId: number | string) => get(`/offices`, { org_id: orgId });
 export const createOffice = (data: Record<string, unknown>) => post(`/offices`, data, {}, false, true);

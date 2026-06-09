@@ -52,7 +52,7 @@ FERNET_KEY = "lWPNdUL_iG672PKUtYNOGAceD5VocxeMeAKW3vpAM2c="
 # ---- Cloudflare Turnstile (bot protection on public forms) ----
 # Pairs with VITE_TURNSTILE_SITE_KEY in the frontend (.env). Treated as a
 # secret; prefer rotating via `wrangler pages secret put TURNSTILE_SECRET_KEY`.
-TURNSTILE_SECRET_KEY = "0x4AAAAAADf3B5i5a4vem9iWqvG-U-uT5yk"
+TURNSTILE_SECRET_KEY = "0x4AAAAAADgl7_57of-sLZz-fBzHDwFhq0Y"
 
 # ---- Google OAuth (login) & Gmail OAuth ----
 GOOGLE_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"

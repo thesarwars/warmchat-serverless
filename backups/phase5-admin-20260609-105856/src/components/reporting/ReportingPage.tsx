@@ -737,24 +737,6 @@ function Reporting() {
   );
 }
 
-/* Reusable tab exports so the Admin control center can fold in Reporting
-   (Overview / Messaging / Goals) without duplicating the design. */
-export function RepOverviewTab() {
-  return <OverviewTab />;
-}
-export function RepGoalsTab() {
-  return <GoalsTab />;
-}
-export function RepMessagingTab() {
-  return (
-    <div>
-      <ChannelReportTab icon="message" metrics={SMS_METRICS} chart={SMS_CHART} chartLabel="Texts sent · last 14 days" types={SMS_TYPES} typesLabel="By message type" />
-      <div style={{ height: 22 }} />
-      <ChannelReportTab icon="mail" metrics={EMAIL_METRICS} chart={EMAIL_CHART} chartLabel="Emails sent · last 14 days" types={EMAIL_TYPES} typesLabel="By email type" />
-    </div>
-  );
-}
-
 export default function ReportingPage() {
   return (
     <MainLayout title="Reporting">
