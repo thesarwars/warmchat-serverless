@@ -4,7 +4,7 @@ import { json, error, readJson } from "../../_shared/http.ts";
 import { queryFirst } from "../../_shared/db.ts";
 import { requireUser } from "../../_shared/auth.ts";
 import { createOrUpdateLead } from "../../_shared/leadIntake.ts";
-import { scheduleInstantReply } from "../../_shared/instantReply.ts";
+import { enrollSpeedToLead } from "../../_shared/speedToLead.ts";
 
 interface Body {
   org_id?: number;
@@ -86,11 +86,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   if (!result.ok) return error(result.message, result.status);
 
-  // Manual-add gate: when the agent explicitly chose "Send now", fire one instant
-  // AI opening (compliance-gated inside the helper). Best-effort - never fail the
-  // create over it. "Schedule"/"Don't send" simply don't trigger here.
+  // Manual-add gate: when the agent explicitly chose "Send now", enroll the
+  // speed-to-lead sequence (instant opening + 2 no-reply nudges, compliance-gated
+  // inside the helper). Best-effort - never fail the create over it.
+  // "Schedule"/"Don't send" simply don't trigger here.
   if (result.created && String(body?.auto_followup_action || "").toLowerCase() === "send_now") {
-    context.waitUntil(scheduleInstantReply(env, result.leadId).catch(() => {}));
+    context.waitUntil(enrollSpeedToLead(env, result.leadId).catch(() => {}));
   }
 
   return json({ lead: result.lead }, 201);

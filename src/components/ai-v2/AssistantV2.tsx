@@ -186,28 +186,12 @@ function AcOverviewTab({ go }: { go: GoFn }) {
         </div>
       </div>
 
-      <div className="wc-ac-grid2" style={{ marginTop: 22 }}>
+      <div style={{ marginTop: 22 }}>
         <div className="wc-panel-card pad">
           <div className="wc-card-h2 sm" style={{ marginBottom: 14 }}><Icon name="sparkles" size={14} /> What AI Updated Today</div>
           <div className="wc-ov-updated">
             {updated.map((u) => { const m = eventMeta(u.event); return <div className="wc-ov-uprow" key={u.id}><span className="wc-ov-up-ic"><Icon name={m.icon} size={14} /></span>{m.label}{u.lead_label ? ` - ${u.lead_label}` : ""}</div>; })}
             {updated.length === 0 && <div className="wc-band-d">No CRM updates yet today.</div>}
-          </div>
-        </div>
-        <div className="wc-panel-card">
-          <div className="wc-card-head"><div className="wc-card-h2"><Icon name="zap" size={15} /> Live AI Activity</div><span className="wc-stream"><span className="wc-livedot" />Live</span></div>
-          <div className="wc-ac-feed">
-            {feed.map((f) => {
-              const m = eventMeta(f.event);
-              const t = AC_TT[m.tone] ?? TONE_FALLBACK;
-              return (
-                <div className="wc-ac-feedrow" key={f.id}>
-                  <span className="wc-ac-feed-ic" style={{ color: t.fg, background: t.bg }}><Icon name={m.icon} size={14} /></span>
-                  <div className="wc-ac-feed-b"><div className="wc-ac-feed-time wc-mono">{timeAgo(f.created_at)}</div><div className="wc-ac-feed-text">{m.label}{f.lead_label ? ` - ${f.lead_label}` : ""}</div></div>
-                </div>
-              );
-            })}
-            {feed.length === 0 && <div className="wc-task-empty" style={{ padding: 16 }}>No AI activity yet. Turn AI on and it will stream here.</div>}
           </div>
         </div>
       </div>
@@ -1128,7 +1112,6 @@ export function AgentPage({ go }: { go: GoFn }) {
     { k: "overview", label: "Overview" },
     { k: "inbound", label: "Inbound" },
     { k: "outbound", label: "Outbound" },
-    { k: "activity", label: "Activity Feed" },
     { k: "settings", label: "AI Settings" },
   ];
   return (
@@ -1191,7 +1174,6 @@ export function AgentPage({ go }: { go: GoFn }) {
       </div>
 
       {tab === "overview" && <AcOverviewTab go={go} />}
-      {tab === "activity" && <AcActivityTab go={go} />}
       {tab === "inbound" && <AgentDetailPage agentId="inbound" go={go} masterEnabled={masterOn} />}
       {tab === "outbound" && <AgentDetailPage agentId="outbound" go={go} masterEnabled={masterOn} />}
       {tab === "settings" && <AcSettingsTab />}

@@ -228,11 +228,28 @@ function Admin() {
   const tab = ADMIN_TABS.some((t) => t.k === raw) ? (raw as string) : "overview";
   const cur = ADMIN_TABS.find((t) => t.k === tab) || ADMIN_TABS[0];
   const setTab = (k: string) => setParams({ tab: k });
+  const navigate = useNavigate();
+  const isSiteAdmin = typeof window !== "undefined" && localStorage.getItem("is_admin") === "1";
   return (
     <div className="wc-page wc-fade">
       <div className="wc-pagehead">
         <div>
-          <div className="wc-eyebrow" style={{ color: "var(--accent-strong)" }}>Admin</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="wc-eyebrow" style={{ color: "var(--accent-strong)" }}>Admin</div>
+            {isSiteAdmin && (
+              <button
+                onClick={() => navigate("/admin/tools")}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "5px 13px", borderRadius: 999, border: "1px solid #7DD3FC",
+                  background: "#E0F2FE", color: "#0369A1", fontWeight: 600, fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                <Icon name="lock" size={14} />Admin Panel
+              </button>
+            )}
+          </div>
           <h1>{cur.label}</h1>
           <p>{ADMIN_BLURB[cur.k]}</p>
         </div>

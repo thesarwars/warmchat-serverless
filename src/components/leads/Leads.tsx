@@ -471,6 +471,8 @@ export default function Leads() {
             channel: "sms",
             automation_id: choice.automationId ?? 0,
             inbound_enabled: choice.inboundEnabled,
+            auto_followup_action: choice.action,
+            auto_followup_scheduled_at: choice.scheduledAt,
           }),
         });
         await fetchLeads();

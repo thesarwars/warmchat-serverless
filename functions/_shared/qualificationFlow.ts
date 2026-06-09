@@ -88,6 +88,13 @@ function flowKey(leadType: string | null): "buyer" | "seller" | "open_house" | "
   return "general";
 }
 
+// One default booking message (used on booking-intent short-circuit) + a single
+// polite acknowledgement for not-interested leads (spec: acknowledge once, stop).
+const BOOKING_MESSAGE =
+  "Based on what you're looking for, it probably makes sense to connect for a few minutes. I can walk you through your options. What day/time works best for a quick call?";
+const NOT_INTERESTED_ACK =
+  "Totally understand - I'll stop here. Feel free to reach out whenever the timing's right!";
+
 /**
  * Persist whichever fields the classifier extracted onto the lead row. Skips
  * any field the classifier left null so we never overwrite real data with
@@ -198,7 +205,7 @@ export async function extractInboundData(env: Env, leadId: number, replyText: st
   await applyExtractions(env, leadId, classified.extracted);
   if (classified.intent === "booking") {
     await execute(env.D1DB, `UPDATE lead SET status = 'Qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, leadId);
-  } else if (classified.intent === "cold") {
+  } else if (classified.intent === "cold" || classified.intent === "not_interested") {
     await execute(env.D1DB, `UPDATE lead SET status = 'Lost', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, leadId);
   }
   await refreshLeadIntelligence(env, leadId);
@@ -253,13 +260,16 @@ async function runQualification(
   const classified = await classifyReplyText(env, replyText, lead.lead_type);
   await applyExtractions(env, leadId, classified.extracted);
 
-  // Booking intent short-circuit.
+  // Booking intent short-circuit: skip qualification, SEND the booking message,
+  // tag hot_seller (sellers), notify the agent.
   if (classified.intent === "booking") {
+    const result = await dispatchQuestion(env, lead, settings, BOOKING_MESSAGE);
     await execute(
       env.D1DB,
       `UPDATE lead SET status = 'Qualified', qualification_status = 'Booking-ready', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       leadId,
     );
+    if (lead.lead_type === "seller") await attachTag(env, lead.org_id, leadId, "hot_seller");
     await notifyAgent(env, lead, "Lead is booking-ready", `${lead.name || lead.first_name || "Lead"} signalled booking intent.`);
     await logAgentActivity(env, {
       orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",
@@ -270,25 +280,61 @@ async function runQualification(
       orgId: lead.org_id, leadId, ownerId: lead.owner_id,
       reason: "Booking intent", detail: replyText.slice(0, 200),
     });
-    return { status: "booking_ready" };
+    return { status: "booking_ready", ...result };
   }
 
-  // Cold intent short-circuit.
-  if (classified.intent === "cold") {
+  // Not-interested short-circuit: acknowledge once, stop, tag Lost / Not Engaged.
+  if (classified.intent === "cold" || classified.intent === "not_interested") {
+    const result = await dispatchQuestion(env, lead, settings, NOT_INTERESTED_ACK);
     await execute(
       env.D1DB,
       `UPDATE lead SET status = 'Lost', qualification_status = 'Not Engaged', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       leadId,
     );
-    return { status: "cold" };
+    return { status: "not_interested", ...result };
   }
 
   // Switch flow if a general/unknown lead signalled buy/sell/both.
   let currentFlow = flowKey(lead.lead_type);
   let currentStep = lead.qualification_step ?? 0;
-  if (currentFlow === "general" && classified.lead_type_signal) {
+  if (lead.lead_type === "both") {
+    // Lead is in the "both" holding state - route on their sell-first/buy-first
+    // answer (default seller-first when unclear, per the flow doc).
+    const lowered = replyText.toLowerCase();
+    const wantsBuy = /\bbuy/.test(lowered);
+    const wantsSell = /\bsell/.test(lowered);
+    let chosen: "buyer" | "seller";
+    if (wantsBuy && !wantsSell) chosen = "buyer";
+    else if (wantsSell && !wantsBuy) chosen = "seller";
+    else chosen = /sell\s*(first|then)/.test(lowered) || !wantsBuy ? "seller" : "buyer";
+    await execute(
+      env.D1DB,
+      `UPDATE lead SET lead_type = ?, qualification_step = 0, status = 'Engaged', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      chosen, leadId,
+    );
+    lead.lead_type = chosen;
+    currentFlow = chosen;
+    currentStep = 0;
+  } else if (currentFlow === "general" && classified.lead_type_signal) {
     const signal = classified.lead_type_signal;
-    // BOTH -> seller first per spec.
+    if (signal === "both") {
+      // BOTH: hold in a 'both' state + ASK the disambiguation question; don't
+      // start a qualification flow until they pick sell-first or buy-first.
+      await execute(
+        env.D1DB,
+        `UPDATE lead SET lead_type = 'both', qualification_step = 0, status = 'Engaged', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        leadId,
+      );
+      const q = "Got it - are you planning to sell first, or buy first?";
+      const result = await dispatchQuestion(env, lead, settings, q);
+      await attachTag(env, lead.org_id, leadId, "AI Qualifying");
+      await logAgentActivity(env, {
+        orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",
+        event: "reply.sent", leadId, leadLabel: lead.name || lead.first_name || "Lead",
+        detail: q, status: result.sent ? "ok" : "warn",
+      });
+      return { status: "both_clarify", ...result };
+    }
     const targetType: "buyer" | "seller" = signal === "buyer" ? "buyer" : "seller";
     await execute(
       env.D1DB,
@@ -311,6 +357,7 @@ async function runQualification(
       `UPDATE lead SET qualification_status = 'Booking-ready', qualification_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       nextStep, leadId,
     );
+    if (lead.lead_type === "seller") await attachTag(env, lead.org_id, leadId, "hot_seller");
     await notifyAgent(env, lead, "Qualification complete", `${lead.name || lead.first_name || "Lead"} finished qualification. Booking transition sent.`);
     await logAgentActivity(env, {
       orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",

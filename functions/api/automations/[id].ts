@@ -66,7 +66,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     email_subject?: string;
     channels?: string[];
     opening_send_time?: string | null;
-    followup_steps?: Array<{ delay_days?: number; message?: string; subject?: string; send_time?: string }>;
+    followup_steps?: Array<{ delay_days?: number; message?: string; subject?: string; send_time?: string; timezone?: string }>;
   }>(request)) || {};
 
   const sets: string[] = [];
@@ -89,6 +89,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         message: String(s.message || "").trim(),
         ...(s.subject ? { subject: String(s.subject) } : {}),
         ...(/^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? { send_time: String(s.send_time) } : {}),
+        ...(s.timezone ? { timezone: String(s.timezone) } : {}),
       }));
     sets.push("followup_steps = ?"); args.push(JSON.stringify(steps));
   }

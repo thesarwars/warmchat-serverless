@@ -67,7 +67,7 @@ interface AutomationRow {
   channels: string | null;       // JSON string array, e.g. ["sms"]
   followup_steps: string | null; // JSON array of { delay_days, message, send_time }
 }
-interface FollowupStep { delay_days?: number; message?: string; send_time?: string }
+interface FollowupStep { delay_days?: number; message?: string; send_time?: string; timezone?: string }
 
 /** Read the org's account timezone (the single source for step send times). */
 async function loadOrgTimezone(env: Env, orgId: number): Promise<string | null> {
@@ -120,7 +120,7 @@ export async function queueAutomationForLead(
   // Step 0 (the opening) is INSTANT (sent ~30s after enroll); each follow-up
   // fires `delay_days` later at its `send_time` wall-clock hour.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null }> = [];
+  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null }> = [];
   if ((camp.message || "").trim()) {
     const opening = await personalizeOpening(
       env, lead.org_id, lead.owner_id ?? fallbackUserId, camp.message!.trim(), lead);
@@ -136,7 +136,7 @@ export async function queueAutomationForLead(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null });
+    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null });
   }
   if (drip.length === 0) return 0;
 
@@ -167,7 +167,7 @@ export async function queueAutomationForLead(
       channel, toAddress, body,
       scheduledAt: step.instant
         ? new Date(now + 30 * 1000).toISOString()
-        : stepScheduledAt(now, step.delayDays, step.sendTime, sendTz),
+        : stepScheduledAt(now, step.delayDays, step.sendTime, step.tz || sendTz),
       // Outbound automation drip: NOT tagged as "AI Agent" - the inbox marks
       // these with the campaign/workflow name instead (derived from
       // automation_id on the materialized message row).
@@ -244,7 +244,7 @@ export async function bulkEnrollAutomation(
   // every lead apart from per-lead token expansion + scheduling done in the row
   // loop. Step 0 (opening) is INSTANT; follow-ups carry a day + send_time.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null }> = [];
+  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null }> = [];
   if ((camp.message || "").trim()) template.push({ body: camp.message!.trim(), instant: !openingTime, delayDays: 0, sendTime: openingTime });
   let followups: FollowupStep[] = [];
   try {
@@ -254,7 +254,7 @@ export async function bulkEnrollAutomation(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null });
+    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null });
   }
   if (!template.length) return { enrolled: 0, queued: 0 };
 
@@ -340,7 +340,7 @@ export async function bulkEnrollAutomation(
         : rendered;
       const scheduledAt = step.instant
         ? new Date(startMs + 30 * 1000).toISOString()
-        : stepScheduledAt(startMs, step.delayDays, step.sendTime, sendTz);
+        : stepScheduledAt(startMs, step.delayDays, step.sendTime, step.tz || sendTz);
       binds.push(stmt.bind(
         userId, lead.org_id, lead.id, automationId, channel, toAddress, null, body,
         scheduledAt, 0, now, now,

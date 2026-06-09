@@ -252,6 +252,65 @@ async function handleRecordingSaved(env: Env, payload: TelnyxPayload, callContro
 }
 
 /**
+ * Text the caller back after an unanswered inbound call so a lead never hits a
+ * dead end - covers the "nobody to ring" drop (agent's browser dialer not
+ * registered + no phone leg) AND the regular call.hangup NO_ANSWER/BUSY/FAILED
+ * path. Idempotent per call via the MISSED_CALL_SMS_SENT call_event, so the two
+ * paths never double-send. Respects the agent's AI/missed-call toggles and
+ * caller suppression.
+ */
+async function sendMissedCallTextback(
+  env: Env,
+  a: { orgId: number | null; agentId: number | null; businessPhone: string | null; customerNumber: string | null; callId: string; callControlId: string },
+  now: string,
+): Promise<boolean> {
+  if (!a.orgId || !a.agentId || !a.businessPhone || !a.customerNumber) return false;
+  const already = await queryFirst<{ id: string }>(
+    env.D1DB,
+    `SELECT id FROM call_events WHERE call_id = ? AND event_type = 'MISSED_CALL_SMS_SENT' LIMIT 1`,
+    a.callId,
+  );
+  if (already) return false;
+
+  const ar = await queryFirst<{ enabled: number; missed_call_enabled: number; missed_call_message: string }>(
+    env.D1DB,
+    `SELECT enabled, missed_call_enabled, missed_call_message FROM auto_response_settings WHERE user_id = ?`,
+    a.agentId,
+  );
+  if (ar && (!ar.enabled || !ar.missed_call_enabled)) return false;
+  if (await isPhoneSuppressed(env, a.orgId, a.customerNumber)) return false;
+
+  const cfg = await queryFirst<{ missed_call_sms_template: string }>(
+    env.D1DB, `SELECT missed_call_sms_template FROM calling_configurations WHERE org_id = ?`, a.orgId,
+  );
+  const rawTemplate = (ar?.missed_call_message && ar.missed_call_message.trim())
+    || cfg?.missed_call_sms_template
+    || "Sorry we missed your call! Reply here and we'll help you right away.";
+  const agentRow = await queryFirst<{ name: string | null }>(
+    env.D1DB, `SELECT name FROM "user" WHERE id = ?`, a.agentId,
+  );
+  const template = appendComplianceFooter(rawTemplate, { kind: "first_auto", agentName: agentRow?.name ?? null });
+  try {
+    await mockTelnyxSendSms(
+      env, a.businessPhone, a.customerNumber, template,
+      { orgId: a.orgId },
+      { ...(env.TELNYX_MESSAGING_PROFILE_ID ? { messagingProfileId: env.TELNYX_MESSAGING_PROFILE_ID } : {}) },
+    );
+    await execute(
+      env.D1DB,
+      `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
+       VALUES (?, ?, 'MISSED_CALL_SMS_SENT', ?, ?, ?)`,
+      crypto.randomUUID(), a.callId, now,
+      JSON.stringify({ to: a.customerNumber, from: a.businessPhone }),
+      `${a.callControlId}-missed-sms`,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Inbound call landed on one of our DIDs. Look up the assigned agent, gate on
  * busy-on-busy + workspace calling_enabled, answer the anchor leg, then dial
  * the fork legs per ring_strategy. Persist sids + seed the CallActorDO so the
@@ -375,8 +434,17 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
   }
 
   if (!webLegSid && !phoneLegSid) {
-    // Nobody to ring. If voicemail is enabled, divert the answered anchor to a
-    // greeting + recording instead of dropping the caller.
+    // Nobody to ring (browser dialer not registered + no phone leg). Always text
+    // the caller back so the lead never hits a dead end, THEN divert to voicemail
+    // if enabled, else hang up. Without this the self-hangup records as COMPLETED
+    // (not NO_ANSWER), so the call.hangup missed-call path would never fire.
+    await sendMissedCallTextback(env, {
+      orgId: businessNumber.org_id, agentId: agent.id,
+      businessPhone: payload.to ?? null, customerNumber: payload.from ?? null,
+      callId, callControlId,
+    }, nowIso());
+    // If voicemail is enabled, divert the answered anchor to a greeting +
+    // recording instead of dropping the caller.
     if (cfg?.voicemail_enabled === 1) {
       try {
         await executeCallControl(env, callControlId, {
@@ -608,70 +676,21 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
     }
   }
 
-  // Missed-call SMS on inbound when no answer / busy / failed.
-  // Prefer the AI Follow-Up settings (per-agent, configurable in the UI) and
-  // fall back to the older calling_configurations.missed_call_sms_template.
+  // Missed-call SMS on inbound when no answer / busy / failed. Uses the shared
+  // idempotent helper - the "nobody to ring" drop path may have already texted
+  // the caller, so this won't double-send.
   if (call.direction === "INBOUND" && (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED")) {
-    const ar = await queryFirst<{ enabled: number; missed_call_enabled: number; missed_call_message: string }>(
-      env.D1DB,
-      `SELECT enabled, missed_call_enabled, missed_call_message
-         FROM auto_response_settings WHERE user_id = ?`,
-      call.agent_id,
-    );
-    const aiBlocks = ar && (!ar.enabled || !ar.missed_call_enabled);
-    const cfg = await queryFirst<{ missed_call_sms_template: string }>(
-      env.D1DB,
-      `SELECT missed_call_sms_template FROM calling_configurations WHERE org_id = ?`,
-      call.org_id,
-    );
     const bn = call.business_number_id
       ? await queryFirst<{ phone_number: string }>(
           env.D1DB, `SELECT phone_number FROM phone_numbers WHERE id = ?`, call.business_number_id)
       : null;
-    // Suppression gate: never auto-text a caller who has opted out, even on
-    // a missed call. Skip the SMS branch but keep the call-state + missed-call
-    // bell notification firing so the agent still sees the missed call in-app.
-    const callerSuppressed = !!call.customer_number
-      && await isPhoneSuppressed(env, call.org_id, call.customer_number);
-    if (!aiBlocks && bn && call.customer_number && !callerSuppressed) {
-      const rawTemplate = (ar?.missed_call_message && ar.missed_call_message.trim())
-        || cfg?.missed_call_sms_template
-        || "Currently in an appointment. I will call you back shortly or text me please.";
-      // Missed-call SMS is the first automated reply the caller receives -
-      // gets AI disclosure + STOP footer per CTIA + state bot-disclosure laws.
-      const agentRow = await queryFirst<{ name: string | null }>(
-        env.D1DB, `SELECT name FROM "user" WHERE id = ?`, call.agent_id,
-      );
-      const template = appendComplianceFooter(rawTemplate, {
-        kind: "first_auto",
-        agentName: agentRow?.name ?? null,
-      });
-      try {
-        // Route through the mock-aware wrapper so the missed-call text-back is
-        // intercepted (and logged to mock_send_log) whenever mock sends are on,
-        // just like every other SMS path. The real path keeps the 10DLC
-        // messaging profile that the low-level client used.
-        await mockTelnyxSendSms(
-          env, bn.phone_number, call.customer_number, template,
-          { orgId: call.org_id ?? null },
-          { ...(env.TELNYX_MESSAGING_PROFILE_ID ? { messagingProfileId: env.TELNYX_MESSAGING_PROFILE_ID } : {}) },
-        );
-        await execute(
-          env.D1DB,
-          `INSERT INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
-           VALUES (?, ?, 'MISSED_CALL_SMS_SENT', ?, ?, ?)`,
-          crypto.randomUUID(), call.id, now,
-          JSON.stringify({ to: call.customer_number, from: bn.phone_number }),
-          `${callControlId}-missed-sms`,
-        );
-        // Tell the agent.
-        await emitState(env, call.id, {
-          status, terminal: true, missedWhileBusy: true,
-        });
-      } catch {
-        // Non-fatal - webhook still succeeded.
-      }
-    }
+    await sendMissedCallTextback(env, {
+      orgId: call.org_id, agentId: call.agent_id,
+      businessPhone: bn?.phone_number ?? null, customerNumber: call.customer_number ?? null,
+      callId: call.id, callControlId,
+    }, now);
+    // Tell the agent it was a missed call (regardless of whether the text sent).
+    await emitState(env, call.id, { status, terminal: true, missedWhileBusy: true });
   }
 
   await emitState(env, call.id, { status, duration, terminal: true });

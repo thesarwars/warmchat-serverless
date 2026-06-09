@@ -25,9 +25,11 @@ export interface AvailabilityConfig {
 export interface OpenSlot { startsAtIso: string; label: string }
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+// Spec default when an agent hasn't configured availability: 8am-8pm every day
+// (in the agent's timezone). Configured agents keep their saved hours.
 const DEFAULT_WEEKLY: Record<string, Window[]> = {
-  mon: [["09:00", "17:00"]], tue: [["09:00", "17:00"]], wed: [["09:00", "17:00"]],
-  thu: [["09:00", "17:00"]], fri: [["09:00", "17:00"]], sat: [], sun: [],
+  mon: [["08:00", "20:00"]], tue: [["08:00", "20:00"]], wed: [["08:00", "20:00"]],
+  thu: [["08:00", "20:00"]], fri: [["08:00", "20:00"]], sat: [["08:00", "20:00"]], sun: [["08:00", "20:00"]],
 };
 const ACTIVE_APPT_STATUSES = "('proposed','scheduled','confirmed','reschedule_proposed','rescheduled')";
 

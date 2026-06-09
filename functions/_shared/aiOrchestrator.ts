@@ -4,7 +4,7 @@ import { queryFirst, queryAll, execute, nowIso } from "./db.ts";
 import { chatWithTools, type ChatMessage, type ChatToolDef, type ChatToolCall } from "./openai.ts";
 import { buildAgentSystemPrompt, logAgentActivity, resolveReplyDelayMs } from "./aiAgents.ts";
 import {
-  loadSettingsForLead, aiSendAllowedForLead,
+  loadSettingsForLead, aiSendAllowedForLead, attachTag,
   type LeadFull, type AutoResponseRow,
 } from "./autoResponse.ts";
 import { sendLeadSms, sendLeadMms } from "./leadSms.ts";
@@ -418,6 +418,20 @@ async function executeTool(
     }
     case "book_appointment": {
       const startsAt = String(args.starts_at || "");
+      // Guard against double-booking: if the lead already has a live (non-cancelled)
+      // upcoming appointment, a reply like "okay"/"sure" is them CONFIRMING it - not
+      // asking for another. Don't create a duplicate; tell the AI to acknowledge it.
+      const existingAppt = await queryFirst<{ id: number; starts_at: string }>(
+        env.D1DB,
+        `SELECT id, starts_at FROM lead_appointment
+          WHERE lead_id = ? AND COALESCE(status,'') != 'cancelled'
+            AND datetime(starts_at) >= datetime('now')
+          ORDER BY datetime(starts_at) ASC LIMIT 1`,
+        lead.id,
+      );
+      if (existingAppt) {
+        return `This lead already has an appointment proposed for ${existingAppt.starts_at}. Do NOT book another - just acknowledge it (e.g. "Great, you're set - the agent will confirm shortly") and answer any questions. Only book again if the lead explicitly asks to change the time (then use reschedule, not a new booking).`;
+      }
       const check = await isSlotBookable(env, orgId, lead.owner_id ?? userId, startsAt);
       if (!check.ok) {
         const alts = await findOpenSlots(env, orgId, lead.owner_id ?? userId, { count: 4 });
@@ -441,11 +455,32 @@ async function executeTool(
       if (prevApptNorm !== "Appointment Set") {
         await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "lead.stage_changed", leadId: lead.id, leadLabel: label, detail: `${prevApptNorm ?? "-"} -> Appointment Set`, status: "ok" });
       }
+      // Surface the proposed appointment as a "confirm" task in the action center
+      // (deduped per lead) so the agent has a clear to-do, not just a notification.
+      const apptMeeting = args.meeting_type ? String(args.meeting_type) : "phone";
+      const apptTaskType = apptMeeting === "in_person" ? "showing" : "call";
+      const apptDup = await queryFirst<{ id: number }>(
+        env.D1DB,
+        `SELECT id FROM task WHERE lead_id = ? AND type = ? AND status = 'open' LIMIT 1`,
+        lead.id, apptTaskType,
+      );
+      if (!apptDup) {
+        await createTask(env, {
+          orgId, userId: lead.owner_id ?? userId, leadId: lead.id,
+          title: `Confirm appointment with ${label}`, type: apptTaskType,
+          why: `AI proposed an appointment for ${startsAt}`,
+          recommendation: "Review and confirm the proposed time, or reschedule.",
+          scoreLabel: "Booking-ready", priority: "high", source: "ai",
+        }).catch(() => {});
+        await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "task.created", leadId: lead.id, leadLabel: label, detail: `Confirm appointment with ${label}`, status: "ok" });
+      }
       return `Held appointment #${apptId} for ${startsAt} (pending the agent's confirmation). Tell the lead it is tentatively set and the agent will confirm.`;
     }
     case "escalate_to_agent": {
       const reason = String(args.reason || "Lead needs the agent");
       await openEscalation(env, { orgId, leadId: lead.id, ownerId: lead.owner_id, reason, detail: reason });
+      // Tag hot_seller when escalating a seller (spec: seller booking trigger -> hot_seller + notify).
+      if (lead.lead_type === "seller") await attachTag(env, orgId, lead.id, "hot_seller").catch(() => {});
       await notifyAgent(env, lead, "AI escalated a lead", `${label}: ${reason}`);
       // Surface every escalation as an actionable TASK so the agent sees it in the
       // Tasks action center (an escalation alone only notifies). Infer the task
