@@ -6,6 +6,7 @@ import { requireUser } from "../../../../_shared/auth.ts";
 import { isOrgMember } from "../../../../_shared/orgAccess.ts";
 import { cancelPendingFollowups } from "../../../../_shared/autoResponse.ts";
 import { bulkEnrollAutomation } from "../../../../_shared/automationEnroll.ts";
+import { enrollSpeedToLead } from "../../../../_shared/speedToLead.ts";
 
 // D1 caps bound parameters per statement at ~100, so any IN-list over the
 // imported lead ids must be chunked - an un-chunked IN (?,?,...) over a large
@@ -61,6 +62,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     automation_id?: number;
     inbound_enabled?: boolean;
     channel?: string;
+    // Manual-add "Start AI follow-up?" gate: send the speed-to-lead sequence now,
+    // schedule it for later, or don't send. Only honored on the enroll path.
+    auto_followup_action?: string;
+    auto_followup_scheduled_at?: string;
   }>(request)) || {};
 
   const leadIds = (body.lead_ids || []).filter((n) => Number.isInteger(n));
@@ -163,5 +168,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     enrolled = leads.length;
   }
 
-  return json({ enabled: true, enrolled, skipped, errors, error_details: errorDetails });
+  // Speed-to-lead "Start AI follow-up?" gate (manual add). Only when not also
+  // enrolled in an automation drip (those would overlap). Compliance/AI-master
+  // gating happens inside enrollSpeedToLead, so this no-ops if AI is off.
+  const followupAction = String(body.auto_followup_action || "").toLowerCase();
+  let speedEnrolled = 0;
+  if ((followupAction === "send_now" || followupAction === "schedule") && !automationId) {
+    const startAtMs = followupAction === "schedule" && body.auto_followup_scheduled_at
+      ? Date.parse(body.auto_followup_scheduled_at) : NaN;
+    const opts = Number.isFinite(startAtMs) ? { startAtMs } : {};
+    for (const lead of leads) {
+      try {
+        const r = await enrollSpeedToLead(env, lead.id, opts);
+        if (r.enrolled) speedEnrolled++;
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  return json({ enabled: true, enrolled, skipped, errors, speed_enrolled: speedEnrolled, error_details: errorDetails });
 };

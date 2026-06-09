@@ -29,7 +29,7 @@ const DAYS: [string, string][] = [
 
 const DEFAULT_CONFIG: Config = {
   timezone: "America/New_York",
-  weeklyHours: { mon: [["09:00", "17:00"]], tue: [["09:00", "17:00"]], wed: [["09:00", "17:00"]], thu: [["09:00", "17:00"]], fri: [["09:00", "17:00"]], sat: [], sun: [] },
+  weeklyHours: { mon: [["08:00", "20:00"]], tue: [["08:00", "20:00"]], wed: [["08:00", "20:00"]], thu: [["08:00", "20:00"]], fri: [["08:00", "20:00"]], sat: [["08:00", "20:00"]], sun: [["08:00", "20:00"]] },
   exceptions: [],
   slotMinutes: 30,
   bufferMinutes: 0,

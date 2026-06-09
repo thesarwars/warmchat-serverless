@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/helpers/queryClient";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ChatbaseWidget } from "./components/ChatbaseWidget";
 import RoleProtectedRoute from "./components/RoleProtectedRoute";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
@@ -509,24 +509,11 @@ const App: React.FC = () => {
             }
           />
 
-          {/* Settings - workspace, billing, compliance, organization (custom
-              brokerage), and availability. The #business-address deep-link and
-              ?tab= query param are handled inside the page. */}
-          <Route
-            path="/settings"
-            element={
-              <RoleProtectedRoute
-                allowedRoles={[
-                  ROLES.ADMIN,
-                  ROLES.MANAGER,
-                  ROLES.REPRESENTATIVE,
-                  ROLES.GUEST,
-                ]}
-              >
-                <SettingsPage />
-              </RoleProtectedRoute>
-            }
-          />
+          {/* Settings is retired - its workspace/billing/compliance content now
+              lives in the Admin control center. Redirect any /settings link
+              (incl. ?tab=) to /admin so nothing dead-ends. (SettingsPage.tsx is
+              kept only for the wired cards Admin imports from it.) */}
+          <Route path="/settings" element={<Navigate to="/admin" replace />} />
 
           {/* Outbound workflows live inside the AI Agent -> Outbound tab (the
               workflow list + in-modal create wizard + template gallery). Only the

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import MainLayout from "../components/MainLayout";
-import { ArrowLeft, Clock, Mail, MessageSquare, Pencil, Plus, Trash2, X, Zap } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Clock, Mail, MessageSquare, Pencil, Plus, Trash2, X, Zap } from "lucide-react";
 import { describeStep, formatSendTime, DEFAULT_STEP_SEND_TIME } from "@/utils/workflowSchedule";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
@@ -17,6 +17,11 @@ interface FollowupStep {
   send_time?: string;
   send_at?: string;
   timezone?: string;
+}
+
+interface LogEvent {
+  id: number; lead_id: number | null; lead: string; channel: string;
+  status: string; label: string; at: string; error: string | null; preview: string;
 }
 
 interface AutomationDetailsPayload {
@@ -131,6 +136,8 @@ const AutomationDetails: React.FC = () => {
   // Opening-message timing: instant (default) or a wall-clock time on enroll day.
   const [editOpeningTiming, setEditOpeningTiming] = useState<"instant" | "timed">("instant");
   const [editOpeningAt, setEditOpeningAt] = useState(DEFAULT_STEP_SEND_TIME);
+  const [logs, setLogs] = useState<LogEvent[]>([]);
+  const [logSummary, setLogSummary] = useState<{ enrolled: number; sent: number; stopped: number; failed: number; total: number } | null>(null);
 
   const fetchDetails = async () => {
     const res = await fetch(`${API_BASE}/automations/${id}/details`, {
@@ -139,12 +146,26 @@ const AutomationDetails: React.FC = () => {
     if (res.ok) setAutomation(await res.json());
   };
 
+  const fetchLogs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/automations/${id}/logs`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.events || []);
+        setLogSummary(data.summary || null);
+      }
+    } catch { /* non-fatal */ }
+  };
+
   useEffect(() => {
     if (!id || !token) return;
     (async () => {
       setLoading(true);
       try {
         await fetchDetails();
+        await fetchLogs();
       } catch (err) {
         console.error("Error fetching automation:", err);
       } finally {
@@ -200,6 +221,7 @@ const AutomationDetails: React.FC = () => {
             message: s.message || "",
             ...(s.subject ? { subject: s.subject } : {}),
             send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
+            ...(s.timezone ? { timezone: s.timezone } : {}),
           })),
         }),
       });
@@ -220,6 +242,14 @@ const AutomationDetails: React.FC = () => {
     setEditFollowups((prev) => [...prev, { delay_days: (prev[prev.length - 1]?.delay_days ?? 0) + 2, message: "", send_time: DEFAULT_STEP_SEND_TIME }]);
   const removeFollowup = (index: number) =>
     setEditFollowups((prev) => prev.filter((_, i) => i !== index));
+  const moveFollowup = (index: number, dir: -1 | 1) =>
+    setEditFollowups((prev) => {
+      const j = index + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j]!, next[index]!];
+      return next;
+    });
 
   const channels = useMemo(() => automation?.message_preview?.channels || [], [automation]);
   const isEmail = channels.some((channel) => String(channel).toLowerCase() === "email");
@@ -440,21 +470,38 @@ const AutomationDetails: React.FC = () => {
                             onChange={(e) => updateFollowup(index, { send_time: e.target.value })}
                             className="rounded border border-gray-200 px-2 py-1 text-sm"
                           />
-                          <span className="inline-flex items-center gap-1 text-xs text-gray-400" title="Send times use your account timezone"><Clock size={11} /> account time</span>
+                          <span className="inline-flex items-center gap-1 text-gray-400"><Clock size={11} /></span>
+                          <select
+                            value={step.timezone || ""}
+                            onChange={(e) => updateFollowup(index, { timezone: e.target.value })}
+                            className="rounded border border-gray-200 px-2 py-1 text-sm"
+                            title="Time zone for this step's send time"
+                          >
+                            <option value="">Account time</option>
+                            <option value="America/Los_Angeles">Pacific (PT)</option>
+                            <option value="America/Denver">Mountain (MT)</option>
+                            <option value="America/Chicago">Central (CT)</option>
+                            <option value="America/New_York">Eastern (ET)</option>
+                          </select>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeFollowup(index)}
-                          className="text-gray-400 hover:text-red-500"
-                          aria-label="Remove step"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveFollowup(index, -1)} disabled={index === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" aria-label="Move step up"><ChevronUp size={16} /></button>
+                          <button type="button" onClick={() => moveFollowup(index, 1)} disabled={index === editFollowups.length - 1} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" aria-label="Move step down"><ChevronDown size={16} /></button>
+                          <button type="button" onClick={() => removeFollowup(index)} className="text-gray-400 hover:text-red-500" aria-label="Remove step"><Trash2 size={15} /></button>
+                        </div>
                       </div>
                       <div className="mb-2 inline-flex items-center gap-1.5 text-xs text-gray-500">
                         <Zap size={11} className="text-orange-400" />
                         If started today, lands {describeStep(Number(step.delay_days) || 1, step.send_time).dateLabel} at {describeStep(Number(step.delay_days) || 1, step.send_time).timeLabel}
                       </div>
+                      {isEmail && (
+                        <input
+                          value={step.subject || ""}
+                          onChange={(e) => updateFollowup(index, { subject: e.target.value })}
+                          placeholder="Email subject..."
+                          className="mb-2 w-full rounded-md border border-gray-200 p-2 text-sm text-gray-800 outline-none focus:border-orange-400"
+                        />
+                      )}
                       <textarea
                         value={step.message || ""}
                         onChange={(e) => updateFollowup(index, { message: e.target.value })}
@@ -552,6 +599,35 @@ const AutomationDetails: React.FC = () => {
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">No replies yet.</p>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs">
+              <h2 className="mb-1 text-lg font-bold text-gray-950">Logs</h2>
+              {logSummary ? (
+                <div className="mb-3 text-xs text-gray-500">
+                  {logSummary.enrolled} enrolled · {logSummary.sent} sent · {logSummary.stopped} stopped
+                  {logSummary.failed ? ` · ${logSummary.failed} failed` : ""}
+                </div>
+              ) : null}
+              {logs.length ? (
+                <div className="max-h-90 space-y-2 overflow-auto">
+                  {logs.map((e) => (
+                    <div key={e.id} className="rounded-lg border border-gray-100 p-2.5 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-gray-900">{e.label}</span>
+                        <span className="shrink-0 text-xs text-gray-400">
+                          {new Date(e.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-500">
+                        {e.lead} · {e.channel.toUpperCase()}{e.error ? ` · ${e.error}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">No activity yet.</p>
               )}
             </section>
           </aside>

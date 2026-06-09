@@ -12,6 +12,10 @@ interface MainLayoutProps {
   hideSidebar?: boolean;
   title?: string;
   onUpgradeClick?: () => void;
+  // Full-bleed content (e.g. Inbox): match the left padding to the sidebar width
+  // (w-60) and drop the inner inset, so content sits flush against the sidebar
+  // border instead of the default pl-72 + p-2 gap.
+  flush?: boolean;
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({
@@ -19,6 +23,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
   hideSidebar,
   title,
   onUpgradeClick,
+  flush,
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (hideSidebar) return false;
@@ -96,8 +101,8 @@ const MainLayout: React.FC<MainLayoutProps> = ({
         floatingOnDesktop={!showSidebar}
       />
 
-      <main className={showSidebar ? "pt-16 overflow-x-hidden lg:pl-72" : "pt-16 overflow-x-hidden"}>
-        <div className="min-w-0 overflow-x-hidden lg:py-0 lg:p-2 lg:pb-0">
+      <main className={showSidebar ? `pt-16 overflow-x-hidden ${flush ? "lg:pl-60" : "lg:pl-72"}` : "pt-16 overflow-x-hidden"}>
+        <div className={flush ? "min-w-0 overflow-x-hidden" : "min-w-0 overflow-x-hidden lg:py-0 lg:p-2 lg:pb-0"}>
           {gmailStatus === "needs_reauth" && !hasVerifiedBusinessEmail && (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
               <span>

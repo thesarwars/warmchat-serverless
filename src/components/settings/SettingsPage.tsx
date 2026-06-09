@@ -1768,7 +1768,7 @@ function Admin() {
             <h1>{cur.label}</h1>
             {isAdmin && tab === "workspace" ? (
               <button
-                onClick={() => navigate("/admin")}
+                onClick={() => navigate("/admin/tools")}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
                   padding: "6px 14px", borderRadius: 999, border: "1px solid #7DD3FC",

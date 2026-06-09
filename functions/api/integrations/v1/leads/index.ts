@@ -5,6 +5,7 @@ import { queryAll, queryFirst, execute, nowIso } from "../../../../_shared/db.ts
 import { requireApiKey } from "../../../../_shared/apiAuth.ts";
 import { createOrUpdateLead } from "../../../../_shared/leadIntake.ts";
 import { queueAutomationForLead } from "../../../../_shared/automationEnroll.ts";
+import { enrollSpeedToLead } from "../../../../_shared/speedToLead.ts";
 import { toLeadView, resolveActorUserId } from "../../../../_shared/integrationApi.ts";
 
 const DEFAULT_LIMIT = 50;
@@ -142,6 +143,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (automationId) {
       const actor = await resolveActorUserId(env, auth.orgId, auth.createdByUserId);
       await queueAutomationForLead(env, automationId, result.leadId, actor ?? 0);
+    } else if (inboundEnabled && result.created) {
+      // Speed-to-lead: a new inbound-enabled lead with no explicit automation gets
+      // the per-lead-type instant + no-reply nudge sequence (compliance-gated).
+      context.waitUntil(enrollSpeedToLead(env, result.leadId).catch(() => {}));
     }
   }
 

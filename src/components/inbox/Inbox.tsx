@@ -2581,6 +2581,8 @@ export default function Inbox() {
             channel: "sms",
             automation_id: choice.automationId ?? 0,
             inbound_enabled: choice.inboundEnabled,
+            auto_followup_action: choice.action,
+            auto_followup_scheduled_at: choice.scheduledAt,
           }),
         });
         await fetchLeads();
@@ -2846,7 +2848,7 @@ export default function Inbox() {
   // untouched.
   if (inboxTopTab === "calls") {
     return (
-      <MainLayout hideSidebar title="Inbox">
+      <MainLayout flush title="Inbox">
         <div className="mb-4">
           <InboxTabs active="calls" onChange={setTab} />
         </div>
@@ -2856,7 +2858,7 @@ export default function Inbox() {
   }
 
   return (
-    <MainLayout hideSidebar title="Inbox">
+    <MainLayout flush title="Inbox">
       <Toaster position="top-right" />
       {quietHoursModal}
 

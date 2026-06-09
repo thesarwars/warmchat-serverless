@@ -14,7 +14,7 @@ import { generateWithOpenAI } from "./openai.ts";
  * /api/ai/classify-reply endpoint.
  */
 
-export type LeadIntent = "warm" | "cold" | "booking" | "unknown";
+export type LeadIntent = "warm" | "cold" | "not_interested" | "booking" | "unknown";
 
 export type LeadTypeSignal = "buyer" | "seller" | "both" | null;
 
@@ -43,12 +43,12 @@ const BOOKING_WORDS = [
   "book", "schedule", "meet", "viewing", "visit",
 ];
 
-// Genuine disinterest only -> "cold" (the lead is dropped/Lost). Per the spec's
-// intent system, vague/exploring replies ("just browsing", "just looking",
-// "not sure") are UNKNOWN (ask a clarifying question + keep nurturing), NOT cold -
-// so they are intentionally NOT in this list. STOP/unsubscribe are handled by the
-// compliance layer upstream, before classification.
-const COLD_WORDS = [
+// Genuine disinterest -> "not_interested" (acknowledge once, stop, tag Lost).
+// Per the spec's intent system, vague/exploring replies ("just browsing", "just
+// looking", "not sure") are UNKNOWN (ask a clarifying question + keep nurturing),
+// NOT disinterest - so they are intentionally NOT in this list. STOP/unsubscribe
+// are handled by the compliance layer upstream, before classification.
+const NOT_INTERESTED_WORDS = [
   "not interested", "leave me alone", "don't text", "do not text",
   "stop texting", "no thanks", "not looking to",
 ];
@@ -75,11 +75,11 @@ function extractKeyword(text: string): ClassifyResult {
     extracted: {},
   };
 
-  // Booking takes priority - never want to treat "tour tomorrow" as cold.
+  // Booking takes priority - never want to treat "tour tomorrow" as disinterest.
   if (containsAny(lowered, BOOKING_WORDS)) {
     result.intent = "booking";
-  } else if (containsAny(lowered, COLD_WORDS)) {
-    result.intent = "cold";
+  } else if (containsAny(lowered, NOT_INTERESTED_WORDS)) {
+    result.intent = "not_interested";
   }
 
   // Lead-type signal is independent of intent (e.g. "want to buy, call me tomorrow").
@@ -140,7 +140,7 @@ const LLM_SYSTEM = `You classify inbound real-estate lead replies. Always respon
 
 Output schema (strict):
 {
-  "intent": "warm" | "cold" | "booking" | "unknown",
+  "intent": "warm" | "not_interested" | "booking" | "unknown",
   "lead_type_signal": "buyer" | "seller" | "both" | null,
   "extracted": {
     "budget": string | null,
@@ -161,7 +161,7 @@ Output schema (strict):
 
 Rules:
 - intent "booking" only if the lead is asking to schedule/tour/call.
-- intent "cold" ONLY when genuinely not interested ("not interested", "stop", "leave me alone").
+- intent "not_interested" ONLY when genuinely not interested ("not interested", "stop", "leave me alone", "no thanks").
 - intent "unknown" for vague/exploring replies ("just browsing", "just looking", "maybe", "not sure") - we will ask a clarifying question, not drop them.
 - intent "warm" for positive engagement.
 - Only fill an extracted field when the reply states it explicitly.
@@ -176,7 +176,8 @@ async function callLLM(env: Env, replyText: string, leadType: string | null): Pr
       extracted?: Record<string, unknown>;
     };
     const intent = (parsed.intent === "warm" || parsed.intent === "cold" ||
-      parsed.intent === "booking" || parsed.intent === "unknown") ? parsed.intent : "unknown";
+      parsed.intent === "not_interested" || parsed.intent === "booking" ||
+      parsed.intent === "unknown") ? parsed.intent : "unknown";
     const signal: LeadTypeSignal = (parsed.lead_type_signal === "buyer" ||
       parsed.lead_type_signal === "seller" || parsed.lead_type_signal === "both")
       ? parsed.lead_type_signal : null;

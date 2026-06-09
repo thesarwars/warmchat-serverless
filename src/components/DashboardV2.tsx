@@ -11,8 +11,6 @@ import AIWinsToday from "./V2/Dashboard/AIWinsToday";
 import ConversionFunnel from "./V2/Dashboard/ConversionFunnel";
 import TodaySchedule from "./V2/Dashboard/TodaySchedule";
 import QuickActions from "./V2/Dashboard/QuickActions";
-import ConversationFeed from "./V2/Dashboard/ConversationFeed";
-import AgentsPulse from "./V2/Dashboard/AgentsPulse";
 import AiNextSteps from "./V2/Dashboard/AiNextSteps";
 import AppointmentModal from "./V2/Dashboard/AppointmentModal";
 import ConfirmDialog from "./V2/Dashboard/ConfirmDialog";
@@ -424,7 +422,6 @@ const DashboardV2: React.FC = () => {
               onViewLead={handleViewLead}
             />
             <AIIntelligence data={priroty_actions} isLoading={priorityLoading} />
-            <ConversationFeed contacts={inbox_contacts} isLoading={inboxLoading} />
           </div>
 
           {/* RIGHT RAIL */}
@@ -438,7 +435,6 @@ const DashboardV2: React.FC = () => {
             />
             <TodaySchedule data={scheduleData} isLoading={dataLoading} />
             <QuickActions onNewMessage={() => navigate("/inbox")} onAddLead={() => navigate("/leads")} />
-            <AgentsPulse />
           </div>
         </div>
       </div>
