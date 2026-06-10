@@ -69,6 +69,10 @@ const ICON_PATHS: Record<string, string> = {
   zzz: '<path d="M4 9h7l-7 7h7"/><path d="M14 4h6l-6 6h6"/>',
   // Spinner arc - spin it with the .wc-spin class for loading indicators.
   loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  // Double check (delivered/read), eye (seen), video (Google Meet) - inbox spec.
+  checkDouble: '<path d="m1.5 12.5 4 4 8-9"/><path d="m9.5 16.5 4-4M14 7l4.5 9.5"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  video: '<path d="m22 8-6 4 6 4V8z"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
 };
 
 interface IconProps {

@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import MainLayout from "@/components/MainLayout";
 import { Icon } from "@/components/ai-v2/Icon";
+import { humanizeTaskText } from "@/utils/humanizeTime";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import {
   fetchOrgTasks,
   fetchOrgLeads,
@@ -111,7 +113,7 @@ function AiPriorityCard({ task, onPrimary, onOpen, onDone, onDismiss, busy }: { 
   const type = dispType(task.type);
   const tt = TASK_TYPES[type];
   const act = goForType(type);
-  const why = task.why || task.description;
+  const why = humanizeTaskText(task.why || task.description);
   return (
     <div className="wc-aip">
       <div className="wc-aip-top">
@@ -120,13 +122,13 @@ function AiPriorityCard({ task, onPrimary, onOpen, onDone, onDismiss, busy }: { 
           <span className="wc-aip-score">{task.score && <b>{task.score}</b>}{task.score_label}</span>
         )}
       </div>
-      <div className="wc-aip-title">{task.title}</div>
+      <div className="wc-aip-title">{humanizeTaskText(task.title)}</div>
       <span className="wc-aip-tag" style={{ color: tt.fg, background: tt.bg }}>{type}</span>
       {why && <p className="wc-aip-why"><strong>Why:</strong> {why}</p>}
       {task.recommendation && (
         <div className="wc-aip-rec">
           <div className="wc-aip-rec-h"><Icon name="sparkles" size={12} />AI Recommendation</div>
-          <div className="wc-aip-rec-t">{task.recommendation}</div>
+          <div className="wc-aip-rec-t">{humanizeTaskText(task.recommendation)}</div>
         </div>
       )}
       <div className="wc-aip-acts">
@@ -147,6 +149,7 @@ const HOW_STEPS = [
   { icon: "checkCircle", fg: "#0E9F6E", bg: "#E4F7EF", title: "Tasks clear themselves", text: "Mark done or dismiss to keep the list tight. Completed work moves to Completed Today so nothing slips." },
 ];
 function HowTasksWorkModal({ onClose }: { onClose: () => void }) {
+  useBodyScrollLock();
   return (
     <div className="wc-modal-scrim" onClick={onClose}>
       <div className="wc-modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
@@ -178,6 +181,7 @@ function AddTaskModal({ onClose, onCreate, leads, busy }: { onClose: () => void;
   const [prio, setPrio] = useState<DispPrio>("Medium");
   const [when, setWhen] = useState<"today" | "upcoming">("today");
   const [due, setDue] = useState("");
+  useBodyScrollLock();
   const tt = TASK_TYPES[type];
   const can = Boolean(title.trim());
   const submit = () => { if (can) onCreate({ title: title.trim(), sub: sub.trim(), type, prio, when, due, leadId }); };
@@ -414,7 +418,7 @@ function TasksInner() {
                   return (
                     <tr key={t.id}>
                       <td><button className="wc-check" style={{ cursor: "pointer" }} disabled={busy} onClick={() => completeMut.mutate(t.id)} title="Mark done" /></td>
-                      <td><div className="wc-tasktbl-title">{t.title}</div>{t.description && <div className="wc-tasktbl-sub">{t.description}</div>}</td>
+                      <td><div className="wc-tasktbl-title">{humanizeTaskText(t.title)}</div>{t.description && <div className="wc-tasktbl-sub">{humanizeTaskText(t.description)}</div>}</td>
                       <td><div className="wc-goalrow-agent">{lead ? <><span className="wc-agoal-lav">{initialsOf(lead)}</span>{lead}</> : "-"}</div></td>
                       <td><span className="wc-tasktbl-type" style={{ color: tt.fg, background: tt.bg }}><Icon name={tt.icon} size={12} />{type}</span></td>
                       <td><Prio p={dispPrio(t.priority)} /></td>
@@ -448,8 +452,8 @@ function TasksInner() {
                   return (
                     <div className="wc-taskcard" key={t.id}>
                       <div className="wc-taskcard-top"><span className="wc-tasktbl-type" style={{ color: tt.fg, background: tt.bg }}><Icon name={tt.icon} size={12} />{type}</span><Prio p={dispPrio(t.priority)} /></div>
-                      <div className="wc-tasktbl-title">{t.title}</div>
-                      {t.description && <div className="wc-tasktbl-sub">{t.description}</div>}
+                      <div className="wc-tasktbl-title">{humanizeTaskText(t.title)}</div>
+                      {t.description && <div className="wc-tasktbl-sub">{humanizeTaskText(t.description)}</div>}
                       <div className="wc-taskcard-foot"><div className="wc-goalrow-agent">{t.lead_name ? <><span className="wc-agoal-lav">{initialsOf(t.lead_name)}</span>{t.lead_name}</> : "-"}</div><span className={"wc-band-d" + (due.overdue ? " wc-overdue" : "")}>{due.label}</span></div>
                     </div>
                   );

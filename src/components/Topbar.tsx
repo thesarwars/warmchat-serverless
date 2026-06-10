@@ -1,7 +1,18 @@
 import React from "react";
-import { ChevronDown, Menu, Search } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Home,
+  Mail,
+  Menu,
+  MessageSquare,
+  Search,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { NotificationCenter } from "./notifications/NotificationCenter";
+import { useFetch } from "@/helpers/hooks";
+import { fetchMeBootstrap, type MeBootstrap } from "@/helpers/backend";
 
 interface TopbarProps {
   onUpgradeClick?: () => void;
@@ -17,6 +28,30 @@ const ROLE_ID_MAP: Record<string, string> = {
   "4": "Manager",
 };
 
+// A connection status pill: green "X Connected" with a check when connected,
+// otherwise a clickable amber "Connect X" that routes to the setup flow.
+const ConnPill: React.FC<{
+  label: string;
+  connected: boolean;
+  icon: React.ReactNode;
+  onConnect: () => void;
+}> = ({ label, connected, icon, onConnect }) =>
+  connected ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#C7E0CE] bg-[#E8F1EA] px-3 py-1 text-xs font-semibold text-[#1F7A52]">
+      <Check className="h-3.5 w-3.5" />
+      {label} Connected
+    </span>
+  ) : (
+    <button
+      type="button"
+      onClick={onConnect}
+      className="inline-flex items-center gap-1.5 rounded-full border border-[#FBD9BE] bg-[#FFF3EA] px-3 py-1 text-xs font-semibold text-[#B9450A] transition hover:bg-[#FDE0C9]"
+    >
+      {icon}
+      Connect {label}
+    </button>
+  );
+
 const Topbar: React.FC<TopbarProps> = ({
   onMenuClick,
   title = "Dashboard",
@@ -26,6 +61,7 @@ const Topbar: React.FC<TopbarProps> = ({
 
   const username = localStorage.getItem("name") || "User";
   const firstLetter = username.charAt(0).toUpperCase();
+  const orgName = localStorage.getItem("org_name") || "";
 
   const roleId = localStorage.getItem("role_id");
   const rawRole =
@@ -35,6 +71,24 @@ const Topbar: React.FC<TopbarProps> = ({
   const roleLabel = rawRole
     ? rawRole.charAt(0).toUpperCase() + rawRole.slice(1).toLowerCase()
     : "Member";
+  const roleLine = orgName ? `${roleLabel} · ${orgName}` : roleLabel;
+
+  // Channel connection state for the two status pills. Shares the ["me_bootstrap"]
+  // query key with the dashboard, so React Query serves it from cache (no extra
+  // request on the dashboard; one cheap request elsewhere).
+  const hasToken = Boolean(localStorage.getItem("token"));
+  const { data: meBootstrap } = useFetch<MeBootstrap>(
+    ["me_bootstrap"],
+    () => fetchMeBootstrap(),
+    {},
+    { enabled: hasToken, staleTime: 1000 * 60 * 2 },
+  );
+  const emailConnected = Boolean(
+    (meBootstrap?.channels?.email as { connected?: boolean } | undefined)?.connected,
+  );
+  const smsConnected = Boolean(meBootstrap?.phone_number?.phone_number);
+  const plan = (meBootstrap?.billing as { plan?: string } | null | undefined)?.plan ?? null;
+  const hasSmsAccess = Boolean(plan) && plan !== "free_channel";
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 h-16 border-b border-[#EAEAEA] bg-white">
@@ -55,8 +109,8 @@ const Topbar: React.FC<TopbarProps> = ({
         </button>
 
         <div className="flex min-w-0 flex-1 items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
-          {/* Left - menu + page title */}
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
+          {/* Left - menu + breadcrumb (home > title) */}
+          <div className="flex min-w-0 items-center gap-1.5">
             {onMenuClick && (
               <button
                 type="button"
@@ -69,9 +123,20 @@ const Topbar: React.FC<TopbarProps> = ({
                 <Menu className="h-5 w-5" />
               </button>
             )}
-            <h1 className="hidden min-w-0 truncate text-base font-bold tracking-tight text-[#101828] sm:block md:text-lg">
-              {title}
-            </h1>
+            <nav className="hidden min-w-0 items-center gap-1.5 sm:flex" aria-label="Breadcrumb">
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
+                aria-label="Dashboard home"
+                className="shrink-0 rounded-md p-1 text-[#98A2B3] transition hover:bg-[#F2F4F7] hover:text-[#475467]"
+              >
+                <Home className="h-4 w-4" />
+              </button>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#CDD3DD]" />
+              <span className="min-w-0 truncate text-base font-bold tracking-tight text-[#101828] md:text-lg">
+                {title}
+              </span>
+            </nav>
           </div>
 
           {/* Center - search */}
@@ -90,8 +155,23 @@ const Topbar: React.FC<TopbarProps> = ({
             </div>
           </form>
 
-          {/* Right - notifications + user */}
+          {/* Right - connection pills + notifications + user */}
           <div className="flex shrink-0 items-center gap-1 sm:gap-2 md:gap-3">
+            <div className="hidden items-center gap-2 xl:flex">
+              <ConnPill
+                label="Email"
+                connected={emailConnected}
+                icon={<Mail className="h-3.5 w-3.5" />}
+                onConnect={() => navigate("/connect-email")}
+              />
+              <ConnPill
+                label="SMS"
+                connected={smsConnected}
+                icon={<MessageSquare className="h-3.5 w-3.5" />}
+                onConnect={() => navigate(hasSmsAccess ? "/connect-phone" : "/upgrade")}
+              />
+            </div>
+
             <NotificationCenter />
 
             <button
@@ -108,7 +188,7 @@ const Topbar: React.FC<TopbarProps> = ({
                   {username}
                 </span>
                 <span className="block truncate text-xs text-[#667085]">
-                  {roleLabel}
+                  {roleLine}
                 </span>
               </span>
               <ChevronDown className="hidden h-4 w-4 shrink-0 text-[#667085] sm:block" />

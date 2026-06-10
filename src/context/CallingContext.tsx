@@ -90,6 +90,13 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
   const telnyxRef = useRef<TelnyxRTC | null>(null);
   const socketRef = useRef<WcSocket | null>(null);
   const sdkPendingByCallIdRef = useRef<Map<string, SdkCall>>(new Map());
+  // Telnyx reconnect plumbing: without it, one socket drop (laptop sleep,
+  // network blip, token expiry) leaves a dead client and inbound calls can
+  // never ring the browser again until a full page reload.
+  const telnyxReadyRef = useRef(false);
+  const telnyxReconnectAttemptRef = useRef(0);
+  const telnyxReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleTelnyxReconnectRef = useRef<() => void>(() => {});
 
   const [ready, setReady] = useState(false);
   const [telnyxReady, setTelnyxReady] = useState(false);
@@ -106,12 +113,18 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
 
   const tearDownTelnyx = useCallback(() => {
     clearRemoteAudio();
+    if (telnyxReconnectTimerRef.current) {
+      clearTimeout(telnyxReconnectTimerRef.current);
+      telnyxReconnectTimerRef.current = null;
+    }
+    telnyxReconnectAttemptRef.current = 0;
     try {
       telnyxRef.current?.disconnect();
     } catch {
       /* noop */
     }
     telnyxRef.current = null;
+    telnyxReadyRef.current = false;
     setTelnyxReady(false);
   }, []);
 
@@ -145,11 +158,21 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       });
       client.remoteElement = TELNYX_REMOTE_AUDIO_ELEMENT_ID;
 
-      client.on("telnyx.ready", () => setTelnyxReady(true));
+      client.on("telnyx.ready", () => {
+        telnyxReadyRef.current = true;
+        telnyxReconnectAttemptRef.current = 0;
+        setTelnyxReady(true);
+      });
       client.on("telnyx.error", (err: unknown) => {
         console.warn("[calling] telnyx.error", err);
       });
-      client.on("telnyx.socket.close", () => setTelnyxReady(false));
+      client.on("telnyx.socket.close", () => {
+        telnyxReadyRef.current = false;
+        setTelnyxReady(false);
+        // Re-register with a FRESH token - a dead client means inbound calls
+        // can't ring this browser.
+        scheduleTelnyxReconnectRef.current();
+      });
 
       // The SDK fires this for both inbound invites and our own outbound
       // call state changes.
@@ -227,8 +250,59 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       await client.connect();
     } catch (err) {
       console.warn("[calling] telnyx init failed", err);
+      // Token fetch / connect failed (offline, expired session blip...) -
+      // retry with backoff instead of staying dead.
+      scheduleTelnyxReconnectRef.current();
     }
   }, []);
+
+  // Reconnect with exponential backoff (2s -> 30s cap). Tears down the dead
+  // client so initTelnyx fetches a fresh login token. Kept in a ref so the
+  // socket-close handler (created inside initTelnyx) can reach it.
+  const scheduleTelnyxReconnect = useCallback(() => {
+    if (!sessionActiveRef.current) return;
+    if (telnyxReconnectTimerRef.current) return; // already scheduled
+    const attempt = telnyxReconnectAttemptRef.current++;
+    const delay = Math.min(30_000, 2_000 * 2 ** Math.min(attempt, 4));
+    telnyxReconnectTimerRef.current = setTimeout(() => {
+      telnyxReconnectTimerRef.current = null;
+      if (!sessionActiveRef.current || telnyxReadyRef.current) return;
+      try {
+        telnyxRef.current?.disconnect();
+      } catch {
+        /* noop */
+      }
+      telnyxRef.current = null;
+      void initTelnyx();
+    }, delay);
+  }, [initTelnyx]);
+  useEffect(() => {
+    scheduleTelnyxReconnectRef.current = scheduleTelnyxReconnect;
+  }, [scheduleTelnyxReconnect]);
+
+  // Waking a laptop / returning to the tab: if the calling client died while
+  // the tab was hidden, reconnect immediately so inbound calls can ring.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!sessionActiveRef.current || telnyxReadyRef.current) return;
+      if (telnyxReconnectTimerRef.current) {
+        clearTimeout(telnyxReconnectTimerRef.current);
+        telnyxReconnectTimerRef.current = null;
+      }
+      telnyxReconnectAttemptRef.current = 0;
+      try {
+        telnyxRef.current?.disconnect();
+      } catch {
+        /* noop */
+      }
+      telnyxRef.current = null;
+      void initTelnyx();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [initTelnyx]);
 
   // ---------------------------------------------------------------------------
   // Socket.IO lifecycle

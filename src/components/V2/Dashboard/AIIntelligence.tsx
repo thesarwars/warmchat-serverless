@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { humanizeTaskText } from "@/utils/humanizeTime";
 
 type Tone = "orange" | "violet" | "blue" | "amber";
 
@@ -121,7 +122,7 @@ const AIIntelligence: React.FC<AIIntelligenceProps> = ({ data, isLoading }) => {
                   </span>
                   <span className="text-[13px] font-semibold text-[#211a14]">{it.lead_name || "Lead"}</span>
                 </div>
-                <p className="text-[13px] leading-snug text-[#463b31]">{it.description || it.title}</p>
+                <p className="text-[13px] leading-snug text-[#463b31]">{humanizeTaskText(it.description || it.title)}</p>
                 <button
                   type="button"
                   onClick={() => navigate(link)}

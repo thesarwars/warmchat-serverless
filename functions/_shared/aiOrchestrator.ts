@@ -608,6 +608,16 @@ async function runAgentLoop(
     lead.id,
   );
 
+  // Lead tags (set by the agent or at import). The AI reads them to tune its
+  // TONE/approach - not to re-ask facts. Imported lists often carry segment
+  // labels ("VIP", "Past Client", "Cold", "Investor") that should shape voice.
+  const tagRows = await queryAll<{ name: string }>(
+    env.D1DB,
+    `SELECT t.name FROM lead_tags lt JOIN tags t ON t.id = lt.tag_id WHERE lt.lead_id = ? ORDER BY t.name`,
+    lead.id,
+  );
+  const leadTags = tagRows.map((r) => r.name).filter(Boolean);
+
   const base = await buildAgentSystemPrompt(env, orgId, userId, "inbound");
   const cfg = await getAvailability(env, orgId, lead.owner_id ?? userId);
   const availLine = cfg.enabled
@@ -632,7 +642,10 @@ async function runAgentLoop(
 
   // base (buildAgentSystemPrompt) already carries the playbook, the tool guide,
   // and the deal pipelines. Here we only add the dynamic, per-lead context.
-  const system = `${base}\n\nCHANNEL: ${channelLine}\n\nLEAD PROFILE (already known - do not re-ask):\n${profileRow ? profileBlock(profileRow) : "(unknown)"}\n\nAGENT BOOKING AVAILABILITY: ${availLine}\n\nCURRENT TIME (UTC): ${nowIso()}`;
+  const tagsLine = leadTags.length
+    ? `\n\nLEAD TAGS (labels set by the agent or at import - use them to tune your TONE and approach, NOT to re-ask facts. Examples: "VIP"/"Past Client" -> warm & familiar; "Hot"/"Urgent" -> prompt, action-oriented; "Cold"/"Nurture" -> gentle, low-pressure; "Investor" -> numbers/ROI-focused): ${leadTags.join(", ")}`
+    : "";
+  const system = `${base}\n\nCHANNEL: ${channelLine}\n\nLEAD PROFILE (already known - do not re-ask):\n${profileRow ? profileBlock(profileRow) : "(unknown)"}${tagsLine}\n\nAGENT BOOKING AVAILABILITY: ${availLine}\n\nCURRENT TIME (UTC): ${nowIso()}`;
 
   const history = channel === "email"
     ? await loadEmailHistory(env, lead.id)

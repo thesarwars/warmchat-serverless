@@ -60,6 +60,7 @@ import AddLeadCampaignModal, {
 // modal for leads, mirrored by the inbox's edit flow.
 import DeleteLeadModal from "./components/DeleteLeadModal";
 import InlinePillSelect from "./components/InlinePillSelect";
+import LeadDetailPanel from "./components/LeadDetailPanel";
 import { useLeadImport } from "./hooks/useLeadImport";
 import {
   AI_STATUS_OPTIONS,
@@ -162,6 +163,16 @@ export default function Leads() {
 
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [selectedAiLead, setSelectedAiLead] = useState<EditingLead | null>(null);
+
+  // The slide-in lead-detail drawer (spec DetailPanel). Opened by clicking a
+  // lead's name in the table or a card on the Kanban board.
+  const [detailLead, setDetailLead] = useState<EditingLead | null>(null);
+  const openDetail = (lead: EditingLead) => setDetailLead(lead);
+  // Keep the open drawer in sync with the freshest row data after edits.
+  const detailLeadLive = useMemo(
+    () => (detailLead ? contacts.find((c) => c.id === detailLead.id) ?? detailLead : null),
+    [detailLead, contacts],
+  );
 
   const openAiPanel = (lead: EditingLead) => {
     setSelectedAiLead(lead);
@@ -471,8 +482,6 @@ export default function Leads() {
             channel: "sms",
             automation_id: choice.automationId ?? 0,
             inbound_enabled: choice.inboundEnabled,
-            auto_followup_action: choice.action,
-            auto_followup_scheduled_at: choice.scheduledAt,
           }),
         });
         await fetchLeads();
@@ -1167,20 +1176,16 @@ export default function Leads() {
           </button>
         </div>
 
-        {/* FILTER BAR */}
-        <div className="bg-white/70 backdrop-blur rounded-xl border border-gray-100 px-4 py-3 flex flex-col gap-3">
-          {/* Row 1: smart search + view toggle */}
-          <div className="flex flex-wrap gap-3 items-center">
-            {/* PIPELINE / TABLE VIEW TOGGLE */}
-            <div className="flex w-full sm:w-auto items-center gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1">
+        {/* TOOLBAR - view toggle + mini search + spacer + Export, then quick
+            filter chips on a second row (spec wc-toolbar). */}
+        <div className="wc-toolbar">
+          <div className="wc-toolbar-row">
+            {/* Pipeline / Table view toggle */}
+            <div className="wc-viewtoggle">
               <button
                 type="button"
                 onClick={() => setLeadsView("pipeline")}
-                className={`inline-flex flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                  leadsView === "pipeline"
-                    ? "bg-white text-orange-600 shadow-sm"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
+                className={leadsView === "pipeline" ? "is-on" : ""}
               >
                 <LayoutGrid size={16} />
                 Pipeline
@@ -1188,103 +1193,80 @@ export default function Leads() {
               <button
                 type="button"
                 onClick={() => setLeadsView("list")}
-                className={`inline-flex flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                  leadsView === "list"
-                    ? "bg-white text-orange-600 shadow-sm"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
+                className={leadsView === "list" ? "is-on" : ""}
               >
                 <List size={16} />
                 Table
               </button>
             </div>
 
-            {/* SMART SEARCH - one box spanning name, contact, type, status,
-                AI status, source, budget, area + notes (server-side `q`). */}
-            <div className="relative flex-1 min-w-0">
-              <Search
-                size={16}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
+            {/* Mini search - one box spanning name, contact, type, status, AI
+                status, source, budget, area + notes (server-side `q`). */}
+            <div className="wc-minisearch">
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search leads by name, email, phone, type, status, source, area..."
-                className="w-full bg-white py-2.5 pl-9 pr-9 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-200"
-                style={{ borderRadius: 16, border: "1px solid #E8EAF0" }}
+                placeholder="Search leads..."
                 aria-label="Search leads"
               />
-              {loading ? (
-                <Loader2
-                  size={15}
-                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400"
-                />
-              ) : searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600"
-                  aria-label="Clear search"
-                >
+              {searchQuery ? (
+                <button type="button" onClick={() => setSearchQuery("")} aria-label="Clear search">
                   <X size={15} />
                 </button>
               ) : null}
             </div>
 
-            {/* Export + Select all - sit at the right corner of the search. */}
-            <div className="flex items-center gap-2">
+            <div className="wc-toolbar-spacer" />
+
+            {leadsView === "list" && (
               <button
                 type="button"
-                onClick={exportLeadsCsv}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-100"
-                title="Export filtered leads"
+                onClick={toggleSelectAllPage}
+                disabled={loading || pageLeadIds.length === 0}
+                className="wc-ghostbtn disabled:opacity-50"
               >
-                <Download size={16} /> Export
+                <CheckCircle2 size={16} />
+                {allPageSelected ? "Deselect all" : "Select all"}
               </button>
-              {leadsView === "list" && (
-                <button
-                  type="button"
-                  onClick={toggleSelectAllPage}
-                  disabled={loading || pageLeadIds.length === 0}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
-                >
-                  <CheckCircle2 size={16} />
-                  {allPageSelected ? "Deselect all" : "Select all"}
-                </button>
-              )}
-            </div>
+            )}
+            <button
+              type="button"
+              onClick={exportLeadsCsv}
+              className="wc-ghostbtn"
+              title="Export filtered leads"
+            >
+              <Download size={16} /> Export
+            </button>
           </div>
 
-          {/* Row 2: Quick filters */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {QUICK_FILTERS.map((qf) => {
-                const active = quickFilters.includes(qf.id);
-                const iconMap: Record<string, React.ElementType> = {
-                  hot:              Flame,
-                  needs_reply:      Zap,
-                  buyers:           Home,
-                  sellers:          Tag,
-                  ai_active:        Bot,
-                  ai_recommended:   Sparkles,
-                  appointment_set:  CalendarCheck,
-                };
-                const Icon = iconMap[qf.id] ?? Sparkles;
-                return (
-                  <button
-                    key={qf.id}
-                    type="button"
-                    onClick={() => toggleQuickFilter(qf.id)}
-                    className={"wc-qchip" + (active ? " is-on" : "")}
-                  >
-                    <Icon size={13} />
-                    {qf.label}
-                  </button>
-                );
-              })}
-            </div>
-
+          {/* Quick filter chips */}
+          <div className="wc-chips">
+            {QUICK_FILTERS.map((qf) => {
+              const active = quickFilters.includes(qf.id);
+              const iconMap: Record<string, React.ElementType> = {
+                hot:              Flame,
+                needs_reply:      Zap,
+                buyers:           Home,
+                sellers:          Tag,
+                ai_active:        Bot,
+                ai_recommended:   Sparkles,
+                appointment_set:  CalendarCheck,
+              };
+              const Icon = iconMap[qf.id] ?? Sparkles;
+              return (
+                <button
+                  key={qf.id}
+                  type="button"
+                  onClick={() => toggleQuickFilter(qf.id)}
+                  className={"wc-qchip" + (active ? " is-on" : "")}
+                >
+                  <Icon size={13} />
+                  {qf.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1297,7 +1279,8 @@ export default function Leads() {
             orgId={org_id}
             debouncedSearch={debouncedSearch}
             quickFilters={quickFilters}
-            onOpenLead={(lead) => openAiPanel(lead as EditingLead)}
+            activeLeadId={detailLead?.id ?? null}
+            onOpenLead={(lead) => openDetail(lead as EditingLead)}
             onChanged={() => {
               // Keep the Table view + KPIs in sync after a drag-to-restage.
               refreshLeadSummary();
@@ -1398,7 +1381,19 @@ export default function Leads() {
                       return (
                         <tr
                           key={lead.id}
-                          className={`transition hover:bg-orange-50/40 ${
+                          onClick={(e) => {
+                            // Whole row opens the detail panel, except clicks on
+                            // interactive controls (checkbox, inline editors,
+                            // row actions, links).
+                            if (
+                              (e.target as HTMLElement).closest(
+                                'button, a, input, select, textarea, label, [role="button"], .wc-inlsel, .wc-inlsel-menu',
+                              )
+                            )
+                              return;
+                            openDetail(lead);
+                          }}
+                          className={`cursor-pointer transition hover:bg-orange-50/40 ${
                             (aiPanelOpen && selectedAiLead?.id === lead.id) ||
                             searchParams.get("lead") === String(lead.id)
                               ? "bg-orange-50/70"
@@ -1420,8 +1415,8 @@ export default function Leads() {
                           <td className="px-4 py-3">
                             <button
                               type="button"
-                              onClick={() => handleEditLead(lead)}
-                              className="flex items-start gap-2.5 text-left hover:opacity-90"
+                              onClick={() => openDetail(lead)}
+                              className="flex cursor-pointer items-start gap-2.5 text-left hover:opacity-90"
                             >
                               <span
                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-gray-200 to-gray-100 text-[11px] font-semibold uppercase text-gray-700"
@@ -1654,7 +1649,10 @@ export default function Leads() {
                             className="px-4 py-3"
                             style={{ position: "sticky", right: 0, zIndex: 1, background: "#fff", boxShadow: "-6px 0 8px -7px rgba(0,0,0,0.15)" }}
                           >
-                            <div className="flex flex-nowrap items-center gap-1">
+                            {/* 2-col action grid (spec wc-rowacts): AI, edit,
+                                message, star, delete. Same real handlers as
+                                before. */}
+                            <div className="wc-rowacts" style={{ gridTemplateColumns: "repeat(3,28px)" }}>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <button
@@ -1664,11 +1662,12 @@ export default function Leads() {
                                       openAiPanel(lead);
                                     }}
                                     aria-label="Open AI Agent"
-                                    className={`inline-flex items-center justify-center rounded-lg border p-1.5 transition ${
+                                    className="wc-rowact"
+                                    style={
                                       aiPanelOpen && selectedAiLead?.id === lead.id
-                                        ? "border-orange-400 bg-orange-500 text-white"
-                                        : "border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100"
-                                    }`}
+                                        ? { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" }
+                                        : undefined
+                                    }
                                   >
                                     <Sparkles size={14} />
                                   </button>
@@ -1681,7 +1680,7 @@ export default function Leads() {
                                     type="button"
                                     onClick={() => openEditLeadFromDetails(lead)}
                                     aria-label="Edit lead"
-                                    className="inline-flex items-center justify-center rounded-lg border border-orange-300 bg-orange-50 p-1.5 text-orange-700 hover:bg-orange-100"
+                                    className="wc-rowact"
                                   >
                                     <Pencil size={14} />
                                   </button>
@@ -1694,7 +1693,7 @@ export default function Leads() {
                                     type="button"
                                     onClick={() => openLeadInInbox(lead.id)}
                                     aria-label="Send message"
-                                    className="inline-flex items-center justify-center rounded-lg border border-orange-400 bg-white p-1.5 text-orange-600 hover:bg-orange-50"
+                                    className="wc-rowact"
                                   >
                                     <MessageSquare size={14} />
                                   </button>
@@ -1710,17 +1709,9 @@ export default function Leads() {
                                       handleToggleHot(lead);
                                     }}
                                     aria-label={hotRow ? "Hot Prospect - click to remove" : "Mark as Hot Prospect"}
-                                    className={
-                                      hotRow
-                                        ? "inline-flex items-center justify-center rounded-lg border border-orange-500 bg-orange-500 p-1.5 text-white shadow-sm hover:bg-orange-600"
-                                        : "inline-flex items-center justify-center rounded-lg border border-orange-300 bg-orange-50 p-1.5 text-orange-700 hover:bg-orange-100"
-                                    }
+                                    className={`wc-rowact is-star${hotRow ? " is-on" : ""}`}
                                   >
-                                    <Star
-                                      size={14}
-                                      className={hotRow ? "text-white" : "text-orange-500"}
-                                      fill={hotRow ? "currentColor" : "none"}
-                                    />
+                                    <Star size={14} fill={hotRow ? "currentColor" : "none"} />
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
@@ -1736,7 +1727,8 @@ export default function Leads() {
                                       openDeleteConfirm([lead.id]);
                                     }}
                                     aria-label="Delete lead"
-                                    className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white p-1.5 text-red-600 hover:bg-red-50 hover:border-red-300"
+                                    className="wc-rowact"
+                                    style={{ borderColor: "#FCA5A5", color: "#DC2626" }}
                                   >
                                     <Trash2 size={14} />
                                   </button>
@@ -1831,6 +1823,26 @@ export default function Leads() {
             </div>
           </div>
         )}
+
+        {/* SLIDE-IN LEAD DETAIL DRAWER (spec DetailPanel) - opened by clicking a
+            lead name in the table or a card on the Kanban board. Wired to the
+            page's real single-field update, message-to-inbox, full edit modal,
+            and AI assistant handlers. */}
+        {detailLeadLive && (
+          <LeadDetailPanel
+            lead={detailLeadLive}
+            apiBase={API_BASE}
+            token={token}
+            onClose={() => setDetailLead(null)}
+            onUpdateField={updateLeadField}
+            onMessage={(id) => openLeadInInbox(id)}
+            onEdit={(lead) => {
+              setDetailLead(null);
+              handleEditLead(lead);
+            }}
+            onOpenAi={(lead) => openAiPanel(lead)}
+          />
+        )}
       </div>
 
       <ImportLeadsModal
@@ -1862,6 +1874,12 @@ export default function Leads() {
         setImportDefaultStage={leadImport.setImportDefaultStage}
         importInboundEnabled={leadImport.importInboundEnabled}
         setImportInboundEnabled={leadImport.setImportInboundEnabled}
+        importQualificationEnabled={leadImport.importQualificationEnabled}
+        setImportQualificationEnabled={leadImport.setImportQualificationEnabled}
+        importHumanOnly={leadImport.importHumanOnly}
+        setImportHumanOnly={leadImport.setImportHumanOnly}
+        importAutomationId={leadImport.importAutomationId}
+        setImportAutomationId={leadImport.setImportAutomationId}
         importAiApplying={leadImport.importAiApplying}
         message2={leadImport.message2}
         importBusy={leadImport.importBusy}

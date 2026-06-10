@@ -149,9 +149,9 @@ export function DesktopNotifPrompt() {
             </p>
           )}
           {cooldown && !blocked && (
-            <p className="mt-1 text-[11px] text-orange-900/70">
-              You closed the browser prompt. Click again when you're ready to
-              choose.
+            <p className="mt-1 text-[11px] leading-snug text-orange-900/80">
+              No prompt appeared - your browser hides it after a dismissal. Click
+              Enable again, and if nothing shows, reset it: {notificationUnblockSteps()}
             </p>
           )}
           <div className="mt-2 flex gap-2">
@@ -165,23 +165,31 @@ export function DesktopNotifPrompt() {
                 {enableLabel}
               </button>
             )}
-            <button
-              type="button"
-              onClick={dismiss}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-orange-900/80 hover:bg-orange-100"
-            >
-              {blocked ? "Got it" : "Not now"}
-            </button>
+            {/* Only a blocked user can dismiss - they can't enable from here and
+                must unblock in browser settings. While the permission is still
+                enable-able, the prompt stays until they turn notifications on
+                (agents rely on notifications). */}
+            {blocked && (
+              <button
+                type="button"
+                onClick={dismiss}
+                className="rounded-md px-3 py-1.5 text-xs font-medium text-orange-900/80 hover:bg-orange-100"
+              >
+                Got it
+              </button>
+            )}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={dismiss}
-          className="rounded p-1 text-orange-700 hover:bg-orange-100"
-          aria-label="Dismiss"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        {blocked && (
+          <button
+            type="button"
+            onClick={dismiss}
+            className="rounded p-1 text-orange-700 hover:bg-orange-100"
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );

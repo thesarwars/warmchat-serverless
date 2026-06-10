@@ -318,7 +318,7 @@ export default function AddLeadModal({
                   }`}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="inline-flex items-center rounded-full bg-amber-200 px-1.5 py-px text-[9px] font-bold uppercase text-amber-900">
+                    <span className="inline-flex items-center rounded-full border border-amber-300 bg-white px-1.5 py-px text-[9px] font-bold uppercase text-amber-800">
                       Action required
                     </span>
                     <span className="text-[11px] font-semibold text-amber-900">
@@ -686,52 +686,6 @@ export default function AddLeadModal({
               >
                 {form.sms_notifications_enabled ? "On" : "Off"}
               </button>
-            </div>
-          </div>
-
-          {/* TAGS */}
-          <div className="mb-3">
-            <div
-              className="flex flex-wrap gap-2 border rounded px-2 py-1 focus-within:ring-2 focus-within:ring-blue-400 cursor-text"
-              onClick={() => document.getElementById("addTagsInput")?.focus()}
-            >
-              {(form.tagsArray || []).map((tag: string, index: number) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm"
-                >
-                  <span>{tag}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated = [...(form.tagsArray || [])];
-                      updated.splice(index, 1);
-                      set({ tagsArray: updated, tags: updated.join(",") });
-                    }}
-                    className="text-blue-500 hover:text-blue-800"
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
-              <input
-                id="addTagsInput"
-                type="text"
-                className="flex-1 border-none focus:ring-0 p-1 outline-none"
-                placeholder="Type Tag and press Enter"
-                maxLength={LEAD_TEXT_LIMITS.tag}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") {
-                    e.preventDefault();
-                    const value = (e.currentTarget.value || "").trim().slice(0, LEAD_TEXT_LIMITS.tag);
-                    if (value && !(form.tagsArray || []).includes(value)) {
-                      const updated = [...(form.tagsArray || []), value];
-                      set({ tagsArray: updated, tags: updated.join(",") });
-                    }
-                    e.currentTarget.value = "";
-                  }
-                }}
-              />
             </div>
           </div>
 

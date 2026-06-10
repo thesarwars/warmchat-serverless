@@ -28,14 +28,15 @@ const FIELD_DEFS: { key: string; label: string; hint: string }[] = [
   { key: "first_name", label: "First Name", hint: "ONLY a first/given name (e.g. 'John'). Use this - not 'name' - whenever the header or values are just a first name" },
   { key: "last_name", label: "Last Name", hint: "ONLY a last/family/surname (e.g. 'Smith'). Use this - not 'name' - whenever the header or values are just a last name" },
   { key: "email", label: "Email", hint: "an email address" },
-  { key: "phone", label: "Phone", hint: "a phone / mobile number" },
+  { key: "phone", label: "Phone", hint: "a phone / mobile number. A column of 10-digit numbers (or 11 digits starting with 1), formatted OR unformatted, is a PHONE - e.g. '2603565735', '(555) 123-4567', '+15551234567'. Map it here even when the digits have no punctuation" },
   { key: "contact", label: "Phone or Email (single column)", hint: "use ONLY when ONE column holds EITHER a phone OR an email interchangeably; otherwise prefer the separate email/phone fields" },
-  { key: "notes", label: "Notes", hint: "free-text notes, comments, or a description" },
+  { key: "notes", label: "Notes", hint: "free-text notes, comments, or a description (full sentences/phrases). NOT a city, state, ZIP, or single code" },
   { key: "company", label: "Company", hint: "a company or brokerage name" },
-  { key: "property_address", label: "Property Address", hint: "a street or property address" },
-  { key: "status", label: "Stage", hint: "the pipeline stage / lead status" },
-  { key: "source", label: "Source", hint: "the lead source (e.g. Zillow, Referral, Website, Open House)" },
-  { key: "tags", label: "Tags", hint: "labels or tags" },
+  { key: "property_address", label: "Property Address", hint: "a STREET address (number + street, e.g. '261 W Market St')" },
+  { key: "area", label: "Area", hint: "the CITY, neighborhood, or region the lead is interested in (e.g. 'Huntington', 'Burbank', 'Yonkers', 'Dallas'). A column of US CITY names maps HERE" },
+  { key: "status", label: "Stage", hint: "the pipeline STAGE. Values look like: New Lead, Contacted, Engaged, Qualified, Appointment Set, Active Client, Under Contract, Closed, Lost. NEVER map a US state abbreviation (NY, CA, TX, WA) here" },
+  { key: "source", label: "Source", hint: "the lead SOURCE. Values look like: Zillow, Realtor.com, Open House, Cold Calling, Website, Google Ads, Facebook Ads, Instagram, Referral. NEVER map ZIP codes, phone numbers, or addresses here" },
+  { key: "tags", label: "Tags", hint: "free-form labels/segments (e.g. 'VIP', 'q2-batch', 'cold-outreach'). NEVER map a country code ('US'), state, or ZIP here" },
   { key: "timezone", label: "Time Zone", hint: "an IANA or US timezone" },
   { key: "sms_consent", label: "SMS Consent", hint: "a per-row opt-in / opt-out / consent status" },
 ];
@@ -125,14 +126,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const system = `You map spreadsheet columns to CRM lead fields for a real estate import tool.
 You are given, for each file column, its header name and a few example values sampled from the data.
 Rules:
-- Map EVERY column that clearly corresponds to a lead field. Be thorough - it is a mistake to leave an obvious column (like "source", "email", or "tags") unmapped.
-- Use BOTH signals: the header name AND the example values. The header name alone is often enough (a column headed "source" is the source field even if its examples are blank).
-- "examples" may be empty when a column is mostly blank in the sampled rows. An empty examples list does NOT mean the column is useless - map it from its header name (e.g. a blank "email" column is still the email field).
-- A column of values like "(555) 123-4567" is a phone even if its header is generic; an "a@b.com" value is an email.
-- Each file column may be used for at most one field. Pick the single best field for it.
-- Prefer separate "email" and "phone" over "contact". Use "contact" only when one column genuinely mixes emails and phones.
-- Name columns: map a "First Name" column to first_name and a "Last Name" column to last_name. Only use "name" for a single column that contains the full name (first and last together). Never map a first-name-only or last-name-only column to "name".
-- Only leave a field out when NO column matches it by header or values. Do not invent a mapping for a field that has no matching column.
+- Map each column to the lead field its example VALUES match. Most files have several OBVIOUS matches - map those CONFIDENTLY. Use these value signatures:
+  - a person's GIVEN name (e.g. "RICK", "DAVID") -> first_name; a SURNAME (e.g. "MEADOWS", "KLATT") -> last_name; a full "First Last" in one column -> name
+  - an email address (a@b.com) -> email
+  - a 10-digit number, or 11 digits starting with 1, formatted OR unformatted (e.g. "2603565735", "(555) 123-4567", "+15551234567") -> phone
+  - a STREET address (street number + street name, e.g. "261 W MARKET ST") -> property_address
+  - a US CITY / town name (e.g. "HUNTINGTON", "DALLAS", "YONKERS") -> area
+  - pipeline-stage words (New Lead, Contacted, Engaged, Qualified, Appointment Set, Closed...) -> status
+  - a recognizable lead source (Zillow, Realtor.com, Open House, Cold Calling, Website, Google/Facebook/Instagram Ads, Referral) -> source
+  - free-text comments / sentences -> notes
+- Headers are often generic (A, B, C...). Then rely ENTIRELY on the example values, and STILL map every column whose values clearly match a field - do not skip an obvious phone/city/name/address just because its header is a letter.
+- Leave a column UNMAPPED only when its values match NONE of the fields. Columns that usually have no matching field (leave them out, do NOT force them): US STATE abbreviations (IN, WA, NY, TX, NJ), ZIP/postal codes (5-digit "90210" or 5+4 "46750-2660"), COUNTRY codes (US, USA), short record-ID numbers (5-6 digits), and all-blank / "NA" columns. NEVER force a state into "status", a ZIP into "source", or a country into "tags".
+- "examples" may be empty when a column is mostly blank - then map from the header name if it is meaningful, else leave it unmapped.
+- Each file column maps to at most one field; pick the single best field. Prefer separate "email"/"phone" over "contact". Use first_name/last_name (not "name") for single-name columns.
 Lead fields:
 ${fieldLines}`;
 

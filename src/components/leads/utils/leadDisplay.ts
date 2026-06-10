@@ -61,6 +61,17 @@ export const scoreColor = (score: number): { bar: string; text: string } => {
   return { bar: "bg-emerald-500", text: "text-emerald-600" };
 };
 
+/**
+ * Hex fill color for the spec's `.wc-score-fill` / `.wc-score-num` (inline
+ * style, since those classes carry no color). Matches the spec thresholds:
+ * >=80 green, >=55 orange, else grey. Used by the Kanban cards + DetailPanel.
+ */
+export const scoreFillColor = (score: number): string => {
+  if (score >= 80) return "#16A34A";
+  if (score >= 55) return "#F97316";
+  return "#A8AEBD";
+};
+
 /** Normalize lead_type from any backend variation. Falls back to "Unknown". */
 export const getLeadType = (lead: Record<string, unknown>): string => {
   const raw = String(lead?.lead_type ?? "").trim().toLowerCase();
@@ -169,3 +180,29 @@ export const leadInitials = (name?: string | null) => {
 /** A lead is hot when its stage-derived score is above the hot threshold. */
 export const isHotStage = (lead: Record<string, unknown>) =>
   stageScore(lead) > HOT_SCORE_THRESHOLD;
+
+/**
+ * Build the AI Activity timeline for the DetailPanel (spec section 8 #10).
+ * Derived from the lead's stage progression + any captured qualification, so it
+ * reflects real lead data (no hardcoded sample). Earliest event first.
+ */
+export const activityFor = (lead: Record<string, unknown>): string[] => {
+  const stage = getStageValue(lead);
+  const idx = STAGE_OPTIONS.indexOf(stage as (typeof STAGE_OPTIONS)[number]);
+  const out: string[] = [];
+
+  // New Lead and beyond: the AI has at least acknowledged the lead.
+  if (idx >= 0) out.push("Lead added to pipeline");
+  if (idx >= STAGE_OPTIONS.indexOf("Contacted")) out.push("AI responded instantly");
+
+  const budget = lead.price_range ?? lead.budget;
+  if (budget && String(budget).trim()) out.push(`Budget captured — ${String(budget)}`);
+  if (lead.area && String(lead.area).trim()) out.push(`Area captured — ${String(lead.area)}`);
+
+  if (idx >= STAGE_OPTIONS.indexOf("Qualified")) out.push("Qualified automatically");
+  if (idx >= STAGE_OPTIONS.indexOf("Appointment Set")) out.push("Appointment booked");
+  if (idx >= STAGE_OPTIONS.indexOf("Under Contract")) out.push("Moved under contract");
+  if (stage === "Closed") out.push("Deal closed");
+
+  return out;
+};

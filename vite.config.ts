@@ -17,7 +17,10 @@ const stampSwBuildVersion = (): Plugin => ({
     if (!fs.existsSync(swPath)) return;
     const version = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const src = fs.readFileSync(swPath, 'utf8');
-    fs.writeFileSync(swPath, src.replace(/__BUILD_VERSION__/g, version));
+    // Replace ONLY the quoted placeholder, so the version always lands inside a
+    // string literal. A bare /__BUILD_VERSION__/g replace would also rewrite any
+    // identifier use of the token into invalid JS (which broke SW evaluation).
+    fs.writeFileSync(swPath, src.replace(/"__BUILD_VERSION__"/g, JSON.stringify(version)));
   },
 });
 

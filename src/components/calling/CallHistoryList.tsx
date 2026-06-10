@@ -32,7 +32,7 @@ function CallRow({ call }: { call: CallSummary }) {
     ? "text-red-600"
     : isInbound
       ? "text-emerald-600"
-      : "text-blue-600";
+      : "text-sky-400"; // outbound - light "nimbus" blue
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm">
       <Icon className={`h-4 w-4 ${color}`} />

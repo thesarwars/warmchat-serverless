@@ -503,7 +503,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return [
       pr.name ?? null, pr.first_name ?? null, pr.last_name ?? null,
       pr.email ?? null, pr.phone ?? null, pr.company ?? null,
-      pr.status ?? defaultStage ?? "New", pr.source ?? null,
+      // Bulk-imported leads default to source "Imported" when the file has no
+      // mapped source column (single manual adds default to "Manual Add").
+      pr.status ?? defaultStage ?? "New", pr.source ?? "Imported",
       pr.property_address ?? null, pr.area ?? null, pr.price_range ?? null,
       numOrNull(pr.estimated_price), pr.notes ?? null, pr.lead_type ?? null, pr.intent ?? null,
       p.importTimezone, p.importTimezone ? "import" : null, p.resolvedConsent,

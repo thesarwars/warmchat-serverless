@@ -7,7 +7,10 @@
 // distinct SW - which is what kicks the "Update available" toast on
 // installed PWAs (iOS / Android / desktop).
 const BUILD_VERSION = "__BUILD_VERSION__";
-self.__BUILD_VERSION__ = BUILD_VERSION;
+// NOTE: keep the "__BUILD_VERSION__" token ONLY inside the quoted string above.
+// The build stamp replaces that token, and using it as a bare property name here
+// (e.g. self.__BUILD_VERSION__) would be rewritten into invalid JS.
+self.WC_BUILD_VERSION = BUILD_VERSION;
 
 self.addEventListener("install", () => {
   self.skipWaiting();

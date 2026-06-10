@@ -121,42 +121,62 @@ function cap(s: string): string {
 }
 
 /**
- * Deterministic one-line lead summary built from the structured fields, matching
- * the example in Smart-Filters-Update-Automatically.md ("Buyer interested in
- * Clovis. Budget $550k. Pre-approved. Looking within 60 days."). No LLM, so it
- * never invents facts and costs nothing. Returns null when there is nothing to
- * summarize yet.
+ * Deterministic NARRATIVE lead summary built from the structured fields - reads
+ * like a short profile paragraph ("John is looking for a 3-bedroom home in
+ * Burbank. Budget $850k-$950k, ready within 60 days, and pre-approved. Last
+ * asked: \"Can I see the home Saturday?\""). No LLM, so it never invents facts
+ * and costs nothing. Returns null when there is nothing to summarize yet.
  */
-function buildLeadSummary(l: IntelLead): string | null {
-  const parts: string[] = [];
-  const type = knownType(l) ? cap(String(l.lead_type)) : null;
-  if (type && l.area) parts.push(`${type} interested in ${l.area}`);
-  else if (type) parts.push(`${type} lead`);
-  else if (l.area) parts.push(`Interested in ${l.area}`);
+function buildLeadSummary(l: IntelLead, lastInbound?: string | null): string | null {
+  const sentences: string[] = [];
+  const who = (l.first_name || (l.name || "").trim().split(/\s+/)[0] || "").trim();
+  const subject = who || (knownType(l) ? `This ${String(l.lead_type)}` : "This lead");
 
-  if (l.price_range) parts.push(`Budget ${l.price_range}`);
-  else if (l.estimated_price) parts.push(`Budget ~$${Math.round(l.estimated_price).toLocaleString("en-US")}`);
-
-  const beds = l.bedrooms ? `${l.bedrooms}bd` : "";
-  const baths = l.bathrooms ? `${l.bathrooms}ba` : "";
-  const ptype = l.property_type || "";
-  const propline = [beds, baths, ptype].filter(Boolean).join(" ");
-  if (propline) parts.push(propline);
-
-  if (l.pre_approved === 1) parts.push("Pre-approved");
-  else if (l.financing_status && l.financing_status !== "pre_approved") {
-    parts.push(cap(l.financing_status.replace(/_/g, " ")));
+  // Sentence 1 - who they are + what they want, in plain English.
+  const beds = l.bedrooms ? `${l.bedrooms}-bedroom ` : "";
+  const ptype = (l.property_type || "home").toLowerCase();
+  if (l.lead_type === "seller") {
+    const prop = l.property_address
+      ? `their property at ${l.property_address}`
+      : l.area
+        ? `their ${ptype} in ${l.area}`
+        : `their ${ptype}`;
+    sentences.push(`${subject} is looking to sell ${prop}`);
+  } else if (knownType(l) || l.area || beds) {
+    const where = l.area ? ` in ${l.area}` : "";
+    sentences.push(`${subject} is looking for a ${beds}${ptype}${where}`);
   }
 
-  if (l.timeline) parts.push(`Timeline ${l.timeline}`);
-  if (l.lead_type === "seller" && l.property_address) parts.push(`Property ${l.property_address}`);
-  if (l.occupancy_status) parts.push(cap(l.occupancy_status));
-  if (l.seller_price_expectations) parts.push(`Expects ${l.seller_price_expectations}`);
-  if (l.motivation) parts.push(`Motivation: ${l.motivation}`);
-  if (l.appointment_booked) parts.push("Appointment booked");
+  // Sentence 2 - the qualification facts, joined naturally.
+  const facts: string[] = [];
+  if (l.price_range) facts.push(`Budget ${l.price_range}`);
+  else if (l.estimated_price) facts.push(`Budget ~$${Math.round(l.estimated_price).toLocaleString("en-US")}`);
+  if (l.timeline) facts.push(`ready ${l.timeline.toLowerCase()}`);
+  if (l.pre_approved === 1) facts.push("pre-approved");
+  else if (l.financing_status && l.financing_status !== "pre_approved") {
+    facts.push(l.financing_status.replace(/_/g, " ").toLowerCase());
+  }
+  if (l.lead_type === "seller" && l.seller_price_expectations) facts.push(`expects ${l.seller_price_expectations}`);
+  if (l.occupancy_status) facts.push(l.occupancy_status.replace(/_/g, " ").toLowerCase());
+  if (facts.length) {
+    const last = facts.pop() as string;
+    sentences.push(cap(facts.length ? `${facts.join(", ")}, and ${last}` : last));
+  }
 
-  if (!parts.length) return null;
-  return parts.join(". ") + ".";
+  // Sentence 3 - motivation / appointment, when known.
+  if (l.motivation) sentences.push(`Motivation: ${l.motivation}`);
+  if (l.appointment_booked) sentences.push("An appointment is on the calendar");
+
+  // Sentence 4 - what they last asked, quoted from their latest inbound message.
+  // Strip any HTML (email bodies) and collapse whitespace before quoting.
+  const ask = (lastInbound || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (ask) {
+    const clipped = ask.length > 90 ? `${ask.slice(0, 87)}...` : ask;
+    sentences.push(`Last asked: "${clipped}"`);
+  }
+
+  if (!sentences.length) return null;
+  return sentences.map((s) => (s.endsWith(".") || s.endsWith("\"") ? s : `${s}.`)).join(" ");
 }
 
 /**
@@ -183,7 +203,45 @@ export async function refreshLeadIntelligence(env: Env, leadId: number): Promise
 
   const score = computeLeadScore(lead);
   const action = computeNextBestAction(lead);
-  const summary = buildLeadSummary(lead);
+  // Latest inbound message (SMS or email, whichever is newer) feeds the
+  // "Last asked: ..." line of the summary. Best-effort - a miss just omits it.
+  let lastInbound: string | null = null;
+  try {
+    const sms = await queryFirst<{ body: string | null; created_at: string | null }>(
+      env.D1DB,
+      `SELECT m.body, m.created_at
+         FROM sms_message m
+         JOIN sms_conversation c ON m.conversation_id = c.id
+         JOIN sms_contact sc ON c.contact_id = sc.id
+         JOIN lead l ON l.id = ?
+        WHERE c.org_id = l.org_id AND m.direction = 'inbound'
+          AND l.phone IS NOT NULL AND length(replace(l.phone, '+', '')) >= 10
+          AND substr(replace(replace(replace(replace(sc.phone_number_e164,'-',''),' ',''),'(',''),')',''), -10)
+            = substr(replace(replace(replace(replace(l.phone,'-',''),' ',''),'(',''),')',''), -10)
+        ORDER BY m.created_at DESC LIMIT 1`,
+      leadId,
+    );
+    const email = await queryFirst<{ body: string | null; created_at: string | null }>(
+      env.D1DB,
+      `SELECT im.body, COALESCE(im.message_date, im.created_at) AS created_at
+         FROM inbox_messages im
+         JOIN thread t ON im.thread_id = t.id
+         JOIN inbox i ON t.inbox_id = i.id
+         JOIN lead l ON l.id = ?
+        WHERE i.org_id = l.org_id AND im.direction = 'inbound'
+          AND l.email IS NOT NULL AND lower(im.sender_email) = lower(l.email)
+        ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1`,
+      leadId,
+    );
+    const pick =
+      sms && email
+        ? (String(sms.created_at) > String(email.created_at) ? sms : email)
+        : sms || email;
+    lastInbound = pick?.body ?? null;
+  } catch {
+    /* summary simply omits the "Last asked" line */
+  }
+  const summary = buildLeadSummary(lead, lastInbound);
 
   const sets: string[] = [];
   const args: unknown[] = [];

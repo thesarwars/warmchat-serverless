@@ -9,6 +9,7 @@ import { notifyQuotaExceeded } from "../../../../_shared/quotaNotify.ts";
 import { planMinuteLimit } from "../../../../_shared/plans.ts";
 import { isPhoneSuppressed } from "../../../../_shared/suppression.ts";
 import { appendComplianceFooter } from "../../../../_shared/smsCompliance.ts";
+import { createTask } from "../../../../_shared/tasks.ts";
 
 /**
  * POST /api/webhooks/calling/telnyx/status - Telnyx Call Control events.
@@ -311,6 +312,70 @@ async function sendMissedCallTextback(
 }
 
 /**
+ * Missed-call follow-through: a bell/push notification + a call-back task for
+ * the agent. Used by BOTH miss paths - the "nobody to ring" voicemail divert
+ * (which ends COMPLETED, so handleHangup's NO_ANSWER path never sees it) and
+ * the rang-but-unanswered hangup. Idempotent per call via the
+ * MISSED_CALL_LOGGED call_event so the paths never double-log.
+ */
+async function recordMissedCall(
+  env: Env,
+  a: { orgId: number | null; agentId: number | null; leadId: number | null; customerNumber: string | null; callId: string; callControlId: string },
+  now: string,
+): Promise<void> {
+  if (!a.orgId || !a.agentId) return;
+  const already = await queryFirst<{ id: string }>(
+    env.D1DB,
+    `SELECT id FROM call_events WHERE call_id = ? AND event_type = 'MISSED_CALL_LOGGED' LIMIT 1`,
+    a.callId,
+  );
+  if (already) return;
+  const leadRow = a.leadId
+    ? await queryFirst<{ name: string | null }>(env.D1DB, `SELECT name FROM lead WHERE id = ?`, a.leadId)
+    : null;
+  const caller = (leadRow?.name && leadRow.name.trim()) || a.customerNumber || "Unknown caller";
+  try {
+    await notify(env, {
+      userId: a.agentId,
+      orgId: a.orgId,
+      kind: "call_missed",
+      channel: "call",
+      contactId: a.leadId ?? undefined,
+      title: `Missed call from ${caller}`,
+      body: a.customerNumber || undefined,
+      severity: "warning",
+      data: { path: `/inbox?tab=calls`, call_id: a.callId, from_number: a.customerNumber },
+    });
+  } catch (err) {
+    console.warn("[missed-call] notify failed", err);
+  }
+  try {
+    await createTask(env, {
+      orgId: a.orgId,
+      userId: a.agentId,
+      leadId: a.leadId ?? null,
+      title: `Call back ${caller}`,
+      description: `Missed inbound call${a.customerNumber ? ` from ${a.customerNumber}` : ""}.`,
+      why: "They called you - missed calls are the hottest follow-ups.",
+      recommendation: "Call back as soon as possible.",
+      type: "call",
+      priority: "high",
+      source: "ai",
+    });
+  } catch (err) {
+    console.warn("[missed-call] task failed", err);
+  }
+  await execute(
+    env.D1DB,
+    `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
+     VALUES (?, ?, 'MISSED_CALL_LOGGED', ?, ?, ?)`,
+    crypto.randomUUID(), a.callId, now,
+    JSON.stringify({ from: a.customerNumber }),
+    `${a.callControlId}-missed-log`,
+  );
+}
+
+/**
  * Inbound call landed on one of our DIDs. Look up the assigned agent, gate on
  * busy-on-busy + workspace calling_enabled, answer the anchor leg, then dial
  * the fork legs per ring_strategy. Persist sids + seed the CallActorDO so the
@@ -400,7 +465,11 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
 
   const origin = new URL(requestUrl).origin;
   const webhookUrl = `${origin}/api/webhooks/calling/telnyx/status`;
-  const wantsWeb = ringStrategy !== "phone_first" && !!agent.telnyx_sip_uri && !!env.TELNYX_CREDENTIAL_CONNECTION_ID;
+  // NOTE: the Dial API (/v2/calls) only accepts a CALL CONTROL APP id - passing
+  // the credential SIP connection id fails with Telnyx 10015 (which silently
+  // killed web ringing). The SIP URI still routes to the agent's registered
+  // browser; the dial just has to originate from the Call Control App.
+  const wantsWeb = ringStrategy !== "phone_first" && !!agent.telnyx_sip_uri && !!env.TELNYX_CONNECTION_ID;
   const wantsPhone = ringStrategy !== "web_first" && !!agent.agent_phone_number && !!env.TELNYX_CONNECTION_ID;
 
   let webLegSid: string | null = null;
@@ -410,7 +479,7 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
     const dialed = await dialForkLeg(env, {
       from: payload.to,
       to: agent.telnyx_sip_uri,
-      connectionId: env.TELNYX_CREDENTIAL_CONNECTION_ID,
+      connectionId: env.TELNYX_CONNECTION_ID,
       anchorCallControlId: callControlId,
       timeoutSecs: ringTimeout,
       leg: "web",
@@ -418,6 +487,7 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
       webhookUrl,
     });
     if (dialed.ok) webLegSid = dialed.data.call_control_id;
+    else console.warn("[fork] web leg dial failed", dialed.error?.message ?? dialed.error);
   }
   if (wantsPhone && agent.agent_phone_number) {
     const dialed = await dialForkLeg(env, {
@@ -442,6 +512,13 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
       orgId: businessNumber.org_id, agentId: agent.id,
       businessPhone: payload.to ?? null, customerNumber: payload.from ?? null,
       callId, callControlId,
+    }, nowIso());
+    // The agent must still LEARN about the call: missed-call notification +
+    // call-back task (this path ends COMPLETED, so handleHangup's NO_ANSWER
+    // notify never fires for it).
+    await recordMissedCall(env, {
+      orgId: businessNumber.org_id, agentId: agent.id, leadId,
+      customerNumber: payload.from ?? null, callId, callControlId,
     }, nowIso());
     // If voicemail is enabled, divert the answered anchor to a greeting +
     // recording instead of dropping the caller.
@@ -577,6 +654,17 @@ async function handleAnswered(env: Env, payload: TelnyxPayload, callControlId: s
     );
     if (anchor) await maybeStartRecording(env, cs.callId, anchor);
     await emitState(env, cs.callId, { status: "IN_PROGRESS", answeredVia: cs.leg });
+    // Tell every other tab/device the call was picked up so their ringing
+    // modal stops (the answering tab's modal already became the active call).
+    const callRow = await queryFirst<{ agent_id: number | null }>(
+      env.D1DB, `SELECT agent_id FROM calls WHERE id = ?`, cs.callId,
+    );
+    if (callRow?.agent_id) {
+      await gatewayFetch(env, `/do/userSocket/user:${callRow.agent_id}/emit`, "POST", {
+        event: "call_taken_elsewhere",
+        data: { callId: cs.callId, answeredVia: cs.leg },
+      });
+    }
     return;
   }
 
@@ -695,31 +783,16 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
 
   await emitState(env, call.id, { status, duration, terminal: true });
 
-  // Missed-call bell entry + push (inbound only, when it wasn't picked up).
+  // Missed-call bell entry + push + call-back task (inbound only, when it
+  // wasn't picked up). Idempotent with the "nobody to ring" path.
   if (
     call.direction === "INBOUND" &&
     (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED")
   ) {
-    try {
-      const leadRow = call.lead_id
-        ? await queryFirst<{ name: string | null }>(
-            env.D1DB, `SELECT name FROM lead WHERE id = ?`, call.lead_id)
-        : null;
-      const caller = (leadRow?.name && leadRow.name.trim()) || call.customer_number || "Unknown";
-      await notify(env, {
-        userId: call.agent_id,
-        orgId: call.org_id,
-        kind: "call_missed",
-        channel: "call",
-        contactId: call.lead_id ?? undefined,
-        title: `Missed call from ${caller}`,
-        body: call.customer_number || undefined,
-        severity: "warning",
-        data: { path: `/inbox?tab=calls`, call_id: call.id, from_number: call.customer_number },
-      });
-    } catch (err) {
-      console.warn("[call-missed] notify failed", err);
-    }
+    await recordMissedCall(env, {
+      orgId: call.org_id, agentId: call.agent_id, leadId: call.lead_id ?? null,
+      customerNumber: call.customer_number ?? null, callId: call.id, callControlId,
+    }, now);
   }
 
   // Tell the CallActorDO it can shed state.

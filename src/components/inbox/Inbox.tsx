@@ -24,36 +24,22 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bell,
-  BellOff,
   Calendar,
   Eye,
   ImageIcon,
   Bold,
-  Clock,
   Italic,
-  Link2,
   List,
   ListOrdered,
   Loader2,
   Lock,
-  Mail,
   MessageSquare,
-  MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Paperclip,
-  Phone,
   Plus,
   Send,
-  ShieldOff,
-  SquarePen,
-  StickyNote,
-  Tag,
-  Trash2,
   UserPlus,
-  Zap,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast, { Toaster } from "react-hot-toast";
@@ -72,44 +58,34 @@ import {
   renderPersonalizedText,
   validatePersonalization,
 } from "../../utils/personalization";
+import { callAiImprove } from "@/utils/aiImprove";
 import {
   EMAIL_PERSONALIZE_TOKENS,
-  SMS_PERSONALIZE_TOKENS,
 } from "./utils/personalizeTokens";
 import {
   uploadMessageAttachments,
   UploadedAttachment,
 } from "../../utils/messageAttachments";
-import AttachmentGallery from "../AttachmentGallery";
 import AppointmentCancelConfirmModal from "../AppointmentCancelConfirmModal";
 import AppointmentModal from "../V2/Dashboard/AppointmentModal";
-import AiSuggestionPanel from "./AiSuggestionPanel";
 import SendLaterModal from "./SendLaterModal";
-import ScheduledMessagesPanel from "./ScheduledMessagesPanel";
 import EmptyStateCard from "./components/EmptyStateCard";
 // EditLeadModal was removed - the unified AddLeadModal handles both Add and
 // Edit. See openEditLead() + saveLeadFromInbox() below for the edit path.
 import NewMessageModal from "./components/NewMessageModal";
 import BookingMessageModal from "./components/BookingMessageModal";
-import {
-  AiCapturedFieldsPanel,
-  AiContactBadges,
-} from "./components/AiInboxExtras";
 import { isHotStage, getLeadType } from "@/components/leads/utils/leadDisplay";
 import AttachmentChips from "./components/AttachmentChips";
 import PersonalizeOptionsMenu from "./components/PersonalizeOptionsMenu";
 import AppointmentThreadCard from "./components/AppointmentThreadCard";
 import DeleteLeadConfirmModal from "./components/DeleteLeadConfirmModal";
 import MessageBubble from "./components/MessageBubble";
-import DetailField from "./components/DetailField";
 import {
   SMS_MAX_SEGMENTS,
   CONTACTS_PAGE_SIZE,
 } from "./constants";
 import {
-  avatarGradient,
   contactDisplayName,
-  formatLocalTime,
   initials,
   parseTags,
 } from "./utils/contactUtils";
@@ -119,7 +95,6 @@ import {
   latestPreviewMessage,
   latestTimestamp,
   mergeAppointmentsById,
-  stageBadgeClass,
 } from "./utils/formatters";
 import {
   composerInnerPlain,
@@ -164,7 +139,7 @@ const TZ_ABBREV: Record<string, string> = {
   "America/Chicago": "CT",
   "America/Denver": "MT",
   "America/Phoenix": "MST",
-  "America/Los_Angeles": "PT",
+  "America/Los_Angeles": "PST", // always PST (not PDT) per workspace preference
   "America/Anchorage": "AKT",
   "Pacific/Honolulu": "HT",
 };
@@ -537,13 +512,6 @@ export default function Inbox() {
   const [selectedContact, setSelectedContact] = useState<InboxContact | null>(
     null,
   );
-  // Tick once a minute so the "local time" pill in the header stays in sync.
-  // Held as state so React re-renders pull a fresh `formatLocalTime()` value.
-  const [localTimeNow, setLocalTimeNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const handle = window.setInterval(() => setLocalTimeNow(Date.now()), 60_000);
-    return () => window.clearInterval(handle);
-  }, []);
   const [messagesByTab, setMessagesByTab] = useState<{
     unified: ContactMessage[];
     email: ContactMessage[];
@@ -594,10 +562,29 @@ export default function Inbox() {
   const [showNewMessageModal, setShowNewMessageModal] = useState(false);
   const [showBookingMessageModal, setShowBookingMessageModal] = useState(false);
   const [isContactsCollapsed, setIsContactsCollapsed] = useState(false);
-  const [isDetailsCollapsed, setIsDetailsCollapsed] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "chat" | "details">(
     "list",
   );
+  // Spec section-8 state machine. `intelOpen` drives the lead-intelligence panel
+  // (inline on desktop, slide-over drawer on tablet, bottom-sheet on phone).
+  // `bp` mirrors the active breakpoint so JS can keep the data-attrs honest.
+  const [intelOpen, setIntelOpen] = useState(true);
+  const [bp, setBp] = useState<"xl" | "lg" | "md" | "sm">("xl");
+  useEffect(() => {
+    const compute = () => {
+      const w = window.innerWidth;
+      setBp(w >= 1280 ? "xl" : w >= 1024 ? "lg" : w >= 768 ? "md" : "sm");
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  // On tablet/phone the intel panel is an overlay; default it closed there and
+  // close it whenever the conversation changes (spec 8.4).
+  useEffect(() => {
+    if (bp === "md" || bp === "sm") setIntelOpen(false);
+    else setIntelOpen(true);
+  }, [bp]);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isContactActionMenuOpen, setIsContactActionMenuOpen] = useState(false);
   const [addContactSaving, setAddContactSaving] = useState(false);
@@ -624,15 +611,10 @@ export default function Inbox() {
   const [_notifPrefs, _setNotifPrefs] = useState<InboxNotifPrefs>(() =>
     loadNotifPrefs(),
   );
-  const [showAiAssistModal, setShowAiAssistModal] = useState(false);
-  // When opened via the Tasks "Send Draft" deep-link (?aidraft=1), the AI panel
-  // applies its first draft straight to the composer instead of showing options.
-  const [aiDraftAuto, setAiDraftAuto] = useState(false);
-  // Latched from the initial URL so the inbox's own ?lead= cleanup can't drop the
-  // request before the thread finishes loading.
-  const [aiDraftPending, setAiDraftPending] = useState(
-    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("aidraft") === "1",
-  );
+  // AI Assist ▾ dropdown — rewrites the current draft in place via callAiImprove.
+  const [assistOpen, setAssistOpen] = useState(false);
+  const [assistBusy, setAssistBusy] = useState(false);
+  const assistWrapRef = useRef<HTMLDivElement | null>(null);
   const [showSendLaterModal, setShowSendLaterModal] = useState(false);
   const [showDeleteLeadConfirm, setShowDeleteLeadConfirm] = useState(false);
   const unreadBaselineRef = useRef<Map<
@@ -857,20 +839,6 @@ export default function Inbox() {
     selectedContact && selectedContact.id === selectedLeadId
       ? selectedContact
       : selectedSummary;
-
-  // Tasks "Send Draft" deep-link (?aidraft=1). Latch the request if the param
-  // appears (e.g. navigating while already on the inbox), then once the lead's
-  // contact is loaded, open the AI panel (which auto-applies a draft to the
-  // composer). The latch survives the inbox's own ?lead= URL cleanup.
-  useEffect(() => {
-    if (searchParams.get("aidraft") === "1") setAiDraftPending(true);
-  }, [searchParams]);
-  useEffect(() => {
-    if (!aiDraftPending || !contactForView) return;
-    setAiDraftAuto(true);
-    setShowAiAssistModal(true);
-    setAiDraftPending(false);
-  }, [aiDraftPending, contactForView]);
 
   // Open the rich Edit Lead modal for the selected contact. The contact IS a
   // lead, so we edit it with the same modal the Leads page uses. Prefer the full
@@ -1563,6 +1531,28 @@ export default function Inbox() {
     return () => window.removeEventListener("mousedown", handlePointerDown);
   }, [isHeaderMenuOpen, isContactActionMenuOpen, notifCenterOpen]);
 
+  // AI Assist ▾ dropdown: close on outside-click or Escape.
+  useEffect(() => {
+    if (!assistOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        assistWrapRef.current &&
+        !assistWrapRef.current.contains(event.target as Node)
+      ) {
+        setAssistOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAssistOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [assistOpen]);
+
   const handleSelectContact = async (
     contact: InboxContact,
     opts?: { preferredTab?: ViewTab },
@@ -1623,7 +1613,7 @@ export default function Inbox() {
 
   const openDetailsForContact = async (contact: InboxContact) => {
     await handleSelectContact(contact);
-    setIsDetailsCollapsed(false);
+    setIntelOpen(true);
   };
   useEffect(() => {
     openDetailsRef.current = openDetailsForContact;
@@ -1631,9 +1621,19 @@ export default function Inbox() {
 
   const openContactDetails = () => {
     setIsHeaderMenuOpen(false);
-    setIsDetailsCollapsed(false);
-    setMobileView("details");
+    setIntelOpen(true);
   };
+
+  // Honor a ?filter= deep-link (e.g. the dashboard's "Open inbox" / "View all"
+  // links pass ?filter=needs_reply) so the conversation list opens pre-filtered.
+  useEffect(() => {
+    const raw = searchParams.get("filter");
+    if (!raw) return;
+    const valid: InboxListFilter[] = ["all", "needs_reply", "hot", "buyers", "sellers"];
+    if ((valid as string[]).includes(raw)) setListFilter(raw as InboxListFilter);
+    // Run once per URL filter value; the chip UI takes over after that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     const raw = searchParams.get("lead");
@@ -1923,343 +1923,310 @@ export default function Inbox() {
     }
   };
 
+  // Per-lead AI on/off. A lead's AI is "on" unless its ai_status reads off /
+  // paused / disabled. Toggling persists through the same updateLead path the
+  // Edit Lead modal uses, so the AI agent's handling of inbound replies flips
+  // with it (mirrors the Leads page AI Active control).
+  const aiStatusIsOn = (c: InboxContact | null): boolean => {
+    if (!c) return false;
+    const s = String(c.ai_status || "").toLowerCase();
+    if (!s) return true;
+    return !(s === "off" || s === "paused" || s === "disabled" || s.includes("off"));
+  };
+
+  const handleToggleAiStatus = async () => {
+    if (!contactForView) return;
+    const next = aiStatusIsOn(contactForView) ? "off" : "AI Active";
+    // Optimistic flip in both the open detail and the list row.
+    setSelectedContact((cur) =>
+      cur && cur.id === contactForView.id ? { ...cur, ai_status: next } : cur,
+    );
+    setContacts((current) =>
+      current.map((c) =>
+        c.id === contactForView.id ? { ...c, ai_status: next } : c,
+      ),
+    );
+    try {
+      await updateLead(
+        contactForView.id,
+        {
+          name: contactDisplayName(contactForView),
+          email: contactForView.email || "",
+          phone: contactForView.phone || "",
+          stage: contactForView.stage || "New",
+          ai_status: next,
+        },
+        { silent: true },
+      );
+      toast.success(next === "off" ? "AI paused for this lead." : "AI enabled for this lead.");
+    } catch (error) {
+      toast.error((error as Error)?.message || "Failed to update AI status.");
+      await fetchContacts(true);
+    }
+  };
+
+  // Inline saves for the lead-intelligence sidebar (notes / address). We always
+  // re-send name/email/phone/stage/tags so the lead PUT never clears them.
+  const [editingAddress, setEditingAddress] = useState(false);
+  const saveLeadField = async (
+    patch: Record<string, unknown>,
+    successMsg?: string,
+  ) => {
+    if (!contactForView) return;
+    try {
+      await updateLead(
+        contactForView.id,
+        {
+          name: contactDisplayName(contactForView),
+          email: contactForView.email || "",
+          phone: contactForView.phone || "",
+          stage: contactForView.stage || "New",
+          tags: contactForView.tags || [],
+          ...patch,
+        },
+        { silent: true },
+      );
+      if (successMsg) toast.success(successMsg);
+    } catch (error) {
+      toast.error((error as Error)?.message || "Failed to save.");
+    }
+  };
+
+  // Lead-intelligence sidebar - spec section 4 ONLY: identity, lead info,
+  // buyer/seller info, notes, call history, per-contact notifications.
+  const isSellerLead = String(contactForView?.lead_type || "")
+    .toLowerCase()
+    .includes("sell");
   const contactDetailsPanelContent = contactForView ? (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-gray-100 px-6 py-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setMobileView("chat")}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition hover:border-orange-200 hover:text-orange-600 xl:hidden"
-              aria-label="Back to chat"
-              title="Back to chat"
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <div className="text-[13px] font-semibold text-gray-900">
-              Contact Details
-            </div>
+    <>
+      {/* Mobile-only close (drawer / bottom sheet). */}
+      <div className="mb-1 flex justify-end lg:hidden">
+        <button
+          type="button"
+          onClick={() => setIntelOpen(false)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500"
+          aria-label="Close lead information"
+        >
+          <Icon name="x" size={16} />
+        </button>
+      </div>
+
+      {/* 1. Identity */}
+      <div className="wc-intel-id">
+        <div className="wc-intel-av">
+          {initials(contactDisplayName(contactForView))}
+        </div>
+        <div className="min-w-0">
+          <div className="wc-intel-name truncate">
+            {contactDisplayName(contactForView)}
           </div>
-
-          <div className="flex items-center gap-2">
-            <div className="relative" ref={contactActionMenuRef}>
-              <button
-                type="button"
-                onClick={() =>
-                  setIsContactActionMenuOpen((current) => !current)
-                }
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-                aria-label="Open contact options"
-              >
-                <MoreVertical size={18} />
-              </button>
-
-              {isContactActionMenuOpen ? (
-                <div className="absolute right-0 top-full z-20 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsContactActionMenuOpen(false);
-                      openEditLead();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                  >
-                    <SquarePen size={16} className="text-gray-400" />
-                    Edit lead
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Inlined here (rather than calling a hoisted handler)
-                      // to satisfy react-hooks/immutability: the menu JSX is
-                      // rendered above the handler's const declaration, so
-                      // referencing it by name would be a stale-closure smell.
-                      const c = contactForView;
-                      if (!c) return;
-                      if (c.sms_opt_out) {
-                        toast("This contact is already blocked from SMS.");
-                        setIsContactActionMenuOpen(false);
-                        return;
-                      }
-                      if (!c.phone) {
-                        toast.error("This contact has no phone number to block.");
-                        setIsContactActionMenuOpen(false);
-                        return;
-                      }
-                      const ok = window.confirm(
-                        `Block ${c.name || c.phone} from receiving SMS? ` +
-                          "They will be removed from campaigns and AI follow-up. " +
-                          "Only an admin can unblock - you cannot reverse this yourself.",
-                      );
-                      if (!ok) return;
-                      void (async () => {
-                        try {
-                          const res = await fetch(
-                            `${API_BASE}/blocked-numbers/by-lead/${c.id}`,
-                            {
-                              method: "POST",
-                              headers: {
-                                Authorization: `Bearer ${token}`,
-                                "Content-Type": "application/json",
-                              },
-                            },
-                          );
-                          const data = await res.json().catch(() => ({}));
-                          if (!res.ok) {
-                            toast.error(
-                              (data as { message?: string }).message ||
-                                "Could not block contact.",
-                            );
-                            return;
-                          }
-                          toast.success("Contact blocked - no further SMS will be sent.");
-                          setIsContactActionMenuOpen(false);
-                          setSelectedContact((prev) =>
-                            prev && prev.id === c.id
-                              ? { ...prev, sms_opt_out: true }
-                              : prev,
-                          );
-                          await fetchContacts(true);
-                        } catch {
-                          toast.error("Network error while blocking.");
-                        }
-                      })();
-                    }}
-                    disabled={!!contactForView?.sms_opt_out}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-transparent"
-                  >
-                    <ShieldOff size={16} className="text-rose-500" />
-                    {contactForView?.sms_opt_out ? "Already blocked" : "Block contact"}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsContactActionMenuOpen(false);
-                setIsDetailsCollapsed(true);
-              }}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-              aria-label="Collapse contact details"
-            >
-              <PanelRightClose size={18} />
-            </button>
+          <div className="wc-intel-last">
+            {contactForView.last_activity_label
+              ? contactForView.last_activity_label
+              : contactForView.last_activity_at
+                ? `Last contact ${formatDateTime(contactForView.last_activity_at)}`
+                : "No recent contact"}
           </div>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <div className="space-y-5">
-          <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-xs">
-            <div className="flex items-start gap-4">
-              <div
-                className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl bg-linear-to-br ${avatarGradient(
-                  contactDisplayName(contactForView),
-                )} text-xl font-semibold text-gray-500`}
-              >
-                {initials(contactDisplayName(contactForView))}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="text-lg font-semibold leading-snug text-gray-900">
-                  {contactDisplayName(contactForView)}
-                </div>
-                <div className="mt-3">
-                  <span
-                    title={contactForView.stage || "New"}
-                    className={`inline-block max-w-30 truncate align-middle rounded-full border px-3 py-1 text-xs font-semibold ${stageBadgeClass(
-                      contactForView.stage,
-                    )}`}
-                  >
-                    {contactForView.stage || "New"}
-                  </span>
-                </div>
-              </div>
+      {/* 2. Lead Information */}
+      <div className="wc-intel-sec">
+        <div className="wc-intel-sech">Lead Information</div>
+        {/* AI Summary card - top of Lead Information, above the Phone row. */}
+        {contactForView.ai_summary &&
+        contactForView.ai_summary.trim() !== "" ? (
+          <div className="mb-3 rounded-xl border border-orange-200 bg-orange-50/70 p-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-orange-600">
+              <Icon name="sparkles" size={12} /> AI Summary
             </div>
-
-            <div className="mt-5 space-y-4">
-              <div className="flex items-center gap-3 text-base text-gray-700">
-                <Phone size={18} className="shrink-0 text-orange-500" />
-                <span>{contactForView.phone || "No phone number"}</span>
-              </div>
-              <div className="flex items-center gap-3 text-base text-gray-700">
-                <Mail size={18} className="shrink-0 text-orange-500" />
-                <span className="min-w-0 truncate">
-                  {contactForView.email || "No email address"}
-                </span>
-              </div>
-            </div>
+            <p className="text-[13px] leading-relaxed text-gray-700">
+              {contactForView.ai_summary}
+            </p>
           </div>
-
-          <AiCapturedFieldsPanel contact={contactForView} />
-
-          <div className="overflow-hidden rounded-[28px] border border-gray-100 bg-white shadow-xs">
-            <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-5">
-              <div className="text-[1.05rem] font-semibold text-gray-900">
-                Stage
-              </div>
-              <span
-                title={contactForView.stage || "New"}
-                className={`inline-block max-w-30 truncate align-middle rounded-full border px-3 py-1 text-xs font-semibold ${stageBadgeClass(
-                  contactForView.stage,
-                )}`}
-              >
-                {contactForView.stage || "New"}
-              </span>
-            </div>
-            <div className="border-b border-gray-100 px-5 py-5">
-              <div className="text-[1.05rem] font-semibold text-gray-900">
-                Price Range
-              </div>
-              <div className="mt-2 text-[1.05rem] text-gray-600">
-                {contactForView.price_range || "No price range added"}
-              </div>
-            </div>
-            <div className="px-5 py-5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Last Activity
-              </div>
-              <div className="mt-1 text-sm text-gray-700">
-                {contactForView.last_activity_label ||
-                  formatDateTime(contactForView.last_activity_at)}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("email");
-                setComposeChannel("email");
-                setIsContactActionMenuOpen(false);
-              }}
-              disabled={!contactForView.email}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-            >
-              <Mail size={16} />
-              Email
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("sms");
-                setComposeChannel("sms");
-                setIsContactActionMenuOpen(false);
-              }}
-              disabled={!contactForView.phone}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-            >
-              <MessageSquare size={16} />
-              SMS
-            </button>
-          </div>
-
-          {contactForView.phone ? (
-            <div className="rounded-[28px] border border-gray-100 bg-white p-5 shadow-xs">
-              <h3 className="mb-3 text-sm font-semibold text-gray-700">
-                Call history
-              </h3>
-              <CallHistoryList phoneNumber={contactForView.phone} />
-            </div>
-          ) : null}
-
-          <div className="rounded-[28px] border border-gray-100 bg-white p-5 shadow-xs">
-            <DetailField
-              label="Tags"
-              value={
-                contactForView.tags?.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {contactForView.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  "No tags yet"
-                )
-              }
-            />
-            <div className="mt-5">
-              <DetailField
-                label="Notes"
-                value={
-                  contactForView.notes ? (
-                    <div className="whitespace-pre-wrap text-sm leading-6 text-gray-700">
-                      {contactForView.notes}
-                    </div>
-                  ) : (
-                    "No notes yet"
-                  )
-                }
+        ) : null}
+        <div className="wc-irow">
+          <span>Phone</span>
+          <b>{contactForView.phone || "—"}</b>
+        </div>
+        <div className="wc-irow">
+          <span>Email</span>
+          <b className="min-w-0 truncate">{contactForView.email || "—"}</b>
+        </div>
+        {contactForView.property_address || editingAddress ? (
+          <div className="wc-irow">
+            <span>Address</span>
+            {editingAddress ? (
+              <input
+                className="wc-modal-input"
+                style={{ height: 32, maxWidth: 190 }}
+                autoFocus
+                defaultValue={contactForView.property_address || ""}
+                placeholder="123 Main St"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter")
+                    (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") setEditingAddress(false);
+                }}
+                onBlur={(e) => {
+                  setEditingAddress(false);
+                  const v = e.target.value.trim();
+                  if (v !== (contactForView.property_address || ""))
+                    void saveLeadField({ property_address: v }, "Address saved.");
+                }}
               />
-            </div>
+            ) : (
+              <b
+                className="cursor-pointer hover:text-orange-600"
+                onClick={() => setEditingAddress(true)}
+              >
+                {contactForView.property_address}
+              </b>
+            )}
           </div>
-
-          <ScheduledMessagesPanel contactId={contactForView.id} />
-
-          <div className="space-y-3 rounded-[28px] border border-gray-100 bg-white p-5 shadow-xs">
-            <div>
-              <div className="text-sm font-semibold text-gray-900">
-                Per-Contact Notifications
-              </div>
-              <p className="mt-1 text-xs leading-5 text-gray-500">
-                SMS and email notifications default to on. Unread counts are
-                tracked per channel and surfaced in the list, header tabs, and
-                unified view.
-              </p>
-            </div>
-
-            <button
-              onClick={() => handleToggleNotifications("email")}
-              className="flex w-full items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 text-left transition hover:border-gray-300"
-            >
-              <div>
-                <div className="font-medium text-gray-900">
-                  Email Notifications
-                </div>
-                <div className="text-xs text-gray-500">
-                  {contactForView.email_unread_count || 0} unread email
-                  {(contactForView.email_unread_count || 0) === 1 ? "" : "s"}
-                </div>
-              </div>
-              {contactForView.email_notifications_enabled ? (
-                <Bell size={18} className="text-blue-600" />
-              ) : (
-                <BellOff size={18} className="text-gray-400" />
-              )}
-            </button>
-
-            <button
-              onClick={() => handleToggleNotifications("sms")}
-              className="flex w-full items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 text-left transition hover:border-gray-300"
-            >
-              <div>
-                <div className="font-medium text-gray-900">
-                  SMS Notifications
-                </div>
-                <div className="text-xs text-gray-500">
-                  {contactForView.sms_unread_count || 0} unread SMS
-                  {(contactForView.sms_unread_count || 0) === 1 ? "" : "s"}
-                </div>
-              </div>
-              {contactForView.sms_notifications_enabled ? (
-                <Bell size={18} className="text-emerald-600" />
-              ) : (
-                <BellOff size={18} className="text-gray-400" />
-              )}
-            </button>
-          </div>
+        ) : (
+          <button
+            type="button"
+            className="wc-intel-add"
+            onClick={() => setEditingAddress(true)}
+          >
+            <Icon name="plus" size={14} /> Add address
+          </button>
+        )}
+        <div className="wc-irow">
+          <span>Source</span>
+          <b>{contactForView.source || "—"}</b>
+        </div>
+        <div className="wc-irow">
+          <span>Stage</span>
+          <b>{contactForView.stage || "New"}</b>
         </div>
       </div>
-    </div>
+
+      {/* 3. Buyer / Seller Information */}
+      {isSellerLead ? (
+        <div className="wc-intel-sec">
+          <div className="wc-intel-sech">Seller Information</div>
+          <div className="wc-irow">
+            <span>Address</span>
+            <b>{contactForView.property_address || "—"}</b>
+          </div>
+          <div className="wc-irow">
+            <span>Est. Value</span>
+            <b>
+              {contactForView.seller_price_expectations ||
+                contactForView.price_range ||
+                "—"}
+            </b>
+          </div>
+          <div className="wc-irow">
+            <span>Timeline</span>
+            <b>{contactForView.timeline || "—"}</b>
+          </div>
+        </div>
+      ) : (
+        <div className="wc-intel-sec">
+          <div className="wc-intel-sech">Buyer Information</div>
+          <div className="wc-irow">
+            <span>Budget</span>
+            <b>{contactForView.price_range || "—"}</b>
+          </div>
+          <div className="wc-irow">
+            <span>Area</span>
+            <b>{contactForView.area || "—"}</b>
+          </div>
+          <div className="wc-irow">
+            <span>Timeline</span>
+            <b>{contactForView.timeline || "—"}</b>
+          </div>
+          <div className="wc-irow">
+            <span>Pre-Approved</span>
+            <b className={contactForView.pre_approved ? "ok" : ""}>
+              {contactForView.pre_approved == null
+                ? "—"
+                : contactForView.pre_approved
+                  ? "Yes"
+                  : "No"}
+            </b>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Notes */}
+      <div className="wc-intel-sec">
+        <div className="wc-intel-sech">Notes</div>
+        <textarea
+          key={contactForView.id}
+          className="wc-notes-ta"
+          defaultValue={contactForView.notes || ""}
+          placeholder="Add a note about this lead…"
+          onBlur={(e) => {
+            const v = e.target.value;
+            if (v !== (contactForView.notes || ""))
+              void saveLeadField({ notes: v }, "Note saved.");
+          }}
+        />
+      </div>
+
+      {/* 5. Call history */}
+      {contactForView.phone ? (
+        <div className="wc-intel-sec">
+          <div className="wc-intel-sech">Call History</div>
+          <CallHistoryList phoneNumber={contactForView.phone} />
+        </div>
+      ) : null}
+
+      {/* 6. Per-Contact Notifications */}
+      <div className="wc-intel-sec">
+        <div className="wc-intel-sech">Notifications</div>
+        <div className="wc-cc-notif">
+          <button
+            type="button"
+            onClick={() => handleToggleNotifications("email")}
+            className="wc-cc-notifrow"
+          >
+            <div>
+              <div className="wc-cc-notif-t">Email Notifications</div>
+              <div className="wc-cc-notif-s">
+                {contactForView.email_notifications_enabled
+                  ? `${contactForView.email_unread_count || 0} unread email${
+                      (contactForView.email_unread_count || 0) === 1 ? "" : "s"
+                    }`
+                  : "Notifications off"}
+              </div>
+            </div>
+            <Bell
+              size={18}
+              className={`wc-cc-bell ${
+                contactForView.email_notifications_enabled ? "is-on" : "is-off"
+              }`}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleNotifications("sms")}
+            className="wc-cc-notifrow"
+          >
+            <div>
+              <div className="wc-cc-notif-t">SMS Notifications</div>
+              <div className="wc-cc-notif-s">
+                {contactForView.sms_notifications_enabled
+                  ? `${contactForView.sms_unread_count || 0} unread SMS${
+                      (contactForView.sms_unread_count || 0) === 1 ? "" : "s"
+                    }`
+                  : "Notifications off"}
+              </div>
+            </div>
+            <Bell
+              size={18}
+              className={`wc-cc-bell ${
+                contactForView.sms_notifications_enabled ? "is-on" : "is-off"
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </>
   ) : null;
 
   const handleUploadComposeAttachments = async (files: FileList | null) => {
@@ -2581,8 +2548,6 @@ export default function Inbox() {
             channel: "sms",
             automation_id: choice.automationId ?? 0,
             inbound_enabled: choice.inboundEnabled,
-            auto_followup_action: choice.action,
-            auto_followup_scheduled_at: choice.scheduledAt,
           }),
         });
         await fetchLeads();
@@ -2650,6 +2615,79 @@ export default function Inbox() {
       execRichCommand("insertOrderedList");
     }
     setComposeBody(composerInnerPlain(el));
+  };
+
+  // AI Assist ▾ presets. Each rewrites the current draft in place by calling
+  // callAiImprove with `tone` as the steering instruction. "Follow-up
+  // suggestion" / "Appointment push" can draft from scratch when empty; the
+  // tone-only rewrites no-op on an empty draft.
+  const AI_ASSIST_PRESETS: {
+    label: string;
+    tone: string;
+    allowEmpty: boolean;
+  }[] = [
+    { label: "Make professional", tone: "Professional", allowEmpty: false },
+    {
+      label: "Make shorter",
+      tone: "Concise — shorter and tighter",
+      allowEmpty: false,
+    },
+    { label: "Make friendlier", tone: "Friendly and warm", allowEmpty: false },
+    {
+      label: "Appointment push",
+      tone: "Encourage booking an appointment / showing",
+      allowEmpty: true,
+    },
+    {
+      label: "Follow-up suggestion",
+      tone: "A gentle follow-up nudge",
+      allowEmpty: true,
+    },
+  ];
+
+  // Set the contentEditable composer body programmatically and sync state. Uses
+  // the same mechanism the AI suggestion apply path uses (textContent + caret to
+  // end) so it behaves like the rest of the composer.
+  const setComposerDraft = (text: string, focusComposer = true) => {
+    const el = bodyRef.current;
+    if (el) el.textContent = text;
+    setComposeBody(text);
+    if (focusComposer && el) {
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }
+  };
+
+  const applyAssist = async (preset: (typeof AI_ASSIST_PRESETS)[number]) => {
+    setAssistOpen(false);
+    const draft = composerInnerPlain(bodyRef.current).trim();
+    if (!draft && !preset.allowEmpty) {
+      toast.error("Type a message first");
+      return;
+    }
+    if (assistBusy) return;
+    setAssistBusy(true);
+    try {
+      const res = await callAiImprove(token, {
+        message: draft,
+        mode: "rewrite_full",
+        channel: currentChannel,
+        tone: preset.tone,
+        persona: "Real Estate Agent",
+        lead_data: contactForView ? [contactForView] : [],
+      });
+      setComposerDraft(res.improved_message);
+    } catch (error) {
+      toast.error(
+        (error as Error)?.message || "AI Assist failed. Try again.",
+      );
+    } finally {
+      setAssistBusy(false);
+    }
   };
 
   const handleSendCurrentMessage = async () => {
@@ -2862,9 +2900,15 @@ export default function Inbox() {
       <Toaster position="top-right" />
       {quietHoursModal}
 
-      <div className="wcv2">
-        <InboxTabs active="messages" onChange={setTab} />
-      </div>
+      <div
+        className="wcv2 wc-inboxwrap"
+        data-bp={bp}
+        data-view={mobileView === "list" ? "list" : "thread"}
+        data-intel={intelOpen ? "open" : "closed"}
+      >
+        <div>
+          <InboxTabs active="messages" onChange={setTab} />
+        </div>
 
       <div className="wcv2 flex min-h-0 min-w-0 flex-col gap-3 overflow-x-hidden lg:min-h-[calc(100dvh-4rem-53px)] xl:h-[calc(100dvh-4rem-53px)] xl:overflow-hidden">
         {contactsLoading && contacts.length === 0 ? (
@@ -2888,10 +2932,17 @@ export default function Inbox() {
             </div>
           </section>
         ) : (
-          <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
-            {/* Collapsible contacts panel */}
-            <div className={`shrink-0 overflow-hidden border-r border-gray-100 transition-all duration-200 ${mobileView === "list" ? "flex w-full" : "hidden"} xl:flex ${isContactsCollapsed ? "xl:w-0" : "xl:w-90"}`}>
-            <section className="flex h-full w-full min-w-0 flex-col xl:w-90">
+          <div className="wc-inbox flex min-h-0 flex-1 overflow-hidden bg-white">
+            {/* LEFT COLUMN - conversation list (spec section 2) */}
+            <div
+              className="wc-ibx-list"
+              style={
+                isContactsCollapsed && (bp === "xl" || bp === "lg")
+                  ? { display: "none" }
+                  : undefined
+              }
+            >
+            <section className="flex h-full w-full min-w-0 flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
                 <div className="min-w-0">
                   <h2 className="text-sm font-semibold text-gray-900">
@@ -3106,8 +3157,8 @@ export default function Inbox() {
             </div>
             {/* End collapsible contacts panel */}
 
-            {/* Center: Chat area */}
-            <section className={`${mobileView === "chat" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col xl:flex`}>
+            {/* CENTER COLUMN - message thread (spec section 3) */}
+            <section className="wc-ibx-thread flex min-h-0 min-w-0 flex-1 flex-col">
               {!contactForView ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-5 p-10 text-center">
                   <div className="flex h-20 w-20 items-center justify-center rounded-full bg-orange-100">
@@ -3143,178 +3194,93 @@ export default function Inbox() {
                 </div>
               ) : (
                 <>
-                  <div className="border-b border-gray-100 px-4 py-3 sm:px-5 sm:py-4">
-                    <div className="relative flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                  <div className="wc-thread-head">
+                      <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+                        {/* Phone: back to list. (CSS shows only <768px.) */}
                         <button
                           type="button"
                           onClick={closeConversation}
-                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition hover:border-orange-200 hover:text-orange-600 xl:hidden"
+                          className="wc-thread-back"
                           aria-label="Back to conversations"
                           title="Back to conversations"
                         >
                           <ArrowLeft size={16} />
                         </button>
-                        {isContactsCollapsed && (
+                        {isContactsCollapsed && (bp === "xl" || bp === "lg") && (
                           <button
                             type="button"
                             onClick={() => setIsContactsCollapsed(false)}
-                            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition hover:border-orange-200 hover:text-orange-600 xl:inline-flex"
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition hover:border-orange-200 hover:text-orange-600"
                             aria-label="Show contacts"
                             title="Show contacts"
                           >
                             <PanelLeftOpen size={16} />
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={openContactDetails}
-                          className="shrink-0 rounded-3xl transition hover:scale-[1.02] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-200"
-                          aria-label="Open contact details"
-                        >
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-[20px] bg-linear-to-br text-sm font-semibold text-gray-500 sm:h-12 sm:w-12 sm:rounded-[22px] sm:text-lg ${avatarGradient(
-                              contactDisplayName(contactForView),
-                            )}`}
-                          >
-                            {initials(contactDisplayName(contactForView))}
-                          </div>
-                        </button>
-
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="wc-thread-name">
                             <button
                               type="button"
                               onClick={openContactDetails}
-                              className="min-w-0 truncate text-left text-xl font-semibold leading-tight text-gray-900 hover:text-orange-600 sm:text-[1.75rem]"
+                              className="min-w-0 truncate text-left hover:text-orange-600"
                             >
                               {contactDisplayName(contactForView)}
                             </button>
+                            {/* Narrow screens: icon-only Call sits beside the
+                                name; the right-cluster Call is hidden then. */}
+                            <CallButton
+                              className="wc-call-inline shrink-0"
+                              hideMenu
+                              iconOnly
+                              size="sm"
+                              phoneNumber={contactForView.phone}
+                              name={contactDisplayName(contactForView)}
+                            />
                           </div>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500 sm:text-sm">
-                            {contactForView.phone ? (
-                              <span>{contactForView.phone}</span>
-                            ) : null}
-                            {contactForView.phone && contactForView.email ? (
-                              <span className="text-gray-300">*</span>
-                            ) : null}
-                            {contactForView.email ? (
-                              <span className="min-w-0 truncate">
-                                {contactForView.email}
+                          {/* Sub line: AI On/Off toggle + stage chip (moved off
+                              the name line to save horizontal space) + quiet-hours
+                              alert. Lead details live in the sidebar. */}
+                          <div className="wc-thread-sub">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={aiStatusIsOn(contactForView)}
+                              onClick={() => void handleToggleAiStatus()}
+                              className={`wc-ai-toggle${aiStatusIsOn(contactForView) ? " is-on" : ""}`}
+                              title="Toggle AI handling for this lead"
+                            >
+                              <span className="wc-ai-toggle-track">
+                                <span className="wc-ai-toggle-knob" />
+                              </span>
+                              {aiStatusIsOn(contactForView) ? "AI On" : "AI Off"}
+                            </button>
+                            {(contactForView.stage || contactForView.status) ? (
+                              <span className="wc-convo-stage">
+                                {contactForView.stage || contactForView.status}
                               </span>
                             ) : null}
-                            {contactForView.timezone ? (
-                              <span
-                                title={`Local time in ${contactForView.timezone}`}
-                                className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700"
-                              >
-                                {formatLocalTime(contactForView.timezone, localTimeNow)}
-                                <span className="text-orange-300">*</span>
-                                <span className="truncate">{contactForView.timezone}</span>
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
                             <QuietHoursBadge
                               timezone={contactForView.timezone}
                               orgTimezone={orgTimezone}
                               quietWindow={orgQuietHours}
                             />
-                            <AiContactBadges
-                              contact={contactForView}
-                              className="mt-1.5 flex flex-wrap items-center gap-1.5"
-                            />
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-2 xl:absolute xl:right-0 xl:top-0">
+                      <div className="wc-thread-actions">
                         <ThreadClock timezone={contactForView.timezone} orgTimezone={orgTimezone} />
-                        <CallButton
-                          phoneNumber={contactForView.phone}
-                          name={contactDisplayName(contactForView)}
-                        />
+                        {/* Tablet/phone only: open the lead-intelligence drawer. */}
                         <button
                           type="button"
-                          onClick={() => setIsDetailsCollapsed((c) => !c)}
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${isDetailsCollapsed ? "border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700"}`}
-                          aria-label={isDetailsCollapsed ? "Show contact details" : "Hide contact details"}
-                          title={isDetailsCollapsed ? "Show details" : "Hide details"}
+                          className="wc-thread-infobtn"
+                          aria-expanded={intelOpen}
+                          aria-label="Lead information"
+                          onClick={() => setIntelOpen((o) => !o)}
                         >
-                          {isDetailsCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                          <Eye size={16} />
                         </button>
-                        <div
-                          className="relative self-center"
-                          ref={headerMenuRef}
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setIsHeaderMenuOpen((current) => !current)
-                            }
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-                            aria-label="More contact actions"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-
-                          {isHeaderMenuOpen ? (
-                            <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsHeaderMenuOpen(false);
-                                  openEditLead();
-                                }}
-                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                              >
-                                <SquarePen
-                                  size={16}
-                                  className="text-gray-400"
-                                />
-                                Edit lead
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsHeaderMenuOpen(false);
-                                  setShowDeleteLeadConfirm(true);
-                                }}
-                                className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-red-600 transition hover:bg-red-50"
-                              >
-                                <Trash2 size={16} className="text-red-400" />
-                                Delete
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsHeaderMenuOpen(false);
-                                  openEditLead();
-                                }}
-                                className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                              >
-                                <StickyNote
-                                  size={16}
-                                  className="text-gray-400"
-                                />
-                                Add note
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsHeaderMenuOpen(false);
-                                  openEditLead();
-                                }}
-                                className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                              >
-                                <Tag size={16} className="text-gray-400" />
-                                Tag
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
                       </div>
-                    </div>
                   </div>
 
                   <div className="border-b border-gray-100 px-5 py-2.5">
@@ -3539,320 +3505,280 @@ export default function Inbox() {
                           </div> */}
 
                           <div className="mt-1 2xl:mt-2">
-                            <div className="mb-2 flex flex-wrap items-center justify-start gap-1.5 2xl:mb-3 2xl:gap-2">
-                              <span className="mr-1 hidden text-xs font-semibold uppercase tracking-wide text-gray-500 2xl:inline">
-                                Message
-                              </span>
-                              <div className="flex flex-wrap items-center gap-1.5 2xl:gap-2">
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() =>
-                                    setShowAiAssistModal((prev) => !prev)
-                                  }
-                                  className={`inline-flex h-8 items-center gap-1.5 rounded-xl border px-2 text-xs font-semibold transition 2xl:h-9 2xl:px-3 2xl:text-sm ${
-                                    showAiAssistModal
-                                      ? "border-orange-500 bg-orange-500 text-white"
-                                      : "border-orange-200 bg-orange-50 text-orange-500 hover:border-orange-500 hover:bg-orange-500 hover:text-white"
-                                  }`}
+                            {/* Top toolbar - AI actions + attach/image/preview/
+                                format + schedule, all on one wrapping line so the
+                                composer stays short and the history gets room. */}
+                            <div className="mb-2 flex flex-wrap items-center gap-1.5 2xl:mb-3 2xl:gap-2">
+                              {/* Primary toolbar — matches the composer spec
+                                  left→right: Attach file · Add image · AI Assist ▾
+                                  · Book Appointment. Lives in .wc-compose-actions
+                                  so the container-query collapses these to
+                                  icon-only on a narrow thread. */}
+                              <div className="wc-compose-actions flex flex-wrap items-center gap-1.5 2xl:gap-2">
+                                <label
+                                  title="Attach file"
+                                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 transition hover:shadow-xs 2xl:h-9 2xl:px-3 2xl:text-sm"
                                 >
-                                  <Zap size={15} className="shrink-0" />
-                                  Generate AI
-                                </button>
-                                <PersonalizeOptionsMenu
-                                  tokens={
-                                    currentChannel === "sms"
-                                      ? SMS_PERSONALIZE_TOKENS
-                                      : EMAIL_PERSONALIZE_TOKENS
-                                  }
-                                  onInsertBody={(token) =>
-                                    handleInsertToken("body", token)
-                                  }
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleAppointment}
-                                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-2 text-xs font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 2xl:h-9 2xl:px-3 2xl:text-sm"
-                                >
-                                  <Calendar size={15} className="shrink-0" />
-                                  Book Appointment
-                                </button>
-                                {contactForView?.phone ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setShowBookingMessageModal(true)
-                                    }
-                                    className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-2 text-xs font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 2xl:h-9 2xl:px-3 2xl:text-sm"
-                                  >
-                                    <Calendar size={15} className="shrink-0" />
-                                    Send Booking Message
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                            <AiSuggestionPanel
-                              open={showAiAssistModal}
-                              token={token}
-                              channel={currentChannel}
-                              message={composeBody}
-                              leadData={contactForView ? [contactForView] : []}
-                              persona="Real Estate Agent"
-                              autoApply={aiDraftAuto}
-                              onClose={() => { setShowAiAssistModal(false); setAiDraftAuto(false); }}
-                              onApply={(text, focusComposer) => {
-                                const el = bodyRef.current;
-                                if (el) el.textContent = text;
-                                setComposeBody(text);
-                                setShowAiAssistModal(false);
-                                setAiDraftAuto(false);
-                                if (focusComposer && el) {
-                                  el.focus();
-                                  const r = document.createRange();
-                                  r.selectNodeContents(el);
-                                  r.collapse(false);
-                                  window.getSelection()?.removeAllRanges();
-                                  window.getSelection()?.addRange(r);
-                                }
-                              }}
-                            />
-                            <div className="relative">
-                            {!composeBody.trim() ? (
-                              <span className="pointer-events-none absolute left-4 top-3 z-1 max-w-[calc(100%-2rem)] text-sm leading-relaxed text-gray-400">
-                                {currentChannel === "sms"
-                                  ? "Click here to type your text message..."
-                                  : "Hi {firstname}, - click here to compose. Use the toolbar for bold, lists, and links."}
-                              </span>
-                            ) : null}
-                            <div
-                              ref={bodyRef}
-                              contentEditable
-                              suppressContentEditableWarning
-                              role="textbox"
-                              aria-multiline="true"
-                              aria-label="Message body"
-                              spellCheck
-                              onInput={() =>
-                                setComposeBody(
-                                  composerInnerPlain(bodyRef.current),
-                                )
-                              }
-                              onBlur={() =>
-                                setComposeBody(
-                                  composerInnerPlain(bodyRef.current),
-                                )
-                              }
-                              onPaste={(event) => {
-                                // SMS is plain-text only. Email keeps basic
-                                // structure but strips colors/styles so pasted
-                                // text can't end up white-on-white.
-                                if (currentChannel === "sms") {
-                                  const text =
-                                    event.clipboardData?.getData("text/plain");
-                                  if (text == null) return;
-                                  event.preventDefault();
-                                  document.execCommand("insertText", false, text);
-                                  setComposeBody(
-                                    composerInnerPlain(bodyRef.current),
-                                  );
-                                  return;
-                                }
-                                const html =
-                                  event.clipboardData?.getData("text/html");
-                                event.preventDefault();
-                                if (html) {
-                                  document.execCommand(
-                                    "insertHTML",
-                                    false,
-                                    sanitizePastedHtml(html),
-                                  );
-                                } else {
-                                  const text =
-                                    event.clipboardData?.getData("text/plain") ||
-                                    "";
-                                  document.execCommand("insertText", false, text);
-                                }
-                                setComposeBody(
-                                  composerInnerPlain(bodyRef.current),
-                                );
-                              }}
-                              className="w-full resize-y rounded-3xl border border-gray-200 px-4 pb-3 pt-3 text-sm leading-relaxed outline-hidden transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100 2xl:min-h-0 2xl:pb-24 [&_a]:text-blue-600 [&_a]:underline [&_li]:ml-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:list-disc [&_ul]:pl-4 min-h-30"
-                            />
-                            {currentChannel === "sms" ? (
-                              <div
-                                className={`pointer-events-none absolute right-4 top-2 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-xs ring-1 ${
-                                  smsSegmentCount(composeBody) > SMS_MAX_SEGMENTS
-                                    ? "bg-red-50 text-red-700 ring-red-200"
-                                    : "bg-white/95 text-gray-600 ring-gray-200"
-                                }`}
-                              >
-                                {composeBody.length}/
-                                {SMS_SEGMENT_LENGTH * SMS_MAX_SEGMENTS}
-                              </div>
-                            ) : null}
-                            <div className="pointer-events-auto mt-1 flex flex-wrap items-center justify-between gap-1 rounded-2xl border border-gray-100 bg-white px-1.5 py-1.5 2xl:pointer-events-none 2xl:absolute 2xl:inset-x-2 2xl:bottom-2 2xl:mt-0 2xl:gap-2 2xl:bg-white/95 2xl:px-2 2xl:py-2 2xl:shadow-xs 2xl:backdrop-blur-xs">
-                              <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-1">
-                                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 sm:text-sm 2xl:px-2.5 2xl:py-1.5">
-                                  <Paperclip size={15} />
-                                  <span className="hidden sm:inline">
-                                    Attach file
-                                  </span>
+                                  <Paperclip size={15} className="shrink-0" />
+                                  <span className="wc-btn-label">Attach file</span>
                                   <input
                                     type="file"
                                     multiple
                                     className="hidden"
                                     onChange={(event) =>
-                                      handleUploadComposeAttachments(
-                                        event.target.files,
-                                      )
+                                      handleUploadComposeAttachments(event.target.files)
                                     }
                                   />
                                 </label>
-                                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 sm:text-sm 2xl:px-2.5 2xl:py-1.5">
-                                  <ImageIcon size={15} />
-                                  <span className="hidden sm:inline">
-                                    Add image
-                                  </span>
+                                <label
+                                  title="Add image"
+                                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 transition hover:shadow-xs 2xl:h-9 2xl:px-3 2xl:text-sm"
+                                >
+                                  <ImageIcon size={15} className="shrink-0" />
+                                  <span className="wc-btn-label">Add image</span>
                                   <input
                                     type="file"
                                     multiple
                                     accept="image/*"
                                     className="hidden"
                                     onChange={(event) =>
-                                      handleUploadComposeAttachments(
-                                        event.target.files,
-                                      )
+                                      handleUploadComposeAttachments(event.target.files)
                                     }
                                   />
                                 </label>
-                                {token && (
-                                  <AttachmentGallery
-                                    apiBase={API_BASE}
-                                    isBottom={true}
-                                    token={token}
-                                    onSelect={(attachment) =>
-                                      setComposeAttachments((current) =>
-                                        current.some((item) => item.id === attachment.id)
-                                          ? current
-                                          : [...current, attachment],
-                                      )
-                                    }
-                                    onDelete={(key) =>
+                                {/* AI Assist ▾ — rewrites the current draft in
+                                    place. Opens an upward dropdown of presets. */}
+                                <div
+                                  ref={assistWrapRef}
+                                  className="wc-assistwrap relative"
+                                >
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => {
+                                      setAssistOpen((open) => !open);
+                                    }}
+                                    disabled={assistBusy}
+                                    aria-haspopup="menu"
+                                    aria-expanded={assistOpen}
+                                    title="AI Assist — rewrite your draft"
+                                    className="wc-assistbtn inline-flex h-8 items-center gap-1.5 rounded-xl border border-[#FBE0CC] bg-orange-50 px-2 text-xs font-semibold text-orange-600 transition hover:shadow-xs disabled:cursor-not-allowed disabled:opacity-60 2xl:h-9 2xl:px-3 2xl:text-sm"
+                                  >
+                                    {assistBusy ? (
+                                      <Loader2
+                                        size={15}
+                                        className="shrink-0 animate-spin"
+                                      />
+                                    ) : (
+                                      <Icon name="sparkles" size={15} />
+                                    )}
+                                    <span className="wc-btn-label">AI Assist</span>
+                                    <Icon
+                                      name="chevronDown"
+                                      size={13}
+                                      className="wc-assist-chevron"
+                                    />
+                                  </button>
+                                  {assistOpen ? (
+                                    <div
+                                      role="menu"
+                                      className="wc-assistmenu absolute bottom-[42px] left-0 z-20 w-[210px] rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl"
+                                    >
+                                      {AI_ASSIST_PRESETS.map((preset) => (
+                                        <button
+                                          key={preset.label}
+                                          type="button"
+                                          role="menuitem"
+                                          onMouseDown={(e) => e.preventDefault()}
+                                          onClick={() => applyAssist(preset)}
+                                          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-semibold text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+                                        >
+                                          <Icon
+                                            name="sparkles"
+                                            size={13}
+                                            className="text-orange-600"
+                                          />
+                                          {preset.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleAppointment}
+                                  title="Book Appointment"
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-2 text-xs font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 2xl:h-9 2xl:px-3 2xl:text-sm"
+                                >
+                                  <Calendar size={15} className="shrink-0" />
+                                  <span className="wc-btn-label">
+                                    Book Appointment
+                                  </span>
+                                </button>
+                              </div>
+                              <div className="wc-compose-tools flex items-center gap-1">
+                                {currentChannel !== "sms" ? (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          applyComposeFormat("bold");
+                                        }}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
+                                        title="Bold"
+                                      >
+                                        <Bold size={16} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          applyComposeFormat("italic");
+                                        }}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
+                                        title="Italic"
+                                      >
+                                        <Italic size={16} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          applyComposeFormat("bullet");
+                                        }}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
+                                        title="Bullet list"
+                                      >
+                                        <List size={16} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          applyComposeFormat("number");
+                                        }}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
+                                        title="Numbered list"
+                                      >
+                                        <ListOrdered size={16} />
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="relative rounded-3xl border border-gray-200 bg-white transition focus-within:border-orange-300 focus-within:ring-2 focus-within:ring-orange-100">
+                              {/* Uploaded files/images preview INSIDE the textbox. */}
+                              {composeAttachments.length > 0 ? (
+                                <div className="px-3 pt-3">
+                                  <AttachmentChips
+                                    attachments={composeAttachments}
+                                    removable
+                                    onRemove={(id) =>
                                       setComposeAttachments((current) =>
                                         current.filter(
-                                          (item) => (item.storage_key || item.id) !== key,
+                                          (attachment) => attachment.id !== id,
                                         ),
                                       )
                                     }
                                   />
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setShowPreview((current) => !current)
-                                  }
-                                  className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 sm:text-sm 2xl:px-2.5 2xl:py-1.5"
-                                >
-                                  <Eye size={15} />
-                                  {showPreview ? "Hide" : "Preview"}
-                                </button>
-
-                                 {currentChannel !== "sms" ? (
-                              <>
-                                <div className="flex flex-wrap items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      applyComposeFormat("bold");
-                                    }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                    title="Bold"
-                                  >
-                                    <Bold size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      applyComposeFormat("italic");
-                                    }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                    title="Italic"
-                                  >
-                                    <Italic size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      applyComposeFormat("bullet");
-                                    }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                    title="Bullet list"
-                                  >
-                                    <List size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      applyComposeFormat("number");
-                                    }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                    title="Numbered list"
-                                  >
-                                    <ListOrdered size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      applyComposeFormat("link");
-                                    }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                    title="Insert link"
-                                  >
-                                    <Link2 size={16} />
-                                  </button>
                                 </div>
-                                <span
-                                  className="mx-0.5 hidden h-6 w-px bg-gray-200 sm:inline-block"
-                                  aria-hidden
-                                />
-                              </>
-                            ) : null}
-                            
-                              </div>
-                              <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
-                                <button
-                                  type="button"
-                                  disabled={composeSendDisabled}
-                                  onClick={handleSendCurrentMessage}
-                                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-orange-500 px-3 py-1 text-xs font-semibold text-white shadow-xs transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm 2xl:h-10 2xl:px-4 2xl:py-2"
+                              ) : null}
+                              {!composeBody.trim() && composeAttachments.length === 0 ? (
+                                <span className="pointer-events-none absolute left-4 top-3 z-1 max-w-[calc(100%-2rem)] text-sm leading-relaxed text-gray-400">
+                                  {currentChannel === "sms"
+                                    ? "Click here to type your text message..."
+                                    : "Hi {firstname}, - click here to compose. Use the toolbar for bold, lists, and links."}
+                                </span>
+                              ) : null}
+                              <div
+                                ref={bodyRef}
+                                contentEditable
+                                suppressContentEditableWarning
+                                role="textbox"
+                                aria-multiline="true"
+                                aria-label="Message body"
+                                spellCheck
+                                onInput={() =>
+                                  setComposeBody(
+                                    composerInnerPlain(bodyRef.current),
+                                  )
+                                }
+                                onBlur={() =>
+                                  setComposeBody(
+                                    composerInnerPlain(bodyRef.current),
+                                  )
+                                }
+                                onPaste={(event) => {
+                                  // SMS is plain-text only. Email keeps basic
+                                  // structure but strips colors/styles so pasted
+                                  // text can't end up white-on-white.
+                                  if (currentChannel === "sms") {
+                                    const text =
+                                      event.clipboardData?.getData("text/plain");
+                                    if (text == null) return;
+                                    event.preventDefault();
+                                    document.execCommand("insertText", false, text);
+                                    setComposeBody(
+                                      composerInnerPlain(bodyRef.current),
+                                    );
+                                    return;
+                                  }
+                                  const html =
+                                    event.clipboardData?.getData("text/html");
+                                  event.preventDefault();
+                                  if (html) {
+                                    document.execCommand(
+                                      "insertHTML",
+                                      false,
+                                      sanitizePastedHtml(html),
+                                    );
+                                  } else {
+                                    const text =
+                                      event.clipboardData?.getData("text/plain") ||
+                                      "";
+                                    document.execCommand("insertText", false, text);
+                                  }
+                                  setComposeBody(
+                                    composerInnerPlain(bodyRef.current),
+                                  );
+                                }}
+                                className="wc-compose-body w-full resize-y px-4 pt-3 pb-14 text-sm leading-relaxed outline-hidden [&_a]:text-blue-600 [&_a]:underline [&_li]:ml-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:list-disc [&_ul]:pl-4 min-h-30"
+                              />
+                              {currentChannel === "sms" ? (
+                                <div
+                                  className={`pointer-events-none absolute right-4 top-2 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-xs ring-1 ${
+                                    smsSegmentCount(composeBody) > SMS_MAX_SEGMENTS
+                                      ? "bg-red-50 text-red-700 ring-red-200"
+                                      : "bg-white/95 text-gray-600 ring-gray-200"
+                                  }`}
                                 >
-                                  {sending ? (
-                                    <Loader2
-                                      size={15}
-                                      className="animate-spin"
-                                    />
-                                  ) : (
-                                    <Send size={15} />
-                                  )}
+                                  {composeBody.length}/
+                                  {SMS_SEGMENT_LENGTH * SMS_MAX_SEGMENTS}
+                                </div>
+                              ) : null}
+                              {/* Send overlaid INSIDE the textbox, bottom-right.
+                                  Icon-only on a narrow thread; label on wide. */}
+                              <button
+                                type="button"
+                                disabled={composeSendDisabled}
+                                onClick={handleSendCurrentMessage}
+                                title={currentChannel === "email" ? "Send Email" : "Send SMS"}
+                                className="wc-send-btn absolute bottom-2.5 right-2.5 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-orange-500 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {sending ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <Send size={16} />
+                                )}
+                                <span>
                                   {currentChannel === "email"
                                     ? "Send Email"
                                     : "Send SMS"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowSendLaterModal(true)}
-                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 transition hover:border-orange-200 hover:text-orange-600 2xl:h-10 2xl:w-10"
-                                  title="Send later"
-                                >
-                                  <Clock size={18} />
-                                </button>
-                              </div>
-                            </div>
+                                </span>
+                              </button>
                             </div>
                           </div>
 
@@ -3861,18 +3787,6 @@ export default function Inbox() {
                               {smsSegmentWarning}
                             </p>
                           ) : null}
-
-                          <AttachmentChips
-                            attachments={composeAttachments}
-                            removable
-                            onRemove={(id) =>
-                              setComposeAttachments((current) =>
-                                current.filter(
-                                  (attachment) => attachment.id !== id,
-                                ),
-                              )
-                            }
-                          />
 
                           {showPreview ? (
                             <div className="rounded-[28px] border border-gray-200 bg-slate-50 p-5">
@@ -3920,16 +3834,46 @@ export default function Inbox() {
               )}
             </section>
 
-            {/* Right: Inline contact details panel */}
-            {contactForView && (
-              <div className={`shrink-0 overflow-hidden border-l border-gray-100 transition-all duration-200 ${mobileView === "details" ? "flex w-full" : "hidden"} xl:flex ${isDetailsCollapsed ? "xl:w-0" : "xl:w-[320px]"}`}>
-                <div className="flex h-full w-full flex-col overflow-hidden xl:w-[320px]">
-                  {contactDetailsPanelContent}
-                </div>
+            {/* RIGHT COLUMN - lead intelligence (spec section 4) */}
+            {/* Hide/open bar for the lead-intelligence panel - grip only, no
+                arrow icon (desktop). */}
+            {contactForView && (bp === "xl" || bp === "lg") ? (
+              <div
+                className="wc-intel-handle"
+                role="button"
+                tabIndex={0}
+                aria-label={intelOpen ? "Hide lead information" : "Show lead information"}
+                title={intelOpen ? "Hide details" : "Show details"}
+                onClick={() => setIntelOpen((o) => !o)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setIntelOpen((o) => !o);
+                  }
+                }}
+              >
+                <span className="wc-intel-grip" />
               </div>
-            )}
+            ) : null}
+
+            {/* Dim scrim behind the drawer/sheet on tablet & phone. */}
+            {contactForView ? (
+              <button
+                type="button"
+                className="wc-intel-scrim"
+                aria-label="Close lead information"
+                onClick={() => setIntelOpen(false)}
+              />
+            ) : null}
+
+            {contactForView && (intelOpen || bp === "md" || bp === "sm") ? (
+              <div className="wc-ibx-intel">
+                {contactDetailsPanelContent}
+              </div>
+            ) : null}
           </div>
         )}
+      </div>
       </div>
 
       <DeleteLeadConfirmModal
