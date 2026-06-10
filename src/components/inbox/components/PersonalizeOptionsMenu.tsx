@@ -95,6 +95,7 @@ export default function PersonalizeOptionsMenu({
         onClick={() => setOpen((current) => !current)}
         className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-2 text-xs font-bold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 2xl:h-9 2xl:px-2.5 2xl:text-sm"
         aria-label="Open personalization options"
+        title="Personalize"
       >
         <Sparkles size={16} className="text-orange-500" />
         Personalize

@@ -64,28 +64,43 @@ export default function MessageBubble({
       id={`inbox-msg-${message.id}`}
       className={`wc-msg scroll-mt-24 ${side} ${who}`}
     >
-      {campaign ? (
-        <div className="wc-msg-tag">
-          <Icon name="route" size={11} />
-          {campaign}
-        </div>
-      ) : ai ? (
-        <div className="wc-msg-tag">
-          <Icon name="sparkles" size={11} />
-          AI Agent
-        </div>
-      ) : null}
       <div
         className={`wc-msg-bub ${
           highlight ? "ring-2 ring-orange-400 ring-offset-2" : ""
         }`}
       >
         <div className="mb-1 flex items-center gap-2 text-[11px] font-medium opacity-80 [&_.bg-white]:bg-white/70 [&_.text-red-200]:text-red-500 [&_.text-white]:text-current">
+          {/* AI Agent / campaign marker - now INSIDE the bubble's top row. */}
+          {campaign ? (
+            <span
+              className="inline-flex items-center gap-1 font-bold"
+              style={{ color: "inherit" }}
+            >
+              <Icon name="route" size={11} />
+              {campaign}
+            </span>
+          ) : ai ? (
+            <span
+              className="inline-flex items-center gap-1 font-bold"
+              style={{ color: "var(--accent-strong)" }}
+            >
+              <Icon name="sparkles" size={11} />
+              AI Agent
+            </span>
+          ) : null}
           <ChannelBadge
             channel={message.channel}
             mms={!!message.attachments && message.attachments.length > 0}
           />
           <DeliveryTicks message={message} />
+          {/* Timestamp inside the bubble, top-right - frees the row that used to
+              sit under each bubble and tightens the thread. */}
+          <time
+            className="ml-auto whitespace-nowrap"
+            style={{ marginTop: 0, color: "inherit", fontWeight: 400 }}
+          >
+            {formatDateTime(message.timestamp)}
+          </time>
         </div>
         {message.subject && message.channel === "email" ? (
           <div className="mb-1 text-sm font-semibold">{message.subject}</div>
@@ -101,7 +116,6 @@ export default function MessageBubble({
           </div>
         ) : null}
       </div>
-      <time>{formatDateTime(message.timestamp)}</time>
     </div>
   );
 }

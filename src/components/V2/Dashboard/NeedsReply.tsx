@@ -198,7 +198,7 @@ const NeedsReply: React.FC<NeedsReplyProps> = ({ priority, contacts, isLoading }
         </div>
         <button
           type="button"
-          onClick={() => navigate("/inbox")}
+          onClick={() => navigate("/inbox?filter=needs_reply")}
           className="whitespace-nowrap rounded-lg border border-[#EAEAEA] bg-white px-2.5 py-1.5 text-xs font-medium text-[#463b31] transition hover:bg-[#faf7f2]"
         >
           View all {total}

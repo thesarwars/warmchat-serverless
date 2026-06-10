@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import MainLayout from "./MainLayout";
 import MissingBusinessAddressBanner from "./MissingBusinessAddressBanner";
 import MonthlyKPIStrip from "./V2/Dashboard/MonthlyKPIStrip";
+import WaitingBanner from "./V2/Dashboard/WaitingBanner";
 import NeedsReply from "./V2/Dashboard/NeedsReply";
 import HotLead from "./V2/Dashboard/HotLead";
 import AIIntelligence, { type PriorityActionsData } from "./V2/Dashboard/AIIntelligence";
@@ -11,7 +12,7 @@ import AIWinsToday from "./V2/Dashboard/AIWinsToday";
 import ConversionFunnel from "./V2/Dashboard/ConversionFunnel";
 import TodaySchedule from "./V2/Dashboard/TodaySchedule";
 import QuickActions from "./V2/Dashboard/QuickActions";
-import AiNextSteps from "./V2/Dashboard/AiNextSteps";
+// import AiNextSteps from "./V2/Dashboard/AiNextSteps"; // hidden per request
 import AppointmentModal from "./V2/Dashboard/AppointmentModal";
 import ConfirmDialog from "./V2/Dashboard/ConfirmDialog";
 import KpiGoalsModal from "./V2/Dashboard/KpiGoalsModal";
@@ -52,9 +53,11 @@ const getDateRangeForDays = (days: number) => {
 };
 
 const getGreeting = () => {
+  // User's local (device) timezone. Morning 4am-12pm, afternoon 12pm-5pm,
+  // evening 5pm-4am (covers late night).
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
+  if (hour >= 4 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
   return "Good evening";
 };
 
@@ -144,11 +147,10 @@ const DashboardV2: React.FC = () => {
 
   const firstName =
     (localStorage.getItem("name") || "there").trim().split(/\s+/)[0] || "there";
-  const todayLabel = new Date().toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  // Uppercase date eyebrow above the greeting (design: "THURSDAY, JUNE 11").
+  const dateEyebrow = new Date()
+    .toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
+    .toUpperCase();
 
   // Always refetch on mount so returning from the Inbox/booking flow shows fresh
   // counts + schedule without a hard page refresh.
@@ -213,6 +215,47 @@ const DashboardV2: React.FC = () => {
         ? (hot_leads as unknown[]).length
         : 0;
   const hotLeadsCount = Math.max(statusHotCount, dashHotCount);
+
+  // Live "needs reply" count from the inbox contacts feed - leads where the lead
+  // spoke last (needs_reply) or that still carry unread inbound messages. Drives
+  // the Needs Reply KPI and the urgency banner copy.
+  const inboxContactList: Array<{
+    needs_reply?: boolean | null;
+    total_unread_count?: number | string | null;
+    unread_count?: number | string | null;
+  }> =
+    (Array.isArray(inbox_contacts)
+      ? inbox_contacts
+      : (inbox_contacts as { contacts?: unknown[] } | undefined)?.contacts) as
+      | Array<{ needs_reply?: boolean | null; total_unread_count?: number | string | null; unread_count?: number | string | null }>
+      | undefined ?? [];
+  const needsReplyCount = inboxContactList.filter(
+    (c) => Boolean(c.needs_reply) || toNumber(c.total_unread_count ?? c.unread_count) > 0,
+  ).length;
+
+  // One-line overnight AI-activity summary, built from real dashboard counts.
+  const dashSummary = (data as { summary?: Record<string, unknown> } | undefined)?.summary ?? {};
+  const overnightConversations = toNumber(
+    (dashSummary as { new_conversations?: unknown }).new_conversations,
+  );
+  const overnightBooked = toNumber(
+    (dashSummary as { ai_appointments?: unknown; appointments?: unknown }).ai_appointments ??
+      (dashSummary as { appointments?: unknown }).appointments,
+  );
+  const summaryParts: string[] = [];
+  if (overnightConversations > 0) {
+    summaryParts.push(
+      `Your AI handled ${overnightConversations} conversation${overnightConversations === 1 ? "" : "s"}`,
+    );
+  }
+  if (overnightBooked > 0) {
+    summaryParts.push(
+      `${summaryParts.length ? "and booked" : "Your AI booked"} ${overnightBooked} showing${overnightBooked === 1 ? "" : "s"}`,
+    );
+  }
+  const overnightSummary = summaryParts.length
+    ? `${summaryParts.join(" ")}.`
+    : "Here's what's happening with your business today.";
 
   // Map appointments endpoint items into the shape TodaySchedule consumes, tagging
   // AI-booked items so they render a "BY AI" pill.
@@ -310,15 +353,28 @@ const DashboardV2: React.FC = () => {
         {/* Greeting header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold tracking-tight text-[#211a14] sm:text-[28px]">
-              {getGreeting()}, {firstName}
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8c7d6f]">
+              {dateEyebrow}
+            </div>
+            <h1 className="text-[28px] font-extrabold leading-[1.04] tracking-[-0.02em] text-[#211a14] sm:text-[40px]">
+              {getGreeting()}, {firstName}.
             </h1>
-            <p className="mt-1 text-[13px] text-[#6a5d50]">
-              Here&apos;s what&apos;s happening with your business today.
+            <p className="mt-2 text-[15px] text-[#6a5d50]">
+              {overnightSummary}
+              {needsReplyCount > 0 && (
+                <>
+                  {" "}
+                  <span className="font-semibold text-[#C0530F]">
+                    {needsReplyCount} need{needsReplyCount === 1 ? "s" : ""} you
+                  </span>{" "}
+                  today.
+                </>
+              )}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Connection chips - shown only where the Topbar pills are hidden (<xl). */}
+          <div className="flex flex-wrap items-center gap-2 xl:hidden">
             {emailState !== "loading" && (
               <button
                 type="button"
@@ -385,21 +441,20 @@ const DashboardV2: React.FC = () => {
                     : "SMS not connected - Upgrade"}
               </button>
             )}
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#EAEAEA] bg-white px-3 py-1.5 text-xs font-medium text-[#211a14]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="#8c7d6f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {todayLabel}
-            </span>
           </div>
         </header>
+
+        {/* Urgency strip: leads waiting on a human reply (live inbox data) */}
+        <WaitingBanner contacts={inbox_contacts} isLoading={inboxLoading} />
 
         {/* KPI strip with monthly goals */}
         <MonthlyKPIStrip
           data={data}
           hotLeadsCount={hotLeadsCount}
+          needsReplyCount={needsReplyCount}
           goals={kpiGoals}
           onEditGoals={() => setGoalsOpen(true)}
+          onOpenNeedsReply={() => navigate("/inbox?filter=needs_reply")}
           isLoading={dataLoading}
         />
 
@@ -426,7 +481,8 @@ const DashboardV2: React.FC = () => {
 
           {/* RIGHT RAIL */}
           <div className="flex min-w-0 flex-col gap-4">
-            <AiNextSteps />
+            {/* AI Next Steps hidden per request */}
+            {/* <AiNextSteps /> */}
             <AIWinsToday data={data} isLoading={dataLoading} />
             <ConversionFunnel
               data={perfomances}

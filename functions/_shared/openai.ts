@@ -231,7 +231,13 @@ function formatDateInZone(now: Date, timeZone: string): { text: string; zone: st
       hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short",
     }).formatToParts(now);
     const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-    const tzName = get("timeZoneName");
+    // Always show the STANDARD abbreviation (e.g. PST, not PDT) regardless of
+    // daylight saving, so times read consistently everywhere.
+    const STD_ABBREV: Record<string, string> = {
+      PDT: "PST", MDT: "MST", CDT: "CST", EDT: "EST", AKDT: "AKST", HDT: "HST",
+    };
+    const rawTzName = get("timeZoneName");
+    const tzName = STD_ABBREV[rawTzName] || rawTzName;
     const text = `${get("weekday")}, ${get("month")} ${get("day")}, ${get("year")} at ${get("hour")}:${get("minute")} ${get("dayPeriod")}${tzName ? ` ${tzName}` : ""}`;
     return { text, zone: tz };
   } catch {

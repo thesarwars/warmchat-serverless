@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import {
   X,
   Home,
@@ -118,6 +119,9 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   const [sendEmail, setSendEmail] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const today = new Date().toISOString().split("T")[0];
+
+  // Lock page scroll while the modal is open (no background scrolling).
+  useBodyScrollLock(isOpen);
 
   useEffect(() => {
     if (!isOpen) setSubmitting(false);
@@ -289,22 +293,23 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
 
   return (
     <div
-      className={`fixed inset-0 z-50 ${isOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6 ${isOpen ? "pointer-events-auto" : "pointer-events-none"}`}
       aria-hidden={!isOpen}
     >
       <div
         onClick={onClose}
-        className={`absolute inset-0 bg-black/30 transition-opacity duration-300 ${
+        className={`absolute inset-0 bg-black/30 transition-opacity duration-200 ${
           isOpen ? "opacity-100" : "opacity-0"
         }`}
       />
 
+      {/* Centered modal panel (was a right-side slide-in drawer). */}
       <aside
         role="dialog"
         aria-modal="true"
         aria-labelledby="appointment-modal-title"
-        className={`absolute right-0 top-0 h-full w-full max-w-155 bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-out ${
-          isOpen ? "translate-x-0" : "translate-x-full"
+        className={`relative z-10 m-auto flex w-full max-w-155 max-h-[calc(100dvh-3rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-all duration-200 ease-out ${
+          isOpen ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-2 pointer-events-none"
         }`}
       >
         <header className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-gray-100">

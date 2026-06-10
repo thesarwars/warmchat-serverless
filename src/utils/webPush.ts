@@ -117,13 +117,19 @@ export const enableWebPush = async (_token?: string): Promise<boolean> => {
   if (!isWebPushSupported()) {
     throw new Error("Web push is not supported in this browser");
   }
-  const reg = await registerServiceWorker();
-  if (!reg) throw new Error("Could not register the service worker");
-
+  // Request permission FIRST, as the very first async step in the click
+  // handler, so the browser still treats it as user-initiated and reliably
+  // shows the native OS/browser prompt. Awaiting service-worker registration
+  // BEFORE this breaks the user-gesture in Chrome/Safari, so the prompt never
+  // appears and permission silently resolves to "default" - which is exactly
+  // the "try again shortly" cooldown the user hit.
   const perm = await Notification.requestPermission();
   if (perm !== "granted") {
     throw new Error("Notification permission was not granted");
   }
+
+  const reg = await registerServiceWorker();
+  if (!reg) throw new Error("Could not register the service worker");
 
   const keyRes = await cookieFetch(`${API_BASE}/notifications/vapid-public-key`);
   if (!keyRes.ok) {

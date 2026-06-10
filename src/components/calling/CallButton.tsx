@@ -15,6 +15,11 @@ interface Props {
   leadId?: string;
   size?: "sm" | "md";
   className?: string;
+  /** Hide the "Call from web / Call from my phone" dropdown - just the web-call
+   *  button (web is the only active path). */
+  hideMenu?: boolean;
+  /** Render the icon only (no "Call" label). */
+  iconOnly?: boolean;
 }
 
 export function CallButton({
@@ -23,6 +28,8 @@ export function CallButton({
   leadId,
   size = "md",
   className = "",
+  hideMenu = false,
+  iconOnly = false,
 }: Props) {
   const { canCall, reasons, loading } = useCanCall();
   const { startWebCall, startPhoneCall, activeCall, telnyxReady } =
@@ -91,43 +98,45 @@ export function CallButton({
         className={`${sizeClasses} inline-flex items-center gap-1.5 bg-orange-500 text-white hover:bg-orange-600 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed`}
       >
         <Phone className="h-4 w-4" />
-        <span>Call</span>
+        {!iconOnly ? <span>Call</span> : null}
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            className={`${sizeClasses} inline-flex items-center bg-orange-500 text-white border-l border-orange-600 hover:bg-orange-600 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed`}
-            aria-label="Call options"
-          >
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onClick={handleWeb}
-            disabled={disabled || !telnyxReady}
-          >
-            <Phone className="mr-2 h-4 w-4" />
-            <div className="flex flex-col">
-              <span>Call from web</span>
-              <span className="text-xs text-gray-500">
-                {telnyxReady ? "Ready" : "Connecting..."}
-              </span>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handlePhone} disabled={disabled}>
-            <Smartphone className="mr-2 h-4 w-4" />
-            <div className="flex flex-col">
-              <span>Call from my phone</span>
-              <span className="text-xs text-gray-500">
-                Rings your cell first
-              </span>
-            </div>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {!hideMenu ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={disabled}
+              className={`${sizeClasses} inline-flex items-center bg-orange-500 text-white border-l border-orange-600 hover:bg-orange-600 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed`}
+              aria-label="Call options"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={handleWeb}
+              disabled={disabled || !telnyxReady}
+            >
+              <Phone className="mr-2 h-4 w-4" />
+              <div className="flex flex-col">
+                <span>Call from web</span>
+                <span className="text-xs text-gray-500">
+                  {telnyxReady ? "Ready" : "Connecting..."}
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handlePhone} disabled={disabled}>
+              <Smartphone className="mr-2 h-4 w-4" />
+              <div className="flex flex-col">
+                <span>Call from my phone</span>
+                <span className="text-xs text-gray-500">
+                  Rings your cell first
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   );
 }

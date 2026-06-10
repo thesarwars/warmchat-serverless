@@ -10,6 +10,7 @@ export const LEAD_FIELDS = [
   "notes",
   "company",
   "property_address",
+  "area",
   "status",
   "source",
   "tags",
@@ -30,6 +31,7 @@ export const LEAD_FIELD_LABELS_MAP: Record<string, string> = {
   notes: "Notes",
   company: "Company",
   property_address: "Property Address",
+  area: "Area (city / neighborhood)",
   status: "Stage",
   source: "Source",
   tags: "Tags",
@@ -187,9 +189,7 @@ export const QUICK_FILTERS: { id: QuickFilterId; label: string }[] = [
 export const IMPORT_STEP_LABELS = [
   "Upload File",
   "Map Columns",
-  "Duplicate Handling",
-  "AI Follow-Up",
-  "SMS Consent & Tags",
+  "Import Settings",
   "Review & Import",
 ];
 

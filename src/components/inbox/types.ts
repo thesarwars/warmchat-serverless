@@ -21,6 +21,8 @@ export type InboxContact = {
   stage?: string | null;
   company?: string | null;
   property_address?: string | null;
+  source?: string | null;
+  ai_summary?: string | null;
   price_range?: string | null;
   tags?: string[];
   notes?: string | null;

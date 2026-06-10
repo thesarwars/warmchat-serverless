@@ -11,7 +11,7 @@ const TZ_ABBREV: Record<string, string> = {
   "America/Chicago": "CT",
   "America/Denver": "MT",
   "America/Phoenix": "MST",
-  "America/Los_Angeles": "PT",
+  "America/Los_Angeles": "PST", // always PST (not PDT) per workspace preference
   "America/Anchorage": "AKT",
   "Pacific/Honolulu": "HT",
 };

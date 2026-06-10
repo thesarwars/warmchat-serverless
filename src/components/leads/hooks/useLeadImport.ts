@@ -91,6 +91,14 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
   // integration). The import wizard therefore offers ONLY this reactive
   // inbound-reply switch, no automation picker.
   const [importInboundEnabled, setImportInboundEnabled] = useState(true);
+  // "AI Qualification" - AI asks the qualifying questions when it replies. Runs
+  // as part of the inbound flow, so either AI checkbox turns inbound on.
+  const [importQualificationEnabled, setImportQualificationEnabled] = useState(true);
+  // "Human Only" - no AI replies and no automation; sets ai_status='off'.
+  const [importHumanOnly, setImportHumanOnly] = useState(false);
+  // Optional workflow/automation to enroll the imported leads into (apply-ai
+  // bulk-enrolls via bulkEnrollAutomation; "Do not SMS" rows are skipped there).
+  const [importAutomationId, setImportAutomationId] = useState<number | null>(null);
   const [importAiApplying, setImportAiApplying] = useState(false);
   // "Batch N of M" shown during a chunked large import (empty for single-shot).
   const [importProgress, setImportProgress] = useState("");
@@ -282,11 +290,19 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     return "manual";
   };
 
-  // Turn on reactive inbound AI replies for the imported leads. This only sets
-  // the per-lead ai_status (gated by the master + Inbound switches at reply
-  // time); it never queues an outbound message. No automation enrollment.
+  // Configure AI for the imported leads via apply-ai:
+  //  - inbound replies on when either AI checkbox is checked (qualification runs
+  //    inside the inbound flow) and Human Only is off,
+  //  - optional workflow enrollment (automation_id -> bulkEnrollAutomation),
+  //  - Human Only -> inbound off + no automation -> ai_status='off' explicitly.
   const applyImportAi = async (leadIds: number[]) => {
-    if (!importInboundEnabled || !leadIds.length) return { ok: true, enrolled: 0 };
+    const inbound =
+      (importInboundEnabled || importQualificationEnabled) && !importHumanOnly;
+    const automationId = !importHumanOnly && importAutomationId ? importAutomationId : null;
+    // Nothing to set: AI checkboxes off without an explicit Human Only choice.
+    if ((!inbound && !automationId && !importHumanOnly) || !leadIds.length) {
+      return { ok: true, enrolled: 0 };
+    }
     setImportAiApplying(true);
     try {
       const res = await fetch(`${API_BASE}/leads/import/${org_id}/apply-ai`, {
@@ -299,7 +315,8 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
           lead_ids: leadIds,
           enabled: true,
           channel: "sms",
-          inbound_enabled: true,
+          inbound_enabled: inbound,
+          ...(automationId ? { automation_id: automationId } : {}),
         }),
       });
       const data = await res.json();
@@ -312,7 +329,7 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
   };
 
   const handleImportWizardContinue = () => {
-    if (importStep >= 6) return;
+    if (importStep >= 4) return;
     setImportResult(null);
     setImportSkipReasons([]);
     setMessage2("");
@@ -321,7 +338,7 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
 
   const handleImportConfirm = async () => {
     const parsed = parsedRef.current;
-    if (!csvFile || !parsed || importStep !== 6 || importResult) return;
+    if (!csvFile || !parsed || importStep !== 4 || importResult) return;
     setImporting(true);
     setImportProgress("");
 
@@ -417,19 +434,24 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     setImportSkipReasons(result.skip_reasons ?? []);
 
     const importedCount = created + updated;
+    const aiWanted =
+      (importInboundEnabled || importQualificationEnabled) && !importHumanOnly;
+    const workflowWanted = !importHumanOnly && !!importAutomationId;
     try {
-      if (importInboundEnabled && importedLeadIds.length) {
+      if ((aiWanted || workflowWanted || importHumanOnly) && importedLeadIds.length) {
         const ai = await applyImportAi(importedLeadIds);
         if (ai.ok) {
-          setMessage2(
-            `Imported ${importedCount} leads. Inbound AI replies enabled for ${ai.enrolled} lead(s).`,
-          );
+          const bits: string[] = [];
+          if (workflowWanted) bits.push(`${ai.enrolled} lead(s) enrolled in the workflow`);
+          else if (aiWanted) bits.push(`Inbound AI replies enabled for ${ai.enrolled} lead(s)`);
+          else bits.push("AI set to Human Only for this batch");
+          setMessage2(`Imported ${importedCount} leads. ${bits.join(" · ")}.`);
         } else {
           const reason =
             (ai.data as { message?: string } | null)?.message ||
             "Please check your AI settings.";
           setMessage2(
-            `Imported ${importedCount} leads, but enabling inbound AI replies failed. ${reason}`,
+            `Imported ${importedCount} leads, but applying the AI settings failed. ${reason}`,
           );
         }
       } else {
@@ -463,6 +485,9 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     setAutoDetectedMapping({});
     setImportDefaultStage("New Lead");
     setImportInboundEnabled(true);
+    setImportQualificationEnabled(true);
+    setImportHumanOnly(false);
+    setImportAutomationId(null);
     setImportAiApplying(false);
     setImportProgress("");
     setImportPreviewLoading(false);
@@ -507,7 +532,7 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     if (importStep === 1) {
       closeImportModal();
     } else {
-      if (importStep === 6) {
+      if (importStep === 4) {
         setImportResult(null);
         setImportSkipReasons([]);
       }
@@ -516,7 +541,7 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
   };
 
   const handleImportContinue = () => {
-    if (importStep === 6 && !importResult) {
+    if (importStep === 4 && !importResult) {
       void handleImportConfirm();
       return;
     }
@@ -577,6 +602,12 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     setImportDefaultStage,
     importInboundEnabled,
     setImportInboundEnabled,
+    importQualificationEnabled,
+    setImportQualificationEnabled,
+    importHumanOnly,
+    setImportHumanOnly,
+    importAutomationId,
+    setImportAutomationId,
     importAiApplying,
     message2,
     importBusy,

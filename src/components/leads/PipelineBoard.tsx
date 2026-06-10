@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Clock, MessageSquare } from "lucide-react";
 import { PIPELINE_STAGES, STAGE_SCORE } from "./constants";
 import type { EditingLead, QuickFilterId } from "./types";
 import {
@@ -9,8 +9,7 @@ import {
   getPriceRange,
   getStageValue,
   leadInitials,
-  leadTypePillClass,
-  scoreColor,
+  scoreFillColor,
   stageDotColor,
 } from "./utils/leadDisplay";
 
@@ -20,38 +19,60 @@ import {
  * the server (`/api/leads/:orgId?statuses=<stage>` with the same search + quick
  * filters and "+N more" paging), and dragging a card to another column persists
  * the lead's new Stage (PUT /leads/:id { status }). Mirrors the Deals board.
+ *
+ * Re-skinned to the spec's wc-board / wc-col / wc-card classes; the stage color
+ * is passed as a `--stage` CSS variable so the column dot, probability pill, and
+ * the card's 3px left border all pick it up.
  */
 
 const PER = 10;
 
 type MoveFn = (lead: EditingLead, toStage: string) => void;
 
-function scoreBar(score: number) {
-  const c = scoreColor(score);
+/** Map a normalized lead type to the spec's wc-chip color variant. */
+function typeChipClass(t: string) {
+  if (t === "Buyer") return "wc-chip wc-chip-buyer";
+  if (t === "Seller") return "wc-chip wc-chip-seller";
+  if (t === "Renter") return "wc-chip wc-chip-renter";
+  return "wc-chip wc-tag";
+}
+
+function ScoreBar({ score }: { score: number }) {
   return (
-    <div className="flex items-center gap-2" title={`Score ${score}%`}>
-      <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
-        <span className={`block h-full rounded-full ${c.bar}`} style={{ width: `${score}%` }} />
+    <div className="wc-score" title={`Score ${score}%`}>
+      <span className="wc-score-track">
+        <span
+          className="wc-score-fill"
+          style={{ width: `${score}%`, background: scoreFillColor(score) }}
+        />
       </span>
-      <span className={`text-xs font-semibold tabular-nums ${c.text}`}>{score}</span>
+      <span className="wc-score-num" style={{ color: scoreFillColor(score) }}>
+        {score}
+      </span>
     </div>
   );
 }
 
 function LeadKanbanCard({
   lead,
+  stageColor,
+  isActive,
   onOpen,
   onDragStart,
 }: {
   lead: EditingLead;
+  stageColor: string;
+  isActive: boolean;
   onOpen: (lead: EditingLead) => void;
   onDragStart: (lead: EditingLead) => void;
 }) {
   const leadType = getLeadType(lead);
   const budget = getPriceRange(lead);
   const score = STAGE_SCORE[getStageValue(lead)] ?? 0;
-  const hot = score > 45;
   const aiActive = getAiStatus(lead) === "AI Active";
+  const needsReply = Boolean(
+    (lead as Record<string, unknown>).needs_reply ?? (lead as Record<string, unknown>).needsReply,
+  );
   return (
     <div
       data-lead-card
@@ -61,43 +82,51 @@ function LeadKanbanCard({
         onDragStart(lead);
       }}
       onClick={() => onOpen(lead)}
-      className={`cursor-pointer rounded-xl border bg-white p-3 shadow-sm transition hover:shadow ${
-        hot ? "border-l-4 border-l-orange-400 border-y border-r border-gray-100" : "border border-gray-100"
-      }`}
+      className={`wc-card${isActive ? " is-active" : ""}`}
+      style={{ ["--stage" as string]: stageColor }}
     >
-      <div className="flex items-start gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-gray-200 to-gray-100 text-[11px] font-semibold uppercase text-gray-700">
+      <div className="wc-card-top">
+        <span className="wc-avatar wc-avatar-grey" style={{ width: 32, height: 32, fontSize: 11 }}>
           {leadInitials(lead.name)}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-gray-900" title={lead.name || undefined}>{lead.name || "-"}</div>
-          <div className="truncate text-xs text-gray-500">
+        <div className="wc-card-id">
+          <div className="wc-card-name" title={lead.name || undefined}>
+            <span className="truncate">{lead.name || "-"}</span>
+          </div>
+          <div className="wc-card-sub truncate">
             {lead.source?.trim() ? lead.source : lead.email || lead.phone || "-"}
           </div>
         </div>
+        {needsReply ? (
+          <span className="wc-needsreply" title="Needs reply">
+            <MessageSquare size={13} />
+          </span>
+        ) : null}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${leadTypePillClass(leadType)}`}>
-          {leadType}
+      <div className="wc-card-meta">
+        <span className={typeChipClass(leadType)}>{leadType}</span>
+        {budget !== "-" ? <span className="wc-tag wc-tag-ok">{budget}</span> : null}
+      </div>
+
+      <div className="wc-card-foot">
+        <span className="wc-card-age">
+          <Clock size={12} />
+          {formatRelativeUpdated(lead.updated_at)}
         </span>
-        {budget !== "-" ? (
-          <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-            {budget}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-400">{formatRelativeUpdated(lead.updated_at)}</span>
         {aiActive ? (
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
-            <Sparkles size={11} /> AI
+          <span className="wc-ai-pill">
+            <span className="wc-ai-dot" />
+            AI
           </span>
-        ) : null}
+        ) : (
+          <ScoreBar score={score} />
+        )}
       </div>
 
-      <div className="mt-2">{scoreBar(score)}</div>
+      {/* When the card already shows the AI pill in the foot, surface the score
+          on its own row below (spec: "If AI and score, a second ScoreBar renders below"). */}
+      {aiActive ? <ScoreBar score={score} /> : null}
     </div>
   );
 }
@@ -109,6 +138,7 @@ function PipelineColumn({
   orgId,
   query,
   reloadKey,
+  activeId,
   onOpen,
   onDragStart,
   isOver,
@@ -122,6 +152,7 @@ function PipelineColumn({
   orgId: string | null;
   query: string;
   reloadKey: number;
+  activeId: number | null;
   onOpen: (lead: EditingLead) => void;
   onDragStart: (lead: EditingLead) => void;
   isOver: boolean;
@@ -179,12 +210,12 @@ function PipelineColumn({
   };
 
   const score = STAGE_SCORE[stage] ?? 0;
+  const color = stageDotColor(stage);
 
   return (
     <div
-      className={`flex w-72 shrink-0 flex-col rounded-2xl border bg-gray-50/70 ${
-        isOver ? "border-orange-300 ring-2 ring-orange-200" : "border-gray-100"
-      }`}
+      className={`wc-col${isOver ? " is-over" : ""}`}
+      style={{ ["--stage" as string]: color }}
       onDragOver={(e) => {
         e.preventDefault();
         onOver();
@@ -195,39 +226,34 @@ function PipelineColumn({
         onDrop();
       }}
     >
-      <div
-        className="flex items-center justify-between gap-2 rounded-t-2xl border-b border-gray-100 px-3 py-2.5"
-        style={{ borderTop: `3px solid ${stageDotColor(stage)}` }}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: stageDotColor(stage) }} />
-          <span className="truncate text-sm font-semibold text-gray-800">{stage}</span>
-          <span className="text-xs font-medium text-gray-400">{total}</span>
+      <div className="wc-col-head">
+        <div className="wc-col-title">
+          <span className="wc-col-dot" />
+          <span className="truncate">{stage}</span>
+          <span className="wc-col-count">{total}</span>
         </div>
-        <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-orange-600 shadow-sm">
-          {score}%
-        </span>
+        <span className="wc-col-prob">{score}%</span>
       </div>
 
-      <div className="flex min-h-24 flex-1 flex-col gap-2 p-2.5">
+      <div className="wc-col-body">
         {items.map((lead) => (
-          <LeadKanbanCard key={lead.id} lead={lead} onOpen={onOpen} onDragStart={onDragStart} />
+          <LeadKanbanCard
+            key={lead.id}
+            lead={lead}
+            stageColor={color}
+            isActive={activeId === lead.id}
+            onOpen={onOpen}
+            onDragStart={onDragStart}
+          />
         ))}
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-gray-400">
             <Loader2 size={16} className="animate-spin" />
           </div>
         ) : null}
-        {!loading && items.length === 0 ? (
-          <div className="px-1 py-6 text-center text-xs text-gray-400">No leads</div>
-        ) : null}
+        {!loading && items.length === 0 ? <div className="wc-col-empty">No leads</div> : null}
         {total > items.length ? (
-          <button
-            type="button"
-            onClick={loadMore}
-            disabled={loading}
-            className="rounded-lg border border-dashed border-gray-200 bg-white px-2 py-2 text-xs font-semibold text-gray-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50"
-          >
+          <button type="button" onClick={loadMore} disabled={loading} className="wc-col-more">
             {loading ? "Loading..." : `+ ${total - items.length} more`}
           </button>
         ) : null}
@@ -242,6 +268,7 @@ export default function PipelineBoard({
   orgId,
   debouncedSearch,
   quickFilters,
+  activeLeadId = null,
   onOpenLead,
   onChanged,
 }: {
@@ -250,6 +277,7 @@ export default function PipelineBoard({
   orgId: string | null;
   debouncedSearch: string;
   quickFilters: QuickFilterId[];
+  activeLeadId?: number | null;
   onOpenLead: (lead: EditingLead) => void;
   onChanged: () => void;
 }) {
@@ -354,7 +382,7 @@ export default function PipelineBoard({
   return (
     <div
       ref={boardRef}
-      className={`flex gap-3 overflow-x-auto pb-2 ${grabbing ? "cursor-grabbing select-none" : "cursor-grab"}`}
+      className={`wc-board wc-board-pan${grabbing ? " is-grabbing" : ""}`}
       onPointerDown={onPanDown}
       onPointerMove={onPanMove}
       onPointerUp={endPan}
@@ -372,6 +400,7 @@ export default function PipelineBoard({
           query={query}
           // Per-stage move signal; filter changes reload via fetchPage's deps.
           reloadKey={reloadKeys[stage] ?? 0}
+          activeId={activeLeadId}
           onOpen={onOpenLead}
           onDragStart={setDragLead}
           isOver={overStage === stage}

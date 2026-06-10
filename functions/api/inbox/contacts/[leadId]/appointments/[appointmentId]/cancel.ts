@@ -15,6 +15,28 @@ interface Body {
   send_email_confirmation?: boolean;
 }
 
+/**
+ * After a cancel, if the lead has no remaining active appointments, clear
+ * appointment_booked and step "Appointment Set" back to "Qualified" so the
+ * pipeline/lead never shows "Appointment Set" with zero live appointments.
+ */
+async function syncLeadStageAfterCancel(env: Env, leadId: number): Promise<void> {
+  const remaining = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(*) AS n FROM lead_appointment WHERE lead_id = ? AND COALESCE(status,'') != ?`,
+    leadId, APPT_CANCELLED,
+  );
+  if ((remaining?.n ?? 0) === 0) {
+    await execute(
+      env.D1DB,
+      `UPDATE lead SET appointment_booked = 0,
+              status = CASE WHEN status = 'Appointment Set' THEN 'Qualified' ELSE status END,
+              updated_at = ? WHERE id = ?`,
+      nowIso(), leadId,
+    );
+  }
+}
+
 /** POST /api/inbox/contacts/:leadId/appointments/:appointmentId/cancel */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env, params } = context;
@@ -28,7 +50,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     env.D1DB, `SELECT * FROM lead_appointment WHERE id = ? AND lead_id = ?`, apptId, leadId);
   if (!appt) return error("Appointment not found", 404);
   if (!(await isOrgMember(env, user.id, appt.org_id))) return error("Forbidden", 403);
-  if (!ACTIVE_APPT_STATUSES.has(appt.status)) return error("Appointment is already cancelled", 400);
+  // Already cancelled? Re-sync the lead stage anyway (self-heals a lead stuck on
+  // "Appointment Set" from a cancel that predated this logic), then return
+  // idempotently instead of erroring.
+  if (!ACTIVE_APPT_STATUSES.has(appt.status)) {
+    await syncLeadStageAfterCancel(env, leadId);
+    return json({
+      appointment: serializeAppointment(appt),
+      message: appointmentToUnifiedDict(appt),
+      already_cancelled: true,
+    });
+  }
 
   const body = (await readJson<Body>(request)) || {};
 
@@ -37,6 +69,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     `UPDATE lead_appointment SET status = ?, updated_at = ? WHERE id = ?`,
     APPT_CANCELLED, nowIso(), apptId,
   );
+
+  await syncLeadStageAfterCancel(env, leadId);
 
   const confirmations = await sendAppointmentConfirmations(env, {
     appointmentId: apptId,
