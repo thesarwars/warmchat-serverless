@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -173,6 +173,13 @@ export default function ImportLeadsModal({
     { enabled: open && Boolean(importOrgId) },
   );
   const workflowOptions = Array.isArray(orgAutomations) ? orgAutomations : [];
+
+  // Each step starts scrolled to the TOP - without this, a long step (e.g. the
+  // mapping grid) leaves the next step opened at the bottom.
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    bodyScrollRef.current?.scrollTo({ top: 0 });
+  }, [importStep]);
 
   // Success screen auto-dismiss: after the import completes, return to the
   // Leads page automatically after 3s (onDone closes + refreshes the list).
@@ -350,7 +357,7 @@ export default function ImportLeadsModal({
               </div>
 
               {/* ===== Body ===== */}
-              <div className="wc-imp-bodywrap">
+              <div className="wc-imp-bodywrap" ref={bodyScrollRef}>
                 {importBusy && importLoadingMessage && (
                   <div className="wc-imp-narrow" style={{ marginBottom: 16 }}>
                     <div className="wc-imp-ready" style={{ marginTop: 0 }}>
