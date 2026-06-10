@@ -311,17 +311,17 @@ export default function AddLeadModal({
               {needsAttestation && (
                 <div
                   ref={attestationRef}
-                  className={`rounded-lg border bg-amber-50 p-2.5 shadow-xs transition ${
+                  className={`rounded-lg border bg-white p-2.5 shadow-xs transition ${
                     flashAttestation
-                      ? "border-amber-500 ring-2 ring-amber-400 ring-offset-1"
-                      : "border-amber-400"
+                      ? "border-orange-500 ring-2 ring-orange-300 ring-offset-1"
+                      : "border-gray-200"
                   }`}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="inline-flex items-center rounded-full border border-amber-300 bg-white px-1.5 py-px text-[9px] font-bold uppercase text-amber-800">
+                    <span className="inline-flex items-center rounded bg-orange-500 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white">
                       Action required
                     </span>
-                    <span className="text-[11px] font-semibold text-amber-900">
+                    <span className="text-[11px] font-bold text-gray-900">
                       TCPA consent attestation
                     </span>
                   </div>
@@ -330,15 +330,15 @@ export default function AddLeadModal({
                       type="checkbox"
                       checked={consentAttested}
                       onChange={(e) => setConsentAttested(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-amber-500 text-amber-600 focus:ring-2 focus:ring-amber-400 focus:ring-offset-1"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-gray-300 text-orange-600 focus:ring-2 focus:ring-orange-300 focus:ring-offset-1"
                       aria-label="I confirm I have prior express written consent for this contact"
                     />
-                    <span className="text-[11px] leading-snug text-amber-950">
-                      I confirm I have <strong className="font-bold">prior express written consent</strong> (TCPA 47 U.S.C. 227 / FCC rules) to send SMS to <strong className="font-bold">this contact</strong>. Disputes and liability for unauthorized contacts are <strong className="font-bold">my responsibility</strong>, not WarmChats.
+                    <span className="text-[11px] leading-snug text-gray-700">
+                      I confirm I have <strong className="font-bold text-gray-900">prior express written consent</strong> (TCPA 47 U.S.C. 227 / FCC rules) to send SMS to <strong className="font-bold text-gray-900">this contact</strong>. Disputes and liability for unauthorized contacts are <strong className="font-bold text-gray-900">my responsibility</strong>, not WarmChats.
                     </span>
                   </label>
                   {!consentAttested && (
-                    <p className="mt-1.5 ml-6 text-[10px] font-medium text-amber-700">
+                    <p className="mt-1.5 ml-6 text-[10px] font-semibold text-orange-600">
                       You must check this box to save.
                     </p>
                   )}
