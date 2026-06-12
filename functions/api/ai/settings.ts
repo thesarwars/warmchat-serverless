@@ -108,11 +108,19 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // Master switch off pauses every agent; on restores per-agent state untouched.
+  // Master switch mirrors into auto_response_settings.enabled (what the inbound
+  // engine actually reads). This MUST be symmetric: off pauses auto-response,
+  // on restores it - the old off-only write left auto-response permanently dead
+  // after one off/on cycle of the master toggle.
   if (body.master_enabled === false) {
     await execute(
       env.D1DB,
       `UPDATE auto_response_settings SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE org_id = ?`, orgId,
+    );
+  } else if (body.master_enabled === true) {
+    await execute(
+      env.D1DB,
+      `UPDATE auto_response_settings SET enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE org_id = ?`, orgId,
     );
   }
 

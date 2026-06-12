@@ -1,0 +1,8 @@
+{
+  "name": "warmchats-email-inbound",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "postal-mime": "^2.3.2"
+  }
+}

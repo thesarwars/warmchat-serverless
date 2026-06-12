@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS call_events (
                                               'CUSTOMER_RINGING', 'CUSTOMER_ANSWERED', 'CALL_CONNECTED',
                                               'CALL_COMPLETED', 'CALL_FAILED', 'CALL_NO_ANSWER',
                                               'CALL_BUSY', 'CALL_CANCELED', 'MISSED_CALL_SMS_SENT',
+                                              'MISSED_CALL_LOGGED',
                                               'WEB_LEG_RINGING', 'PHONE_LEG_RINGING', 'ANSWERED_ON_WEB',
                                               'ANSWERED_ON_PHONE', 'LOSER_LEG_CANCELED', 'BUSY_AGENT_OCCUPIED')),
     timestamp         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

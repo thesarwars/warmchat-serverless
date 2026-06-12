@@ -83,7 +83,7 @@ const ConversionFunnel: React.FC<ConversionFunnelProps> = ({ data, onRangeChange
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2.5">
         <div>
           <div className="text-[11px] font-bold uppercase tracking-wider text-[#8c7d6f]">Last {range} days</div>
-          <div className="mt-0.5 text-base font-bold tracking-tight text-[#211a14]">Conversion funnel</div>
+          <div className="mt-0.5 text-base font-bold tracking-tight text-[#211a14]">Pipeline conversion</div>
         </div>
         <div className="flex items-center gap-2">
           {hasData ? (

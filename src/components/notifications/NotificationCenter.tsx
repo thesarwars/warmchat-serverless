@@ -44,6 +44,42 @@ const SEVERITY_RING: Record<string, string> = {
   error: "bg-red-50 text-red-600",
 };
 
+type SectionKey = "urgent" | "ai" | "appointments" | "messages" | "other";
+
+const SECTION_ORDER: Array<{ key: SectionKey; label: string }> = [
+  { key: "urgent", label: "Urgent" },
+  { key: "ai", label: "AI Suggestions" },
+  { key: "appointments", label: "Appointments" },
+  { key: "messages", label: "Messages" },
+  { key: "other", label: "Other" },
+];
+
+/** Bucket a notification into the panel's sections (Urgent / AI / Appointments / Messages). */
+function sectionFor(n: NotificationItem): SectionKey {
+  const kind = n.kind || "";
+  const data = (n.data || {}) as Record<string, unknown>;
+  if (
+    data.urgent === true ||
+    n.severity === "error" ||
+    kind === "call_missed" ||
+    kind === "payment_failed" ||
+    kind === "message_failed" ||
+    kind === "message_bounced" ||
+    kind === "quota_warning" ||
+    kind === "dlc_status_changed" ||
+    kind.includes("escalat") ||
+    kind.includes("takeover")
+  ) {
+    return "urgent";
+  }
+  if (kind.startsWith("appointment")) return "appointments";
+  if (kind.startsWith("ai_") || kind === "automation_completed" || kind.includes("suggestion")) return "ai";
+  if (kind === "sms_inbound" || kind === "email_inbound" || kind === "call_incoming" || kind === "voicemail") {
+    return "messages";
+  }
+  return "other";
+}
+
 function relativeTime(iso: string | null): string {
   if (!iso) return "";
   const ms = Date.parse(iso);
@@ -91,6 +127,23 @@ export function NotificationCenter() {
     () => (tab === "unread" ? items.filter((n) => !n.is_read) : items),
     [tab, items],
   );
+
+  // Grouped sections (Urgent / AI Suggestions / Appointments / Messages /
+  // Other), each keeping the feed's recency order; empty sections are skipped.
+  const sections = useMemo(() => {
+    const buckets = new Map<SectionKey, NotificationItem[]>();
+    for (const n of visible) {
+      const key = sectionFor(n);
+      const list = buckets.get(key);
+      if (list) list.push(n);
+      else buckets.set(key, [n]);
+    }
+    return SECTION_ORDER.filter(({ key }) => buckets.has(key)).map(({ key, label }) => ({
+      key,
+      label,
+      items: buckets.get(key)!,
+    }));
+  }, [visible]);
 
   const handleClick = async (n: NotificationItem) => {
     if (!n.is_read) await markRead(n.id);
@@ -184,50 +237,77 @@ export function NotificationCenter() {
                   {tab === "unread" ? "You're all caught up." : "Nothing yet."}
                 </div>
               ) : (
-                <ul className="divide-y divide-gray-100">
-                  {visible.map((n) => {
-                    const Icon = KIND_ICONS[n.kind] || Info;
-                    const ringClass = SEVERITY_RING[n.severity] || SEVERITY_RING.info;
-                    return (
-                      <li key={n.id}>
-                        <button
-                          type="button"
-                          onClick={() => void handleClick(n)}
-                          className={`flex w-full items-start gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50 ${
-                            n.is_read ? "" : "bg-orange-50/40"
-                          }`}
-                        >
-                          <span
-                            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${ringClass}`}
-                          >
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-baseline justify-between gap-2">
-                              <span className="truncate text-sm font-medium text-gray-900">
-                                {n.title}
+                sections.map((section) => (
+                  <div key={section.key}>
+                    <p
+                      className={`sticky top-0 z-10 border-b border-gray-100 bg-gray-50/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider backdrop-blur-sm ${
+                        section.key === "urgent" ? "text-red-600" : "text-gray-500"
+                      }`}
+                    >
+                      {section.label}
+                      <span className="ml-1.5 font-semibold text-gray-400">{section.items.length}</span>
+                    </p>
+                    <ul className="divide-y divide-gray-100">
+                      {section.items.map((n) => {
+                        const Icon = KIND_ICONS[n.kind] || Info;
+                        const ringClass = SEVERITY_RING[n.severity] || SEVERITY_RING.info;
+                        return (
+                          <li key={n.id} className="group relative">
+                            <button
+                              type="button"
+                              onClick={() => void handleClick(n)}
+                              className={`flex w-full items-start gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50 ${
+                                n.is_read ? "" : "bg-orange-50/40"
+                              }`}
+                            >
+                              <span
+                                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${ringClass}`}
+                              >
+                                <Icon className="h-4 w-4" />
                               </span>
-                              <span className="shrink-0 text-[10px] text-gray-400">
-                                {relativeTime(n.created_at)}
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-baseline justify-between gap-2">
+                                  <span className="truncate text-sm font-medium text-gray-900">
+                                    {n.title}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] text-gray-400">
+                                    {relativeTime(n.created_at)}
+                                  </span>
+                                </span>
+                                {n.body && (
+                                  <span className="mt-0.5 line-clamp-2 block text-xs text-gray-600">
+                                    {n.body}
+                                  </span>
+                                )}
                               </span>
-                            </span>
-                            {n.body && (
-                              <span className="mt-0.5 line-clamp-2 block text-xs text-gray-600">
-                                {n.body}
-                              </span>
+                              {!n.is_read && (
+                                <span
+                                  className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
+                                  aria-hidden
+                                />
+                              )}
+                            </button>
+                            {/* Mark-as-read without navigating (hover affordance). */}
+                            {!n.is_read && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void markRead(n.id);
+                                }}
+                                title="Mark as read"
+                                aria-label="Mark as read"
+                                className="absolute right-2 top-1/2 hidden -translate-y-1/2 cursor-pointer rounded-full border border-gray-200 bg-white p-1.5 text-gray-400 shadow-sm hover:text-emerald-600 group-hover:block"
+                              >
+                                <CheckCheck className="h-3.5 w-3.5" />
+                              </button>
                             )}
-                          </span>
-                          {!n.is_read && (
-                            <span
-                              className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
-                              aria-hidden
-                            />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))
               )}
             </div>
           </div>

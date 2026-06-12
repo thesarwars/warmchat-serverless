@@ -29,6 +29,11 @@ export interface CronEnv {
   // ElasticEmail / Gmail providers.
   MOCK_SEND_APIS?: string;
 
+  // Inbound reply-parsing domain (mirror of Pages Env.REPLY_DOMAIN). Outbound
+  // email sets Reply-To: inbound+{connectionId}@REPLY_DOMAIN so lead replies
+  // route back into the WarmChats inbox. Defaults to mail.warmchats.com.
+  REPLY_DOMAIN?: string;
+
   // For background notifications (appointment reminders, quota warnings).
   // Set via the same `wrangler secret put`; same VAPID keypair as Pages.
   GATEWAY?: Fetcher;

@@ -125,6 +125,11 @@ export const deleteAccount = () => del(`/auth/account`, {}, true);
 export const fetchOrgTimezone = (id: number | string) => get(`/orgs/${id}/timezone`);
 export const patchOrgTimezone = (id: number | string, data: { timezone: string }) =>
   patch(`/orgs/${id}/timezone`, data, {}, true);
+export const fetchOrgDealDefaults = (id: number | string) => get(`/orgs/${id}/deal-defaults`);
+export const putOrgDealDefaults = (
+  id: number | string,
+  data: { average_deal_price?: number; commission_percent?: number },
+) => put(`/orgs/${id}/deal-defaults`, data, {}, true);
 export const fetchOrgQuietHours = (id: number | string) => get(`/orgs/${id}/quiet-hours`);
 export const patchOrgQuietHours = (id: number | string, data: { start: number; end: number }) =>
   patch(`/orgs/${id}/quiet-hours`, data, {}, true);

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { fetchOrgDealDefaults, putOrgDealDefaults } from "@/helpers/backend";
 import {
   Card,
   CardHeader,
@@ -37,6 +38,26 @@ const Onboarding: React.FC = () => {
   const token = localStorage.getItem("token");
   const userId = localStorage.getItem("user_id");
   const [step, setStep] = useState<Step>(1);
+  // Deal defaults collected at account creation - feed the Pipeline Value KPI.
+  // Editable later in Settings -> Workspace -> Average Sale Price & Commission.
+  const [avgSalePrice, setAvgSalePrice] = useState("");
+  const [avgCommission, setAvgCommission] = useState("");
+  useEffect(() => {
+    const orgId = localStorage.getItem("org_id");
+    if (!orgId) return;
+    void fetchOrgDealDefaults(orgId).then((d) => {
+      const dd = d as { average_deal_price?: number; commission_percent?: number };
+      if (typeof dd?.average_deal_price === "number") setAvgSalePrice(String(dd.average_deal_price));
+      if (typeof dd?.commission_percent === "number") setAvgCommission(String(dd.commission_percent));
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const saveDealDefaults = async () => {
+    const orgId = localStorage.getItem("org_id");
+    const p = Number(avgSalePrice), c = Number(avgCommission);
+    if (!orgId || !Number.isFinite(p) || p <= 0 || !Number.isFinite(c) || c <= 0 || c > 100) return;
+    try { await putOrgDealDefaults(orgId, { average_deal_price: p, commission_percent: c }); } catch { /* best-effort */ }
+  };
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
   const [connected, setConnected] = useState({ email: false, sms: false });
   const [orgPlan, setOrgPlan] = useState<string>("free_channel");
@@ -818,6 +839,35 @@ const Onboarding: React.FC = () => {
                     <span className="font-semibold">What this controls:</span> AI tone * Message templates * Automation style * Follow-up spacing
                   </div>
                 )}
+
+                {/* Deal defaults - drive the Pipeline Value KPI. Editable later
+                    in Settings. */}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-gray-900">Your deal defaults</h3>
+                  <p className="text-xs text-gray-600">
+                    Used to estimate your pipeline value. You can change these anytime in Settings.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-700">Average sale price ($)</span>
+                      <input
+                        type="number" min="0" step="1000" placeholder="400000"
+                        value={avgSalePrice}
+                        onChange={(e) => setAvgSalePrice(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-700">Average commission (%)</span>
+                      <input
+                        type="number" min="0" max="100" step="0.1" placeholder="2.5"
+                        value={avgCommission}
+                        onChange={(e) => setAvgCommission(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1369,6 +1419,7 @@ const Onboarding: React.FC = () => {
                 onClick={async () => {
                   if (selectedPresetId) {
                     await selectPreset(selectedPresetId);
+                    await saveDealDefaults();
                   }
                   updateStep(2);
                 }}

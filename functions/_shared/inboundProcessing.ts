@@ -306,6 +306,17 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   // inbound AI settings being on.
   if (existingLead) {
     await cancelPendingFollowups(env, existingLead.id);
+    // Texting us IS consent to be texted back: upgrade an unknown/cold consent
+    // state to opted_in (mirrors the inbound-call rule). Never overrides an
+    // explicit opt-out - and STOP/HELP keywords returned early above anyway.
+    await execute(
+      env.D1DB,
+      `UPDATE lead SET sms_consent_status = 'opted_in', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND COALESCE(sms_opt_out, 0) = 0
+          AND (sms_consent_status IS NULL OR sms_consent_status NOT IN ('opted_in', 'opted_out'))`,
+      existingLead.id,
+    );
     // Instant "Lead Replied" trigger for any subscribed Zap. Reached only for
     // genuine conversational replies (STOP/HELP returned early above).
     const repliedRow = await queryFirst<Record<string, unknown>>(
@@ -351,10 +362,12 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   if (settings && settings.enabled && !existingLead && settings.inbound_sms_enabled && settings.inbound_new_create_lead) {
     // Inbound-from-unknown (cold inbound): create a lead, tag, and start the
     // qualification flow - the lead texted us first, so we react by qualifying.
+    // Texting us first IS consent to be texted back - record opted_in so
+    // replies go out without the STOP footer (mirrors the inbound-call rule).
     const leadIns = await execute(
       env.D1DB,
-      `INSERT INTO lead (name, phone, source, status, owner_id, org_id, lead_type, intent, created_at, updated_at)
-       VALUES (NULL, ?, 'Inbound SMS', 'New', ?, ?, 'unknown', 'warm', ?, ?)`,
+      `INSERT INTO lead (name, phone, source, status, owner_id, org_id, lead_type, intent, sms_consent_status, created_at, updated_at)
+       VALUES (NULL, ?, 'Inbound SMS', 'New', ?, ?, 'unknown', 'warm', 'opted_in', ?, ?)`,
       fromNumber, u.id, m.org_id, nowIso(), nowIso(),
     );
     const newLeadId = Number(leadIns.meta.last_row_id);
@@ -411,6 +424,40 @@ export interface InboundEmailResult {
 }
 
 /**
+ * Strip the quoted reply chain from an inbound email body so the inbox bubble
+ * (and the AI) sees only the NEW text the sender wrote - mail clients append
+ * the entire prior thread below "On <date>, <name> wrote:" / "> " quoting,
+ * which the inbox already renders as its own message history. Falls back to
+ * the full body if stripping would leave nothing (e.g. a forward with no new
+ * text).
+ */
+export function stripQuotedReply(raw: string): string {
+  if (!raw || !raw.trim()) return raw;
+  const text = raw.replace(/\r\n/g, "\n");
+  const cutPatterns: RegExp[] = [
+    /\n+On [^\n]{0,200}\n?[^\n]{0,200}wrote:\s*\n/, // Gmail/Apple "On <date>, <name> wrote:" (may wrap once)
+    /\n-{2,}\s*Original Message\s*-{2,}/i,           // classic Outlook
+    /\n_{10,}\s*\n/,                                  // Outlook divider
+    /\nFrom:\s[^\n]+\nSent:\s[^\n]+/,                 // Outlook header block
+    /\n\s*>/,                                         // first "> " quoted line
+    /<div[^>]+class="gmail_quote/,                    // HTML-only bodies
+    /<blockquote/i,
+  ];
+  let cut = text.length;
+  for (const re of cutPatterns) {
+    const m = re.exec(text);
+    if (m && m.index < cut) cut = m.index;
+  }
+  const result = text
+    .slice(0, cut)
+    .split("\n")
+    .filter((l) => !/^\s*>/.test(l))
+    .join("\n")
+    .trim();
+  return result || raw.trim();
+}
+
+/**
  * Record an inbound email, mirroring /api/elastic/inbound: attach to the most
  * recent outbound thread for the sender (creating one when `ensureThread` is
  * set), and write the provider-level audit row when a connection is known.
@@ -419,7 +466,10 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   const from = (input.from || "").trim().toLowerCase();
   const to = (input.to || "").trim().toLowerCase();
   const subject = input.subject || "(no subject)";
+  // `body` keeps the raw payload; everything user-facing (inbox bubble,
+  // notification snippet, AI context) uses the quote-stripped version.
   const body = input.body || "";
+  const cleanBody = stripQuotedReply(body);
   const receivedAt = input.receivedAt || nowIso();
   if (!to) return { ok: false, ignored: "missing to" };
 
@@ -507,7 +557,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
       `INSERT INTO inbox_messages
          (thread_id, sender_email, to_email, subject, body, direction, channel, created_at, message_date)
        VALUES (?, ?, ?, ?, ?, 'inbound', 'email', ?, ?)`,
-      thread.id, from, to, subject, body, nowIso(), receivedAt,
+      thread.id, from, to, subject, cleanBody, nowIso(), receivedAt,
     );
   }
 
@@ -556,7 +606,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
 
       if (notifyUserId != null) {
         const senderLabel = (lead?.name && lead.name.trim()) || from;
-        const snippet = body.replace(/\s+/g, " ").trim().slice(0, 200);
+        const snippet = cleanBody.replace(/\s+/g, " ").trim().slice(0, 200);
         await notify(env, {
           userId: notifyUserId,
           orgId,
@@ -589,7 +639,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   // toggle (inbound_email_enabled) + the 3-level lead gate (runInboundAgent
   // re-checks master/per-lead). Best-effort - a failure must not break the
   // webhook reply (the email is already recorded above).
-  if (thread && orgId != null && body.trim()) {
+  if (thread && orgId != null && cleanBody.trim()) {
     try {
       let lead = input.leadId != null
         ? await queryFirst<{ id: number; owner_id: number | null; ai_status: string | null }>(
@@ -620,12 +670,12 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
         }
         if (lead) {
           await escalateOnKeywordMatch(env, {
-            orgId, leadId: lead.id, ownerId, text: body, keywordsRaw: settings.escalation_keywords,
+            orgId, leadId: lead.id, ownerId, text: cleanBody, keywordsRaw: settings.escalation_keywords,
           });
           // Stop-on-reply parity: a known lead replying halts pending drips.
           await cancelPendingFollowups(env, lead.id);
           if (await aiSendAllowedForLead(env, { org_id: orgId, ai_status: lead.ai_status })) {
-            await runInboundAgent(env, lead.id, body, { channel: "email", subject });
+            await runInboundAgent(env, lead.id, cleanBody, { channel: "email", subject });
           }
         }
       }

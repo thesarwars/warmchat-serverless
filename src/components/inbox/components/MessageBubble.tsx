@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ContactMessage } from "../types";
 import AttachmentChips from "./AttachmentChips";
 import ChannelBadge from "./ChannelBadge";
@@ -32,6 +33,10 @@ function isAiSent(message: ContactMessage): boolean {
   );
 }
 
+// Long email bodies used to balloon the thread to several screens. Clamp them
+// past this length and offer a Show more / Show less toggle.
+const EMAIL_CLAMP_CHARS = 500;
+
 export default function MessageBubble({
   message,
   highlight = false,
@@ -39,6 +44,9 @@ export default function MessageBubble({
   message: ContactMessage;
   highlight?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLongEmail =
+    message.channel === "email" && (message.body?.length ?? 0) > EMAIL_CLAMP_CHARS;
   // System events render as a centered chip with the timestamp inline.
   if (message.direction === "system") {
     return (
@@ -107,8 +115,20 @@ export default function MessageBubble({
         ) : null}
         {message.body ? (
           <div className="whitespace-pre-wrap wrap-break-word">
-            {message.body}
+            {isLongEmail && !expanded
+              ? `${message.body.slice(0, EMAIL_CLAMP_CHARS).trimEnd()}...`
+              : message.body}
           </div>
+        ) : null}
+        {isLongEmail ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-1.5 cursor-pointer text-[11.5px] font-bold underline-offset-2 hover:underline"
+            style={{ color: "inherit", opacity: 0.8 }}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
         ) : null}
         {message.attachments && message.attachments.length > 0 ? (
           <div className="mt-2">

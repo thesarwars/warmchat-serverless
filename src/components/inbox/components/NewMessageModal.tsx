@@ -39,7 +39,6 @@ import {
   SMS_SEGMENT_LENGTH,
 } from "../../../utils/smsSegments";
 import {
-  insertTokenAtCursor,
   renderPersonalizedText,
   validatePersonalization,
 } from "../../../utils/personalization";
@@ -51,7 +50,6 @@ import { generateAiLeadMessageDraft } from "../../../utils/aiMessageDraft";
 import AttachmentGallery from "../../AttachmentGallery";
 import { LiveClock } from "../../LiveClock";
 import AttachmentChips from "./AttachmentChips";
-import PersonalizeOptionsMenu from "./PersonalizeOptionsMenu";
 import EmptyStateCard from "./EmptyStateCard";
 
 export default function NewMessageModal({
@@ -257,20 +255,6 @@ export default function NewMessageModal({
     }
   };
 
-  const handleInsertToken = (field: "subject" | "body", tokenValue: string) => {
-    if (!tokenValue) return;
-    if (field === "subject") {
-      const start = subjectRef.current?.selectionStart;
-      const end = subjectRef.current?.selectionEnd;
-      setSubject((current) =>
-        insertTokenAtCursor(current, tokenValue, start, end),
-      );
-      return;
-    }
-    const start = bodyRef.current?.selectionStart;
-    const end = bodyRef.current?.selectionEnd;
-    setBody((current) => insertTokenAtCursor(current, tokenValue, start, end));
-  };
 
   const handleGenerateAi = async () => {
     if (!selectedLead) {
@@ -692,12 +676,6 @@ export default function NewMessageModal({
                             <span className="font-medium text-gray-900">
                               Subject
                             </span>
-                            <PersonalizeOptionsMenu
-                              direction="down"
-                              onInsertBody={(tokenValue) =>
-                                handleInsertToken("subject", tokenValue)
-                              }
-                            />
                           </div>
                           <input
                             ref={subjectRef}
@@ -732,12 +710,6 @@ export default function NewMessageModal({
                             )}
                             {body.trim() ? "Improve with AI" : "Generate with AI"}
                           </button>
-                          <PersonalizeOptionsMenu
-                            direction="down"
-                            onInsertBody={(tokenValue) =>
-                              handleInsertToken("body", tokenValue)
-                            }
-                          />
                         </div>
                       </div>
                       <textarea

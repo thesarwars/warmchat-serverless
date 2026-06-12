@@ -540,7 +540,11 @@ export default function Leads() {
       tagsArray: [...tagsArray],
       lead_type: leadFormString(lead.lead_type, "Unknown"),
       intent: leadFormString(lead.intent),
-      ai_status: leadFormString(lead.ai_status, "AI Off"),
+      // NO "AI Off" fallback: a NULL ai_status means "follow the account
+      // default" (AI responds). Defaulting the form to "AI Off" made ANY edit
+      // of such a lead silently hard-disable its AI on save - which is exactly
+      // how a live test lead stopped getting AI replies.
+      ai_status: leadFormString(lead.ai_status),
       area: leadFormString(lead.area),
       timezone: leadFormString(lead.timezone),
       // AI Qualification fields (ported from EditLeadModal). All optional.
@@ -1376,7 +1380,9 @@ export default function Leads() {
                       const leadType = getLeadType(lead);
                       const stageVal = getStageValue(lead);
                       const scoreVal = stageScore(lead);
-                      const aiStat = getAiStatus(lead) || "AI Off";
+                      // NULL ai_status = follow the account AI setting (AI does
+                      // respond), so it must not be displayed as "AI Off".
+                      const aiStat = getAiStatus(lead) || "AI On";
                       const areaVal = getAreaValue(lead);
                       return (
                         <tr

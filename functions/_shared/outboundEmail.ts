@@ -154,7 +154,11 @@ export async function dispatchOutboundEmail(
       body: htmlBody,
       isHtml: true,
       transactional: true,
-      ...(fromEmail ? { fromEmail, replyTo } : {}),
+      // replyTo is independent of fromEmail: even when the connection has no
+      // explicit from-address (platform sender fallback), lead replies must
+      // still route back through the inbound domain, never to the From mailbox.
+      replyTo,
+      ...(fromEmail ? { fromEmail } : {}),
       ...(senderName ? { fromName: senderName } : {}),
       ...(attachmentParts.length ? { attachments: attachmentParts } : {}),
     }, { leadId: input.leadId ?? null });

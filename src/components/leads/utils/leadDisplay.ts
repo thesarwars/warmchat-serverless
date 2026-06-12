@@ -119,6 +119,7 @@ export const leadTypePillClass = (t: string) => {
 
 export const aiStatusPillClass = (s: string) => {
   const map: Record<string, string> = {
+    "AI On":             "bg-emerald-50 text-emerald-700 border border-emerald-200",
     "AI Off":            "bg-gray-50 text-gray-500 border border-gray-200",
     "Automation Only":   "bg-sky-50 text-sky-700 border border-sky-200",
     "AI Active":         "bg-emerald-50 text-emerald-700 border border-emerald-200",

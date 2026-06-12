@@ -154,7 +154,15 @@ const DashboardV2: React.FC = () => {
 
   // Always refetch on mount so returning from the Inbox/booking flow shows fresh
   // counts + schedule without a hard page refresh.
-  const freshOnMount = { refetchOnMount: "always" as const };
+  // Dashboard data freshness: refetch on mount AND keep auto-refreshing while
+  // the dashboard stays open - every 30 minutes in the background, plus
+  // immediately whenever the user returns to the tab. Keeps the daily-summary
+  // banner / KPIs / Needs Reply live without a manual reload.
+  const freshOnMount = {
+    refetchOnMount: "always" as const,
+    refetchInterval: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  };
 
   const { data, isLoading: dataLoading } = useFetch(["dashboard_data"], () => fetchDashboardData(orgId), {}, freshOnMount);
   const { data: hot_leads, isLoading: hotLeadsLoading } = useFetch(["hot_leads_data"], () => fetchDashboardHotLeads(orgId), {}, freshOnMount);

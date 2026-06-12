@@ -171,3 +171,9 @@ export interface CallTakenElsewhereEvent {
   callId: string;
   answeredVia: "web" | "phone";
 }
+
+/** The ring ended with no winner: timeout, caller hung up, or agent declined. */
+export interface CallRingEndedEvent {
+  callId: string;
+  reason: string;
+}

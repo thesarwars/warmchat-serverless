@@ -11,6 +11,8 @@ interface DealRow {
   stage: string | null; value: number | null; commission: number | null;
   close_date: string | null; description: string | null; probability: number | null;
   status: string; status_source: string;
+  ai_suggested_stage: string | null; ai_suggestion_reason: string | null;
+  next_task: string | null;
   closed_at: string | null; created_at: string | null; updated_at: string | null;
   lead_name: string | null; lead_first: string | null; lead_last: string | null;
   lead_type: string | null; phone: string | null; email: string | null;
@@ -31,6 +33,11 @@ const ser = (r: DealRow, assignees: Assignee[]) => {
     stage: r.stage, value: r.value, commission: r.commission,
     close_date: r.close_date, description: r.description, probability: r.probability,
     status: r.status, status_source: r.status_source,
+    // Pending AI stage suggestion (null once applied/dismissed). Only surfaced
+    // while it still differs from the deal's current stage.
+    ai_suggested_stage: r.ai_suggested_stage !== r.stage ? r.ai_suggested_stage : null,
+    ai_suggestion_reason: r.ai_suggestion_reason,
+    next_task: r.next_task,
     closed_at: r.closed_at, created_at: r.created_at, updated_at: r.updated_at,
     agent: r.owner_name || assignees[0]?.name || "",
     assignees,
@@ -57,6 +64,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     env.D1DB,
     `SELECT d.id, d.lead_id, d.name, d.deal_type, d.stage, d.value, d.commission,
             d.close_date, d.description, d.probability, d.status, d.status_source,
+            d.ai_suggested_stage, d.ai_suggestion_reason,
+            (SELECT t.title FROM task t
+              WHERE (t.deal_id = d.id OR (d.lead_id IS NOT NULL AND t.lead_id = d.lead_id))
+                AND t.status = 'open'
+              ORDER BY t.id DESC LIMIT 1) AS next_task,
             d.closed_at, d.created_at, d.updated_at,
             l.name AS lead_name, l.first_name AS lead_first, l.last_name AS lead_last,
             l.lead_type AS lead_type, l.phone AS phone, l.email AS email,

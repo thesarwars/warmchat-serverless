@@ -60,6 +60,16 @@ export const callingApi = {
   getCall: (callId: string) =>
     get<CallDetails>(`/api/calling/calls/${callId}`),
 
+  // Decline a ringing inbound call: stops the ring on every tab/device and
+  // routes the caller to voicemail / missed-call handling.
+  declineIncoming: (callId: string) =>
+    post<{ ok: boolean }>(`/api/calling/calls/${callId}/decline`),
+
+  // Decline whatever inbound call is currently ringing for this agent - used
+  // when the tab never learned the backend call id.
+  declineActiveIncoming: () =>
+    post<{ ok: boolean }>(`/api/calling/calls/decline-active`),
+
   getCallsByLead: (leadId: string, params?: { limit?: number; offset?: number }) =>
     get<{ calls: CallSummary[]; total: number; limit: number; offset: number }>(
       `/api/calling/leads/${leadId}/calls`,

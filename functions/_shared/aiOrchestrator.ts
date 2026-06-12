@@ -13,7 +13,7 @@ import { getAvailability, findOpenSlots, isSlotBookable } from "./availability.t
 import { createProposedAppointment } from "./booking.ts";
 import { openEscalation } from "./escalation.ts";
 import { createTask } from "./tasks.ts";
-import { upsertDealForLead, type DealUpsert } from "./deals.ts";
+import { applyAiDealUpdate, ensureDealForLead } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { advanceQualification } from "./qualificationFlow.ts";
@@ -155,12 +155,13 @@ const TOOLS: ChatToolDef[] = [
     type: "function",
     function: {
       name: "upsert_deal",
-      description: "Create or move the lead's deal in the pipeline. Pass deal_type + a stage key from that pipeline (see DEAL PIPELINES in the system prompt).",
+      description: "Create or move the lead's deal in the pipeline when the conversation shows real progress. Pass deal_type + a stage key from that pipeline + a short reason quoting the lead (see DEAL STAGE RULES in the system prompt). Major milestones (signed/contract/escrow/closed/lease) are saved as a suggestion the agent confirms - still call this when the lead states them.",
       parameters: {
         type: "object",
         properties: {
           deal_type: { type: "string", enum: ["buyer", "seller", "renter"], description: "Which pipeline this deal belongs to." },
           stage: { type: "string", description: "A stage KEY from the deal_type's pipeline (e.g. consult, search, contract, closed)." },
+          reason: { type: "string", description: "Short quote/paraphrase of what the lead said that justifies this stage." },
           value: { type: "number" },
           probability: { type: "number", description: "0-100" },
           status: { type: "string", enum: ["open", "won", "lost", "archived"] },
@@ -400,6 +401,15 @@ async function executeTool(
       const editedFields = applied.some((k) => k !== "status");
       if (movedStage) {
         await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "lead.stage_changed", leadId: lead.id, leadLabel: label, detail: `${prevNorm ?? "-"} -> ${newStatus}`, status: "ok" });
+        // Deal birth: a lead reaching Qualified (or beyond) is a real
+        // transaction - start its deal at the pipeline's first stage if the AI
+        // hasn't created one via upsert_deal (no-op when one exists).
+        if (["Qualified", "Appointment Set", "Active Client", "Under Contract", "Closed"].includes(newStatus as string)) {
+          const bornId = await ensureDealForLead(env, orgId, lead.id, (args.lead_type ? String(args.lead_type) : null) || lead.lead_type).catch(() => null);
+          if (bornId) {
+            await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "deal.created", leadId: lead.id, leadLabel: label, detail: `Deal created (lead reached ${newStatus})`, status: "ok" });
+          }
+        }
       }
       // Log a record update when non-stage fields changed, or when nothing
       // meaningful moved (so the action still shows in the activity feed).
@@ -448,6 +458,12 @@ async function executeTool(
       // the previous stage first so a genuine move is counted once.
       const prevApptStatus = (await queryFirst<{ status: string | null }>(env.D1DB, `SELECT status FROM lead WHERE id = ?`, lead.id))?.status ?? null;
       await execute(env.D1DB, `UPDATE lead SET status = 'Appointment Set', appointment_booked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, lead.id);
+      // Deal birth: a booked consultation is the start of a real transaction -
+      // make sure the lead has a deal at its pipeline's first stage.
+      const bornDealId = await ensureDealForLead(env, orgId, lead.id, lead.lead_type).catch(() => null);
+      if (bornDealId) {
+        await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "deal.created", leadId: lead.id, leadLabel: label, detail: "Deal created on appointment booking", status: "ok" });
+      }
       await openEscalation(env, { orgId, leadId: lead.id, ownerId: lead.owner_id, reason: "Appointment proposed - confirm", detail: startsAt });
       await notifyAgent(env, lead, "AI proposed an appointment", `${label}: confirm the proposed time.`);
       await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "appointment.proposed", leadId: lead.id, leadLabel: label, detail: startsAt, status: "ok" });
@@ -528,13 +544,34 @@ async function executeTool(
       return "Task created.";
     }
     case "upsert_deal": {
-      const dealFields: DealUpsert = { statusSource: "auto" };
-      if (args.deal_type !== undefined) dealFields.dealType = String(args.deal_type);
-      if (args.stage !== undefined) dealFields.stage = String(args.stage);
-      if (args.value !== undefined) dealFields.value = Number(args.value);
-      if (args.probability !== undefined) dealFields.probability = Number(args.probability);
-      if (args.status !== undefined) dealFields.status = String(args.status);
-      await upsertDealForLead(env, orgId, lead.id, dealFields);
+      const res = await applyAiDealUpdate(env, orgId, lead.id, {
+        dealType: args.deal_type !== undefined ? String(args.deal_type) : undefined,
+        stage: args.stage !== undefined ? String(args.stage) : undefined,
+        reason: args.reason !== undefined ? String(args.reason) : undefined,
+        value: args.value !== undefined ? Number(args.value) : undefined,
+        probability: args.probability !== undefined ? Number(args.probability) : undefined,
+        status: args.status !== undefined ? String(args.status) : undefined,
+      });
+      if (res.kind === "invalid") return res.message;
+      if (res.kind === "suggested") {
+        // Major milestone: not applied - surface it as a confirm task (deduped
+        // per deal) alongside the card's "AI suggests" button.
+        const dup = await queryFirst<{ id: number }>(
+          env.D1DB, `SELECT id FROM task WHERE deal_id = ? AND status = 'open' AND title LIKE 'Confirm deal stage%' LIMIT 1`, res.dealId,
+        );
+        if (!dup) {
+          await createTask(env, {
+            orgId, userId: lead.owner_id ?? userId, leadId: lead.id, dealId: res.dealId,
+            title: `Confirm deal stage: ${label} -> ${res.stageDisplay}`, type: "task",
+            why: res.reason || `The conversation indicates this deal reached "${res.stageDisplay}".`,
+            recommendation: `Accept the suggestion on the deal card (or drag the deal) if "${res.stageDisplay}" is right.`,
+            scoreLabel: "Stage suggestion", priority: "high", source: "ai",
+          }).catch(() => {});
+          await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "task.created", leadId: lead.id, leadLabel: label, detail: `Confirm deal stage -> ${res.stageDisplay}`, status: "ok" });
+        }
+        await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "deal.stage_suggested", leadId: lead.id, leadLabel: label, detail: `${res.stageDisplay}${res.reason ? ` - ${res.reason}` : ""}`, status: "ok" });
+        return `"${res.stageDisplay}" is a major milestone, so it was recorded as a suggestion for the agent to confirm (not applied yet). Do not tell the lead about pipeline stages - just continue the conversation naturally.`;
+      }
       await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "deal.updated", leadId: lead.id, leadLabel: label, detail: JSON.stringify(args), status: "ok" });
       return "Deal updated.";
     }
