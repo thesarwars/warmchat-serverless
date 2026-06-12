@@ -55,6 +55,8 @@ import {
   fetchOffices,
   createOffice,
   deleteOffice,
+  fetchOrgDealDefaults,
+  putOrgDealDefaults,
 } from "@/helpers/backend";
 import {
   type CardState,
@@ -1300,6 +1302,55 @@ function DefaultsCard({ data, token, onSaved }: { data: ConnectedAccountsPayload
   );
 }
 
+export function DealDefaultsCard({ orgId, canManage }: { orgId: number | null; canManage: boolean }) {
+  const qc = useQueryClient();
+  const ddQ = useQuery({ queryKey: ["org-deal-defaults", orgId], queryFn: () => fetchOrgDealDefaults(orgId ?? 0), enabled: Boolean(orgId) });
+  const [price, setPrice] = useState("");
+  const [pct, setPct] = useState("");
+  const [seeded, setSeeded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    const d = ddQ.data as { average_deal_price?: number; commission_percent?: number } | undefined;
+    if (d && !seeded) {
+      if (typeof d.average_deal_price === "number") setPrice(String(d.average_deal_price));
+      if (typeof d.commission_percent === "number") setPct(String(d.commission_percent));
+      setSeeded(true);
+    }
+  }, [ddQ.data, seeded]);
+  const save = async () => {
+    if (!orgId) return;
+    const p = Number(price), c = Number(pct);
+    if (!Number.isFinite(p) || p <= 0) { toast.error("Enter a valid average sale price"); return; }
+    if (!Number.isFinite(c) || c <= 0 || c > 100) { toast.error("Enter a valid commission % (0-100)"); return; }
+    setSaving(true);
+    try {
+      await putOrgDealDefaults(orgId, { average_deal_price: p, commission_percent: c });
+      await qc.invalidateQueries({ queryKey: ["org-deal-defaults", orgId] });
+      await qc.invalidateQueries({ queryKey: ["dashboard_data"] });
+      toast.success("Deal defaults saved - the Pipeline Value KPI uses these.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed to save deal defaults"); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Card icon="dollar" title="Average Sale Price & Commission">
+      <div className="wc-band-d" style={{ marginBottom: 10 }}>
+        Used to estimate your Pipeline Value: leads without a known price use the average sale price, multiplied by your average commission.
+      </div>
+      <div className="wc-formgrid">
+        <div className="wc-modal-field">
+          <div className="wc-modal-lbl">Average sale price ($)</div>
+          <input className="wc-modal-input" type="number" min="0" step="1000" value={price} onChange={(e) => setPrice(e.target.value)} disabled={!canManage} placeholder="400000" />
+        </div>
+        <div className="wc-modal-field">
+          <div className="wc-modal-lbl">Average commission (%)</div>
+          <input className="wc-modal-input" type="number" min="0" max="100" step="0.1" value={pct} onChange={(e) => setPct(e.target.value)} disabled={!canManage} placeholder="2.5" />
+        </div>
+      </div>
+      <div className="wc-formfoot"><button className="wc-primary wc-sm" onClick={() => void save()} disabled={saving || !canManage}>Save deal defaults</button></div>
+    </Card>
+  );
+}
+
 export function TimezoneCard({ orgId, canManage }: { orgId: number | null; canManage: boolean }) {
   const qc = useQueryClient();
   const tzQ = useQuery({ queryKey: ["org-timezone", orgId], queryFn: () => fetchOrgTimezone(orgId ?? 0), enabled: Boolean(orgId) });
@@ -1432,6 +1483,7 @@ function WorkspaceTab() {
         <SmsChannelCard sms={data?.sms ?? null} busy={busy} run={run} token={token} />
         {data ? <DefaultsCard data={data} token={token} onSaved={() => { void connectedQ.refetch(); }} /> : null}
         <TimezoneCard orgId={orgId} canManage={canManage} />
+        <DealDefaultsCard orgId={orgId} canManage={canManage} />
         <QuietHoursCard orgId={orgId} canManage={canManage} />
       </div>
     </div>

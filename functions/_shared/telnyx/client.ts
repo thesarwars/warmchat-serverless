@@ -110,6 +110,14 @@ export async function dialForkLeg(
       timeout_secs: params.timeoutSecs,
       webhook_url: params.webhookUrl,
       client_state: clientState,
+      // Bridge to the (still-ringing) anchor the INSTANT this leg answers -
+      // Telnyx answers the anchor as part of the bridge. Without this, audio
+      // had to wait for the call.answered webhook to reach our server plus two
+      // sequential API calls (answer + bridge) - a multi-second silence after
+      // pickup. handleAnswered keeps its answer/bridge as a repair path for
+      // answer races, but it is no longer in the audio path.
+      link_to: params.anchorCallControlId,
+      bridge_on_answer: true,
     },
   });
 }

@@ -64,22 +64,16 @@ const EditIcon = () => (
     <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
   </svg>
 );
-const InboxIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
-    <path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6l3.5-7z" />
-  </svg>
-);
 const ChevLeft = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-    <path d="M15 18l-6-6 6-6" />
+    <path d="m15 18-6-6 6-6" />
   </svg>
 );
 const ChevRight = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-    <path d="M9 18l6-6-6-6" />
+    <path d="m9 18 6-6-6-6" />
   </svg>
 );
-
 interface KPICardConfig {
   label: string;
   value: string | number;
@@ -162,7 +156,7 @@ const KPICard: React.FC<KPICardConfig> = ({ label, value, delta, deltaTone, curr
   );
 };
 
-const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, needsReplyCount, goals, onEditGoals, onOpenNeedsReply, isLoading }) => {
+const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, goals, onEditGoals, isLoading }) => {
   const now = new Date();
   const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toLocaleDateString("en-US", {
@@ -184,8 +178,8 @@ const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, 
           <div className="h-3 w-44 rounded bg-gray-200" />
           <div className="h-7 w-40 rounded bg-gray-200" />
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          {[0, 1, 2, 3, 4].map((i) => (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
             <div key={i} className="rounded-[18px] border border-[#EAEAEA] bg-white p-4">
               <div className="flex items-center gap-3.5">
                 <div className="h-10 w-10 rounded-xl bg-gray-200" />
@@ -208,7 +202,6 @@ const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, 
   const appointments = toNumber(summary.appointments ?? data?.appointments);
   const aiBooked = toNumber(summary.ai_appointments ?? data?.ai_appointments);
   const deals = toNumber(summary.deals_closed ?? summary.closed_deals ?? data?.deals_closed ?? data?.closed_deals);
-  const needsReply = toNumber(needsReplyCount);
 
   const goalPipeline = toNumber(goals?.goal_pipeline_value);
   const goalHot = toNumber(goals?.goal_hot_leads);
@@ -259,7 +252,7 @@ const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, 
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KPICard
           label="Pipeline value"
           value={formatCompactMoney(pipeline)}
@@ -297,15 +290,6 @@ const MonthlyKPIStrip: React.FC<MonthlyKPIStripProps> = ({ data, hotLeadsCount, 
           goalLabel={`${goalDeals} goal`}
           onSetGoal={onEditGoals}
           icon={<BoltIcon />}
-        />
-        <KPICard
-          label="Needs reply"
-          value={needsReply}
-          delta={needsReply > 0 ? "Awaiting your reply" : "All caught up"}
-          deltaTone={needsReply > 0 ? "down" : "up"}
-          current={needsReply}
-          icon={<InboxIcon />}
-          onClick={onOpenNeedsReply}
         />
       </div>
     </div>

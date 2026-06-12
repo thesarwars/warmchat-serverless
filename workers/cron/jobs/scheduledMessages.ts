@@ -420,6 +420,31 @@ interface SendOk { ok: true; id: string | null }
 interface SendErr { ok: false; error: string; id: null }
 type SendResult = SendOk | SendErr;
 
+/**
+ * Resolve the user's verified business sender + the inbound reply-to. Queued
+ * emails (AI natural-delay replies, quiet-hours, retries) MUST send identically
+ * to the live inbox path: from the agent's verified address with replies routed
+ * to inbound+{connectionId}@REPLY_DOMAIN. The old hardcoded
+ * env.ELASTIC_SENDER_EMAIL made every AI reply come from the platform address
+ * with no Reply-To, so lead replies went to the apex mailbox and never reached
+ * the WarmChats inbox.
+ */
+async function resolveEmailSender(env: CronEnv, userId: number): Promise<{ fromEmail: string; replyTo: string | null }> {
+  const conn = await env.D1DB.prepare(
+    `SELECT id, email_address, elastic_from_email
+       FROM inbox_connection
+      WHERE user_id = ? AND provider = 'elastic'
+        AND (status IS NULL OR status IN ('verified', 'active'))
+      ORDER BY id DESC LIMIT 1`,
+  ).bind(userId).first<{ id: number; email_address: string | null; elastic_from_email: string | null }>();
+  const fromEmail = (conn?.elastic_from_email || conn?.email_address || "").trim();
+  const replyDomain = (env.REPLY_DOMAIN || "mail.warmchats.com").trim();
+  return {
+    fromEmail: fromEmail || env.ELASTIC_SENDER_EMAIL,
+    replyTo: conn ? `inbound+${conn.id}@${replyDomain}` : null,
+  };
+}
+
 async function dispatchEmail(env: CronEnv, row: DueRow): Promise<SendResult> {
   // CAN-SPAM footer: only marketing-shaped sends (those linked to an automation +
   // an identifiable lead) get the agent's address + signed unsubscribe link.
@@ -440,13 +465,15 @@ async function dispatchEmail(env: CronEnv, row: DueRow): Promise<SendResult> {
     listUnsubHeader = `<${url}>`;
   }
 
+  const sender = await resolveEmailSender(env, row.user_id);
+
   if (await isMockSendsEnabled(env, row.org_id ?? null)) {
     await env.D1DB.prepare(
       `INSERT INTO mock_send_log
          (channel, provider, from_address, to_address, subject, body, org_id, lead_id, automation_id, rate_acquired, second_bucket)
        VALUES ('email', 'elastic', ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     ).bind(
-      env.ELASTIC_SENDER_EMAIL || null,
+      sender.fromEmail || null,
       row.to_address,
       row.subject ?? null,
       bodyHtml ?? null,
@@ -461,8 +488,9 @@ async function dispatchEmail(env: CronEnv, row: DueRow): Promise<SendResult> {
   const params = new URLSearchParams();
   params.set("apikey", env.ELASTIC_EMAIL_API_KEY);
   params.set("subject", row.subject || "(no subject)");
-  params.set("from", env.ELASTIC_SENDER_EMAIL);
-  params.set("fromName", env.ELASTIC_SENDER_NAME);
+  params.set("from", sender.fromEmail);
+  params.set("fromName", row.sender_name || env.ELASTIC_SENDER_NAME);
+  if (sender.replyTo) params.set("replyTo", sender.replyTo);
   params.set("to", row.to_address);
   params.set("bodyHtml", bodyHtml);
   // Marketing rows (with a footer) explicitly aren't transactional - leaving

@@ -29,6 +29,19 @@ async function parsePayload(req: Request): Promise<InboundPayload> {
   if (ct.includes("application/json")) {
     try { return await req.json() as InboundPayload; } catch { return {}; }
   }
+  // ElasticEmail's inbound HTTP notification posts multipart/form-data - the
+  // urlencoded fallback below cannot parse boundary-delimited bodies, which
+  // silently dropped every real inbound email (400 "missing 'to'").
+  if (ct.includes("multipart/form-data")) {
+    try {
+      const fd = await req.formData();
+      const out: InboundPayload = {};
+      for (const [k, v] of fd.entries()) {
+        if (typeof v === "string") (out as Record<string, string>)[k] = v;
+      }
+      return out;
+    } catch { return {}; }
+  }
   const text = await req.text();
   const out: InboundPayload = {};
   for (const pair of text.split("&")) {
@@ -47,16 +60,26 @@ const handle: PagesFunction<Env> = async (context) => {
     return json({ ok: true, mode: "inbound webhook ready" });
   }
   const payload = await parsePayload(request);
-  const to = (payload.to || "").trim().toLowerCase();
+  // Field names vary across Elastic notification versions - accept the common
+  // variants for each field.
+  const p = payload as Record<string, string | undefined>;
+  const pick = (...keys: string[]) => {
+    for (const k of keys) {
+      const v = p[k];
+      if (v && String(v).trim()) return String(v);
+    }
+    return "";
+  };
+  const to = pick("to", "To", "recipient").trim().toLowerCase();
   if (!to) return error("missing 'to' address", 400);
 
   const result = await processInboundEmail(env, {
-    from: payload.from || "",
+    from: pick("from", "From", "sender", "from_email"),
     to,
-    subject: payload.subject || "(no subject)",
-    body: payload.bodyText || payload.bodyHtml || payload.message || "",
-    receivedAt: payload.Date || nowIso(),
-    messageId: payload.messageId || null,
+    subject: pick("subject", "Subject") || "(no subject)",
+    body: pick("bodyText", "body_text", "text", "message") || pick("bodyHtml", "body_html", "html"),
+    receivedAt: pick("Date", "date") || nowIso(),
+    messageId: pick("messageId", "message_id", "MessageID") || null,
   });
   return json(result);
 };

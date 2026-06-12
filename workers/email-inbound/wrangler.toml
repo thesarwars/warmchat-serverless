@@ -1,0 +1,7 @@
+name = "warmchats-email-inbound"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# Where parsed inbound emails are POSTed (same contract ElasticEmail used).
+[vars]
+INBOUND_ENDPOINT = "https://dev.warmchats.com/api/elastic/inbound"

@@ -11,6 +11,7 @@ interface PriorityItem {
   title?: string | null;
   description?: string | null;
   priority?: string | null;
+  confidence?: number | null;
   cta?: { label?: string | null; action?: string | null; deep_link?: string | null } | null;
   occurred_at?: string | null;
 }
@@ -41,6 +42,11 @@ const MsgIcon = () => (
     <path d="M20 12a8 8 0 0 1-12.2 6.8L4 20l1.2-3.8A8 8 0 1 1 20 12z" />
   </svg>
 );
+const RefreshIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+    <path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 4v5h-5" />
+  </svg>
+);
 
 const TONE: Record<Tone, { bg: string; fg: string; border: string }> = {
   orange: { bg: "#fdf4ec", fg: "#c0530f", border: "#f7d5b8" },
@@ -52,9 +58,38 @@ const TONE_ORDER: Tone[] = ["orange", "violet", "blue", "amber"];
 const ICONS = [SparkleIcon, BoltIcon, MsgIcon];
 
 // Human label per priority-action type (see priority-actions.ts).
+// Human label + tone + icon per priority-action type, following the
+// AI_intelligence.prompt.md card system (Buying signal / Motivation /
+// message-blue / Cooling-amber).
 const TYPE_TAG: Record<string, string> = {
-  warm_lead_no_outreach: "No outreach yet",
+  ready_to_buy: "Buying signal",
+  motivation: "Motivation",
+  appointment_opportunity: "Appointment opportunity",
   appointment_unconfirmed: "Confirm appointment",
+  human_takeover: "Human takeover needed",
+  needs_response: "Needs response",
+  re_engage: "Cooling",
+  warm_lead_no_outreach: "No outreach yet",
+};
+const TYPE_TONE: Record<string, Tone> = {
+  ready_to_buy: "orange",
+  motivation: "violet",
+  appointment_opportunity: "blue",
+  appointment_unconfirmed: "blue",
+  human_takeover: "amber",
+  needs_response: "blue",
+  re_engage: "amber",
+  warm_lead_no_outreach: "violet",
+};
+const TYPE_ICON: Record<string, React.FC> = {
+  ready_to_buy: SparkleIcon,
+  motivation: BoltIcon,
+  appointment_opportunity: MsgIcon,
+  appointment_unconfirmed: MsgIcon,
+  human_takeover: MsgIcon,
+  needs_response: MsgIcon,
+  re_engage: RefreshIcon,
+  warm_lead_no_outreach: SparkleIcon,
 };
 
 const relativeTime = (iso?: string | null): string | null => {
@@ -103,10 +138,11 @@ const AIIntelligence: React.FC<AIIntelligenceProps> = ({ data, isLoading }) => {
       ) : (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {items.map((it, i) => {
-            const p = TONE[TONE_ORDER[i % TONE_ORDER.length]];
-            const Icon = ICONS[i % ICONS.length];
+            const tone = TYPE_TONE[String(it.type ?? "")] ?? TONE_ORDER[i % TONE_ORDER.length];
+            const p = TONE[tone];
+            const Icon = TYPE_ICON[String(it.type ?? "")] ?? ICONS[i % ICONS.length];
             const tag = TYPE_TAG[String(it.type ?? "")] ?? (it.priority === "high" ? "High priority" : "Action");
-            const link = it.cta?.deep_link || (it.lead_id != null ? `/leads/${it.lead_id}` : "/inbox");
+            const link = it.cta?.deep_link || (it.lead_id != null ? `/inbox?lead=${it.lead_id}` : "/inbox");
             return (
               <div
                 key={`${it.type}-${it.lead_id}-${i}`}
@@ -123,10 +159,15 @@ const AIIntelligence: React.FC<AIIntelligenceProps> = ({ data, isLoading }) => {
                   <span className="text-[13px] font-semibold text-[#211a14]">{it.lead_name || "Lead"}</span>
                 </div>
                 <p className="text-[13px] leading-snug text-[#463b31]">{humanizeTaskText(it.description || it.title)}</p>
+                {typeof it.confidence === "number" && it.confidence > 0 ? (
+                  <div className="text-[11.5px] font-semibold text-[#8c7d6f]">
+                    {Math.round(it.confidence)}% confidence
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => navigate(link)}
-                  className="mt-0.5 self-start rounded-lg border px-2.5 py-1.5 text-[12.5px] font-semibold transition"
+                  className="mt-0.5 cursor-pointer self-start rounded-lg border px-2.5 py-1.5 text-[12.5px] font-semibold transition hover:-translate-y-px hover:shadow-sm"
                   style={{ background: p.bg, color: p.fg, borderColor: p.border }}
                 >
                   {it.cta?.label || "View lead"} →

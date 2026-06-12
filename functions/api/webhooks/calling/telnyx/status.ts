@@ -175,26 +175,69 @@ async function maybeStartRecording(env: Env, callId: string, anchorCallControlId
  * calling_configurations.voicemail_enabled.
  */
 async function maybeDivertToVoicemail(env: Env, forkLegSid: string): Promise<void> {
-  const call = await queryFirst<{ id: string; org_id: number; answered_at: string | null }>(
+  const call = await queryFirst<{
+    id: string; org_id: number; answered_at: string | null;
+    agent_id: number | null; lead_id: number | null; customer_number: string | null;
+    business_number_id: number | null; provider_call_sid: string;
+  }>(
     env.D1DB,
-    `SELECT id, org_id, answered_at FROM calls WHERE web_leg_sid = ? OR phone_leg_sid = ? LIMIT 1`,
+    `SELECT id, org_id, answered_at, agent_id, lead_id, customer_number, business_number_id, provider_call_sid
+       FROM calls WHERE web_leg_sid = ? OR phone_leg_sid = ? LIMIT 1`,
     forkLegSid, forkLegSid,
   );
   if (!call || call.answered_at) return;
+
+  // Track the dead leg FIRST (independent of voicemail config) so the
+  // exhausted check below works for every org.
+  const res = await gatewayFetch<{ exhausted?: boolean; anchorSid?: string }>(
+    env, `/do/callActor/call:${call.id}/leg-down`, "POST", { sid: forkLegSid },
+  );
+  if (!res?.exhausted || !res.anchorSid) return;
+
+  // Every fork leg is down with no winner: the ring is over. Tell every open
+  // tab/device to stop ringing - without this, a tab whose WebRTC leg never
+  // paired keeps its modal + ringtone up forever after the timeout.
+  if (call.agent_id) {
+    await gatewayFetch(env, `/do/userSocket/user:${call.agent_id}/emit`, "POST", {
+      event: "call_ring_ended",
+      data: { callId: call.id, reason: "no_answer" },
+    });
+  }
+
+  // This IS a missed call whether or not voicemail picks up - text the caller
+  // back and leave the agent a notification + call-back task. Both helpers are
+  // idempotent per call, so the later anchor-hangup path can't double-fire.
+  const now = nowIso();
+  const bn = call.business_number_id
+    ? await queryFirst<{ phone_number: string }>(
+        env.D1DB, `SELECT phone_number FROM phone_numbers WHERE id = ?`, call.business_number_id)
+    : null;
+  await sendMissedCallTextback(env, {
+    orgId: call.org_id, agentId: call.agent_id,
+    businessPhone: bn?.phone_number ?? null, customerNumber: call.customer_number ?? null,
+    callId: call.id, callControlId: call.provider_call_sid,
+  }, now);
+  await recordMissedCall(env, {
+    orgId: call.org_id, agentId: call.agent_id, leadId: call.lead_id ?? null,
+    customerNumber: call.customer_number ?? null,
+    callId: call.id, callControlId: call.provider_call_sid,
+  }, now);
 
   const cfg = await queryFirst<{ voicemail_enabled: number; voicemail_greeting: string }>(
     env.D1DB,
     `SELECT voicemail_enabled, voicemail_greeting FROM calling_configurations WHERE org_id = ?`,
     call.org_id,
   );
-  if (!cfg || cfg.voicemail_enabled !== 1) return;
-
-  const res = await gatewayFetch<{ exhausted?: boolean; anchorSid?: string }>(
-    env, `/do/callActor/call:${call.id}/leg-down`, "POST", { sid: forkLegSid },
-  );
-  if (!res?.exhausted || !res.anchorSid) return;
+  if (!cfg || cfg.voicemail_enabled !== 1) {
+    // No voicemail: end the anchor too, otherwise the caller keeps hearing
+    // ringback into the void until they give up.
+    await hangup(env, res.anchorSid);
+    return;
+  }
 
   try {
+    // The anchor is left ringing until pickup/voicemail - answer it now.
+    await executeCallControl(env, res.anchorSid, { command: "answer" });
     await executeCallControl(env, res.anchorSid, {
       command: "speak",
       payload: cfg.voicemail_greeting,
@@ -266,20 +309,56 @@ async function sendMissedCallTextback(
   now: string,
 ): Promise<boolean> {
   if (!a.orgId || !a.agentId || !a.businessPhone || !a.customerNumber) return false;
-  const already = await queryFirst<{ id: string }>(
+  // Per-PHONE rate limit: one missed-call auto-text per caller per 60 minutes,
+  // across ALL their calls. The per-call claim below dedupes within a single
+  // call, but a caller retrying 5 times in 20 minutes got 5 texts - pure spam.
+  // The MISSED_CALL_SMS_SENT event row (joined through calls.customer_number)
+  // IS the stored last-sent timestamp for the number.
+  const rateWindow = await queryFirst<{ ts: string }>(
     env.D1DB,
-    `SELECT id FROM call_events WHERE call_id = ? AND event_type = 'MISSED_CALL_SMS_SENT' LIMIT 1`,
-    a.callId,
+    `SELECT ce.timestamp AS ts FROM call_events ce
+       JOIN calls c ON c.id = ce.call_id
+      WHERE ce.event_type = 'MISSED_CALL_SMS_SENT'
+        AND c.org_id = ? AND c.customer_number = ?
+        AND ce.timestamp > ?
+      LIMIT 1`,
+    a.orgId, a.customerNumber, new Date(Date.now() - 60 * 60_000).toISOString(),
   );
-  if (already) return false;
+  if (rateWindow) {
+    console.log(`[missed-call] rate-limited: skipping auto-response to ${a.customerNumber} (last sent ${rateWindow.ts}, call ${a.callId})`);
+    return false;
+  }
+  // Atomic claim BEFORE sending: the anchor-hangup and fork-exhausted paths
+  // can process within milliseconds of each other, and a check-then-send race
+  // let both through (the caller got the text twice). provider_event_id is
+  // UNIQUE, so exactly one path wins this insert.
+  const claim = await execute(
+    env.D1DB,
+    `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
+     VALUES (?, ?, 'MISSED_CALL_SMS_SENT', ?, ?, ?)`,
+    crypto.randomUUID(), a.callId, now,
+    JSON.stringify({ to: a.customerNumber, from: a.businessPhone }),
+    `${a.callControlId}-missed-sms`,
+  );
+  if (claim.meta.changes === 0) return false;
+  // Helper to release the claim when a gate below declines the send or the
+  // provider call fails, so a later legitimate path can still text the caller.
+  const releaseClaim = () =>
+    execute(env.D1DB, `DELETE FROM call_events WHERE provider_event_id = ?`, `${a.callControlId}-missed-sms`);
 
   const ar = await queryFirst<{ enabled: number; missed_call_enabled: number; missed_call_message: string }>(
     env.D1DB,
     `SELECT enabled, missed_call_enabled, missed_call_message FROM auto_response_settings WHERE user_id = ?`,
     a.agentId,
   );
-  if (ar && (!ar.enabled || !ar.missed_call_enabled)) return false;
-  if (await isPhoneSuppressed(env, a.orgId, a.customerNumber)) return false;
+  if (ar && (!ar.enabled || !ar.missed_call_enabled)) {
+    await releaseClaim();
+    return false;
+  }
+  if (await isPhoneSuppressed(env, a.orgId, a.customerNumber)) {
+    await releaseClaim();
+    return false;
+  }
 
   const cfg = await queryFirst<{ missed_call_sms_template: string }>(
     env.D1DB, `SELECT missed_call_sms_template FROM calling_configurations WHERE org_id = ?`, a.orgId,
@@ -290,23 +369,26 @@ async function sendMissedCallTextback(
   const agentRow = await queryFirst<{ name: string | null }>(
     env.D1DB, `SELECT name FROM "user" WHERE id = ?`, a.agentId,
   );
-  const template = appendComplianceFooter(rawTemplate, { kind: "first_auto", agentName: agentRow?.name ?? null });
+  // Consented callers get the bare message; only unknown/cold numbers carry
+  // the STOP footer.
+  const callerLead = await queryFirst<{ sms_consent_status: string | null }>(
+    env.D1DB, `SELECT sms_consent_status FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
+    a.orgId, a.customerNumber,
+  );
+  const template = appendComplianceFooter(rawTemplate, {
+    kind: "first_auto",
+    agentName: agentRow?.name ?? null,
+    recipientOptedIn: callerLead?.sms_consent_status === "opted_in",
+  });
   try {
     await mockTelnyxSendSms(
       env, a.businessPhone, a.customerNumber, template,
       { orgId: a.orgId },
       { ...(env.TELNYX_MESSAGING_PROFILE_ID ? { messagingProfileId: env.TELNYX_MESSAGING_PROFILE_ID } : {}) },
     );
-    await execute(
-      env.D1DB,
-      `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
-       VALUES (?, ?, 'MISSED_CALL_SMS_SENT', ?, ?, ?)`,
-      crypto.randomUUID(), a.callId, now,
-      JSON.stringify({ to: a.customerNumber, from: a.businessPhone }),
-      `${a.callControlId}-missed-sms`,
-    );
     return true;
   } catch {
+    await releaseClaim();
     return false;
   }
 }
@@ -324,12 +406,41 @@ async function recordMissedCall(
   now: string,
 ): Promise<void> {
   if (!a.orgId || !a.agentId) return;
-  const already = await queryFirst<{ id: string }>(
+  // Per-PHONE rate limit (mirrors the auto-text): one missed-call
+  // notification + call-back task per caller per 60 minutes. A caller
+  // retrying repeatedly created a task pile-up; the bell/call history still
+  // records every individual call.
+  if (a.customerNumber) {
+    const recent = await queryFirst<{ ts: string }>(
+      env.D1DB,
+      `SELECT ce.timestamp AS ts FROM call_events ce
+         JOIN calls c ON c.id = ce.call_id
+        WHERE ce.event_type = 'MISSED_CALL_LOGGED'
+          AND c.org_id = ? AND c.customer_number = ?
+          AND ce.timestamp > ?
+        LIMIT 1`,
+      a.orgId, a.customerNumber, new Date(Date.now() - 60 * 60_000).toISOString(),
+    );
+    if (recent) {
+      console.log(`[missed-call] rate-limited: notification/task for ${a.customerNumber} already logged at ${recent.ts} (call ${a.callId})`);
+      return;
+    }
+  }
+  // Atomic claim BEFORE notifying: concurrent miss paths (anchor hangup +
+  // fork exhausted) raced the old check-then-insert and double-fired the
+  // notification + task. provider_event_id is UNIQUE; one path wins.
+  // (MISSED_CALL_LOGGED also had to be added to the call_events event_type
+  // CHECK - it was missing, so this row was silently dropped and the dedupe
+  // never held at all.)
+  const claim = await execute(
     env.D1DB,
-    `SELECT id FROM call_events WHERE call_id = ? AND event_type = 'MISSED_CALL_LOGGED' LIMIT 1`,
-    a.callId,
+    `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
+     VALUES (?, ?, 'MISSED_CALL_LOGGED', ?, ?, ?)`,
+    crypto.randomUUID(), a.callId, now,
+    JSON.stringify({ from: a.customerNumber }),
+    `${a.callControlId}-missed-log`,
   );
-  if (already) return;
+  if (claim.meta.changes === 0) return;
   const leadRow = a.leadId
     ? await queryFirst<{ name: string | null }>(env.D1DB, `SELECT name FROM lead WHERE id = ?`, a.leadId)
     : null;
@@ -365,14 +476,6 @@ async function recordMissedCall(
   } catch (err) {
     console.warn("[missed-call] task failed", err);
   }
-  await execute(
-    env.D1DB,
-    `INSERT OR IGNORE INTO call_events (id, call_id, event_type, timestamp, payload, provider_event_id)
-     VALUES (?, ?, 'MISSED_CALL_LOGGED', ?, ?, ?)`,
-    crypto.randomUUID(), a.callId, now,
-    JSON.stringify({ from: a.customerNumber }),
-    `${a.callControlId}-missed-log`,
-  );
 }
 
 /**
@@ -384,6 +487,13 @@ async function recordMissedCall(
  */
 async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callControlId: string, requestUrl: string): Promise<void> {
   if (!payload.from || !payload.to) return;
+
+  // The web fork's INVITE toward the agent's WebRTC credential surfaces as its
+  // own `incoming` call.initiated (to = sip:gencred...@sip.telnyx.com). That
+  // leg belongs to OUR dial - falling through to the unknown-DID rejection
+  // below issued a hangup against the very leg ringing the browser. Only
+  // E.164 destinations are real inbound business calls.
+  if (!payload.to.startsWith("+")) return;
 
   const businessNumber = await queryFirst<{ id: string; org_id: number; assigned_to_user_id: number | null }>(
     env.D1DB,
@@ -433,7 +543,10 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
   const ringTimeout = cfg?.ring_timeout ?? 25;
   const ringStrategy = cfg?.ring_strategy ?? "parallel";
 
-  // Find or create a lead by caller phone.
+  // Find or create a lead by caller phone. Calling the business IS consent
+  // to be texted back (the caller initiated contact), so inbound callers are
+  // recorded opted-in - their auto-texts go out without the STOP footer. An
+  // explicit prior opt-out (STOP) is never overridden by a call.
   const existingLead = await queryFirst<{ id: number }>(
     env.D1DB, `SELECT id FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
     businessNumber.org_id, payload.from,
@@ -442,10 +555,20 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
     ? existingLead.id
     : Number((await execute(
         env.D1DB,
-        `INSERT INTO lead (name, phone, status, owner_id, org_id, created_at, updated_at)
-         VALUES (NULL, ?, 'New', ?, ?, ?, ?)`,
+        `INSERT INTO lead (name, phone, status, owner_id, org_id, sms_consent_status, created_at, updated_at)
+         VALUES (NULL, ?, 'New', ?, ?, 'opted_in', ?, ?)`,
         payload.from, agent.id, businessNumber.org_id, nowIso(), nowIso(),
       )).meta.last_row_id);
+  if (existingLead) {
+    await execute(
+      env.D1DB,
+      `UPDATE lead SET sms_consent_status = 'opted_in', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND COALESCE(sms_opt_out, 0) = 0
+          AND (sms_consent_status IS NULL OR sms_consent_status NOT IN ('opted_in', 'opted_out'))`,
+      existingLead.id,
+    );
+  }
 
   const callId = crypto.randomUUID();
   await execute(
@@ -460,9 +583,11 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
     businessNumber.org_id, nowIso(), nowIso(), nowIso(), nowIso(),
   );
 
-  // Answer the anchor so we can attach further actions.
-  await executeCallControl(env, callControlId, { command: "answer" });
-
+  // Deliberately DO NOT answer the anchor here. Answering up front put the
+  // caller in dead silence while the agent's browser rang (~6s of "is this
+  // thing on?"). Left unanswered, the caller hears normal ringback; the anchor
+  // is answered the moment a fork leg wins (handleAnswered) or when diverting
+  // to voicemail.
   const origin = new URL(requestUrl).origin;
   const webhookUrl = `${origin}/api/webhooks/calling/telnyx/status`;
   // NOTE: the Dial API (/v2/calls) only accepts a CALL CONTROL APP id - passing
@@ -520,10 +645,11 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
       orgId: businessNumber.org_id, agentId: agent.id, leadId,
       customerNumber: payload.from ?? null, callId, callControlId,
     }, nowIso());
-    // If voicemail is enabled, divert the answered anchor to a greeting +
-    // recording instead of dropping the caller.
+    // If voicemail is enabled, answer the (still-ringing) anchor and divert it
+    // to a greeting + recording instead of dropping the caller.
     if (cfg?.voicemail_enabled === 1) {
       try {
+        await executeCallControl(env, callControlId, { command: "answer" });
         await executeCallControl(env, callControlId, {
           command: "speak", payload: cfg.voicemail_greeting, voice: "female", language: "en-US",
         });
@@ -645,7 +771,29 @@ async function handleAnswered(env: Env, payload: TelnyxPayload, callControlId: s
       return;
     }
     const anchor = claim.anchorSid ?? cs.anchor;
-    if (anchor) await bridge(env, anchor, callControlId);
+    // Audio is no longer gated on this webhook: the fork was dialed with
+    // link_to + bridge_on_answer, so Telnyx answered the anchor and bridged at
+    // the media layer the moment the leg picked up. Re-answering/re-bridging
+    // here on EVERY answer stomped on that fresh bridge ~300ms in - the
+    // re-bridge forces a media renegotiation on the WebRTC leg (ICE restart),
+    // which is seconds of dead air right after connecting. Only repair when a
+    // second fork leg exists (claim.loserSid): in that race the losing leg may
+    // have answered second and stolen the auto-bridge, so re-bridge the
+    // claimed winner before hanging the loser up.
+    if (anchor && claim.loserSid) {
+      try {
+        await executeCallControl(env, anchor, { command: "answer" });
+      } catch {
+        /* already answered by the auto-bridge - expected */
+      }
+      const bridged = await bridge(env, anchor, callControlId);
+      if (!bridged.ok) {
+        // The answer may still be settling - one short retry covers the race.
+        await new Promise((r) => setTimeout(r, 400));
+        const retry = await bridge(env, anchor, callControlId);
+        if (!retry.ok) console.warn("[bridge] failed after retry", retry.error?.message);
+      }
+    }
     if (claim.loserSid) await hangup(env, claim.loserSid);
     await execute(
       env.D1DB,
@@ -700,7 +848,8 @@ async function handleAnswered(env: Env, payload: TelnyxPayload, callControlId: s
 async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: string): Promise<void> {
   const call = await queryFirst<CallTerminalRow>(
     env.D1DB,
-    `SELECT id, agent_id, org_id, lead_id, business_number_id, customer_number, direction, status
+    `SELECT id, agent_id, org_id, lead_id, business_number_id, customer_number, direction, status,
+            web_leg_sid, phone_leg_sid
        FROM calls WHERE provider_call_sid = ? LIMIT 1`,
     callControlId,
   );
@@ -715,6 +864,22 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
   const status = mapHangupToStatus(call.status, cause);
   const duration = Math.max(0, Number(payload.call_duration_secs ?? payload.duration_secs ?? 0));
   const now = nowIso();
+
+  // Anchor died while still ringing (caller gave up, or we ended it): stop the
+  // ringing modal on every open tab AND kill the still-ringing fork legs at
+  // Telnyx - without this the browser/cell keep ringing for a dead caller
+  // until their own timeout. Terminal call_state below only clears the ACTIVE
+  // call window, never the incoming-call ringer.
+  if (call.direction === "INBOUND" && call.status === "RINGING") {
+    if (call.agent_id) {
+      await gatewayFetch(env, `/do/userSocket/user:${call.agent_id}/emit`, "POST", {
+        event: "call_ring_ended",
+        data: { callId: call.id, reason: cause || "hangup" },
+      });
+    }
+    if (call.web_leg_sid) await hangup(env, call.web_leg_sid);
+    if (call.phone_leg_sid) await hangup(env, call.phone_leg_sid);
+  }
 
   await execute(
     env.D1DB,
@@ -764,10 +929,11 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
     }
   }
 
-  // Missed-call SMS on inbound when no answer / busy / failed. Uses the shared
-  // idempotent helper - the "nobody to ring" drop path may have already texted
-  // the caller, so this won't double-send.
-  if (call.direction === "INBOUND" && (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED")) {
+  // Missed-call SMS on inbound when no answer / busy / failed / caller gave up
+  // mid-ring (CANCELED). Uses the shared idempotent helper - the "nobody to
+  // ring" drop path may have already texted the caller, so this won't
+  // double-send.
+  if (call.direction === "INBOUND" && (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED" || status === "CANCELED")) {
     const bn = call.business_number_id
       ? await queryFirst<{ phone_number: string }>(
           env.D1DB, `SELECT phone_number FROM phone_numbers WHERE id = ?`, call.business_number_id)
@@ -787,7 +953,7 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
   // wasn't picked up). Idempotent with the "nobody to ring" path.
   if (
     call.direction === "INBOUND" &&
-    (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED")
+    (status === "NO_ANSWER" || status === "BUSY" || status === "FAILED" || status === "CANCELED")
   ) {
     await recordMissedCall(env, {
       orgId: call.org_id, agentId: call.agent_id, leadId: call.lead_id ?? null,
@@ -910,4 +1076,6 @@ type CallTerminalRow = {
   customer_number: string | null;
   direction: "OUTBOUND" | "INBOUND";
   status: string;
+  web_leg_sid: string | null;
+  phone_leg_sid: string | null;
 };

@@ -17,6 +17,7 @@ import { toLeadView } from "./integrationApi.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { logAgentActivity } from "./aiAgents.ts";
 import { openEscalation } from "./escalation.ts";
+import { ensureDealForLead } from "./deals.ts";
 
 /**
  * AI Follow-Up qualification state machine.
@@ -270,6 +271,9 @@ async function runQualification(
       leadId,
     );
     if (lead.lead_type === "seller") await attachTag(env, lead.org_id, leadId, "hot_seller");
+    // Deal birth: a booking-ready lead is a real transaction - start its deal
+    // at the pipeline's first stage (no-op when one already exists).
+    await ensureDealForLead(env, lead.org_id, leadId, lead.lead_type).catch(() => {});
     await notifyAgent(env, lead, "Lead is booking-ready", `${lead.name || lead.first_name || "Lead"} signalled booking intent.`);
     await logAgentActivity(env, {
       orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",
@@ -358,6 +362,7 @@ async function runQualification(
       nextStep, leadId,
     );
     if (lead.lead_type === "seller") await attachTag(env, lead.org_id, leadId, "hot_seller");
+    await ensureDealForLead(env, lead.org_id, leadId, lead.lead_type).catch(() => {});
     await notifyAgent(env, lead, "Qualification complete", `${lead.name || lead.first_name || "Lead"} finished qualification. Booking transition sent.`);
     await logAgentActivity(env, {
       orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",

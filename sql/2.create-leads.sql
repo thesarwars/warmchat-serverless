@@ -136,6 +136,10 @@ CREATE TABLE IF NOT EXISTS deal (
     status        TEXT NOT NULL DEFAULT 'open',   -- open | won | lost | archived
     status_source TEXT NOT NULL DEFAULT 'auto',   -- auto | manual
     closed_at     TEXT,
+    -- AI stage suggestion: major-milestone moves from the AI land here (instead
+    -- of stage) until the agent accepts/dismisses them on the deal card.
+    ai_suggested_stage   TEXT,
+    ai_suggestion_reason TEXT,
     created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
 );

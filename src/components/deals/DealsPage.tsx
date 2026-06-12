@@ -58,8 +58,6 @@ const TYPE_META: Record<string, TypeMeta> = {
   Renter: { icon: "home", chip: "wc-chip-renter", monthly: true, rate: 1, feeLabel: "Est. fee (1 mo.)" },
 };
 
-// Mirror MAX_DEALS_PER_ORG in functions/_shared/deals.ts.
-const MAX_DEALS = 5000;
 const fmt$ = (n: number) => "$" + n.toLocaleString("en-US");
 const fmtK = (n: number) => (n >= 1000 ? "$" + (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "K" : "$" + n);
 
@@ -75,6 +73,7 @@ interface Deal {
   agent: string;
   agentInit: string;
   ai: string | null;
+  aiReason: string | null;
   // Carried for the edit modal.
   commissionRaw: number | null;
   closeDate: string | null;
@@ -91,6 +90,8 @@ interface ApiDeal {
   stage: string | null; value: number | null; commission: number | null;
   close_date: string | null; description: string | null;
   status: string; agent: string; assignees?: { id: number; name: string }[];
+  ai_suggested_stage?: string | null; ai_suggestion_reason?: string | null;
+  next_task?: string | null;
 }
 interface DealSummary { total: number; open: number; won: number; pipeline_value: number; won_value: number }
 
@@ -115,12 +116,18 @@ const apiToDeal = (d: ApiDeal): Deal => {
   const value = d.value || 0;
   // Real commission when set, otherwise the type-based estimate.
   const comm = d.commission != null ? d.commission : Math.round(value * TYPE_META[type].rate);
+  const stage = validStage(type, d.stage);
+  // Pending AI stage suggestion -> the card's "AI suggests ->" accept button.
+  // Only honoured when it's a real stage of this pipeline and an actual move.
+  const suggested = d.ai_suggested_stage || null;
+  const ai = suggested && suggested !== stage && (STAGE_SETS[type] || []).some((s) => s.key === suggested)
+    ? suggested : null;
   return {
     id: d.id, lead_id: d.lead_id, name: d.name, type,
-    price: value, stage: validStage(type, d.stage), task: "",
+    price: value, stage, task: d.next_task || "",
     comm,
     agent: d.agent || "", agentInit: d.agent ? initials(d.agent) : "",
-    ai: null,
+    ai, aiReason: d.ai_suggestion_reason || null,
     commissionRaw: d.commission, closeDate: d.close_date, description: d.description,
     assignees: d.assignees ?? [],
   };
@@ -128,7 +135,7 @@ const apiToDeal = (d: ApiDeal): Deal => {
 
 const stageName = (type: string, key: string) => (STAGE_SETS[type] || []).find((s) => s.key === key)?.name || key;
 
-function DealCard({ deal, onMove, onDragStart, onEdit, onDelete }: { deal: Deal; onMove: (d: Deal, stage: string) => void; onDragStart: (d: Deal) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void }) {
+function DealCard({ deal, onMove, onDismissAi, onDragStart, onEdit, onDelete }: { deal: Deal; onMove: (d: Deal, stage: string) => void; onDismissAi: (d: Deal) => void; onDragStart: (d: Deal) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void }) {
   const meta = TYPE_META[deal.type];
   const priceTxt = meta.monthly ? fmt$(deal.price) + "/mo" : fmt$(deal.price);
   // Click opens the edit modal; drag still moves the card (HTML5 drag does not
@@ -151,10 +158,15 @@ function DealCard({ deal, onMove, onDragStart, onEdit, onDelete }: { deal: Deal;
       {deal.agent && <span className="wc-dagent"><span className="wc-dagent-av">{deal.agentInit}</span>{deal.agent}</span>}
       {deal.task && <div className="wc-dtask"><Icon name="calendarCheck" size={13} /><span>{deal.task}</span></div>}
       {deal.ai && (
-        <button className="wc-aimove" onClick={(e) => { e.stopPropagation(); onMove(deal, deal.ai as string); }}>
+        <button className="wc-aimove" title={deal.aiReason ? `Lead: "${deal.aiReason}" — accept to move, × to dismiss` : "Accept to move, × to dismiss"}
+          onClick={(e) => { e.stopPropagation(); onMove(deal, deal.ai as string); }}>
           <Icon name="sparkles" size={13} />
           <span>AI suggests &rarr; <strong>{stageName(deal.type, deal.ai)}</strong></span>
           <span className="wc-aimove-go"><Icon name="check" size={13} /></span>
+          <span className="wc-aimove-x" title="Dismiss suggestion" role="button"
+            onClick={(e) => { e.stopPropagation(); onDismissAi(deal); }}>
+            <Icon name="x" size={12} />
+          </span>
         </button>
       )}
     </div>
@@ -163,8 +175,8 @@ function DealCard({ deal, onMove, onDragStart, onEdit, onDelete }: { deal: Deal;
 
 const DEALS_PAGE = 20;
 
-function DealColumn({ stage, deals, onMove, onAdd, onEdit, onDelete, onDragStart, isOver, onOver, onLeave, onDrop }: {
-  stage: Stage; deals: Deal[]; onMove: (d: Deal, stage: string) => void; onAdd: (k: string) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void;
+function DealColumn({ stage, deals, onMove, onDismissAi, onAdd, onEdit, onDelete, onDragStart, isOver, onOver, onLeave, onDrop }: {
+  stage: Stage; deals: Deal[]; onMove: (d: Deal, stage: string) => void; onDismissAi: (d: Deal) => void; onAdd: (k: string) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void;
   onDragStart: (d: Deal) => void; isOver: boolean; onOver: () => void; onLeave: () => void; onDrop: () => void;
 }) {
   const total = deals.reduce((s, d) => s + d.comm, 0);
@@ -183,7 +195,7 @@ function DealColumn({ stage, deals, onMove, onAdd, onEdit, onDelete, onDragStart
         </div>
       </div>
       <div className="wc-col-body">
-        {visible.map((d) => <DealCard key={d.id} deal={d} onMove={onMove} onDragStart={onDragStart} onEdit={onEdit} onDelete={onDelete} />)}
+        {visible.map((d) => <DealCard key={d.id} deal={d} onMove={onMove} onDismissAi={onDismissAi} onDragStart={onDragStart} onEdit={onEdit} onDelete={onDelete} />)}
         {deals.length > shown && (
           <button className="wc-dempty" onClick={() => setShown((s) => s + DEALS_PAGE)}>Load more <span>({deals.length - shown})</span></button>
         )}
@@ -193,7 +205,7 @@ function DealColumn({ stage, deals, onMove, onAdd, onEdit, onDelete, onDragStart
   );
 }
 
-function DealBoard({ type, deals, onMove, onAdd, onEdit, onDelete }: { type: string; deals: Deal[]; onMove: (d: Deal, stage: string) => void; onAdd: (type: string, stage: string) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void }) {
+function DealBoard({ type, deals, onMove, onDismissAi, onAdd, onEdit, onDelete }: { type: string; deals: Deal[]; onMove: (d: Deal, stage: string) => void; onDismissAi: (d: Deal) => void; onAdd: (type: string, stage: string) => void; onEdit: (d: Deal) => void; onDelete: (d: Deal) => void }) {
   const stages = STAGE_SETS[type];
   const [drag, setDrag] = useState<Deal | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -254,7 +266,7 @@ function DealBoard({ type, deals, onMove, onAdd, onEdit, onDelete }: { type: str
       onDragOver={onBoardDragOver} onDrop={stopAuto}>
       {stages.map((s) => (
         <DealColumn key={s.key} stage={s} deals={deals.filter((d) => d.type === type && d.stage === s.key)}
-          onMove={onMove} onAdd={(k) => onAdd(type, k)} onEdit={onEdit} onDelete={onDelete}
+          onMove={onMove} onDismissAi={onDismissAi} onAdd={(k) => onAdd(type, k)} onEdit={onEdit} onDelete={onDelete}
           onDragStart={setDrag} isOver={over === s.key}
           onOver={() => setOver(s.key)} onLeave={() => setOver((o) => (o === s.key ? null : o))}
           onDrop={() => { stopAuto(); if (drag && drag.stage !== s.key) onMove(drag, s.key); setDrag(null); setOver(null); }} />
@@ -345,7 +357,9 @@ function AddDealModal({ type, stage, leads, members, currentUser, isBroker, init
       <div className="wc-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
         <button className="wc-modal-x" onClick={onClose}><Icon name="x" size={18} /></button>
         <div className="wc-modal-lbl" style={{ marginBottom: 4 }}>{nameLabel}{listing ? " (the listing)" : ""}</div>
-        <input className="wc-modal-title" placeholder={listing ? "123 Oak St" : "Deal name"} autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="wc-modal-title" placeholder={listing ? "123 Oak St" : "Deal name"} autoFocus value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="wc-modal-crumb">
           <span className="wc-crumb-tag">#{type}</span>
           <Icon name="chevronRight" size={12} />
@@ -446,10 +460,11 @@ interface LeadOpt { id: number; name: string; lead_type: string | null }
 function DealsInner() {
   const orgId = localStorage.getItem("org_id") || "";
   const qc = useQueryClient();
-  const [tab, setTab] = useState("Seller");
+  const [tab, setTab] = useState("Buyer");
   const [addOpen, setAddOpen] = useState<{ type: string; stage: string } | null>(null);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [confirmDel, setConfirmDel] = useState<Deal | null>(null);
+  const [aiToast, setAiToast] = useState(true);
 
   // Pipeline vs Listings view, persisted in the URL (?view=listings).
   const [params, setParams] = useSearchParams();
@@ -500,6 +515,7 @@ function DealsInner() {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["org-deals", orgId] });
   const moveMut = useMutation({ mutationFn: (v: { id: number; stage: string }) => updateDeal(v.id, { stage: v.stage }), onSuccess: () => refresh() });
+  const dismissAiMut = useMutation({ mutationFn: (id: number) => updateDeal(id, { dismiss_ai_suggestion: true }), onSuccess: () => refresh() });
   const createMut = useMutation({
     mutationFn: (d: NewDeal) => createDeal({
       name: d.name, lead_id: d.leadId, deal_type: TYPE_TO_KEY[d.type], stage: d.stage, value: d.price,
@@ -528,7 +544,11 @@ function DealsInner() {
   } : null;
 
   const onMove = (deal: Deal, toStage: string) => { if (deal.id && deal.stage !== toStage) moveMut.mutate({ id: deal.id, stage: toStage }); };
+  const onDismissAi = (deal: Deal) => { if (deal.id) dismissAiMut.mutate(deal.id); };
   const onAdd = (type: string, stage: string) => setAddOpen({ type, stage });
+
+  // Pending AI stage suggestions -> header subtitle + the dismissible toast.
+  const aiCount = deals.filter((d) => d.ai).length;
 
   // KPI strip from real data.
   const underContract = deals.filter((d) => d.stage === "contract" || d.stage === "escrow").length;
@@ -539,10 +559,10 @@ function DealsInner() {
     { icon: "trophy", label: "Closed Won", value: String(summary?.won ?? 0), delta: fmtK(summary?.won_value ?? 0) + " won", tone: "emerald", up: (summary?.won ?? 0) > 0 },
   ];
 
-  // Listing-side categories first (Seller default), then buyer/renter.
+  // Buyers first (deals.prompt.md tab order).
   const tabs = [
-    { key: "Seller", label: "Sellers", icon: "building2" },
     { key: "Buyer", label: "Buyers", icon: "home" },
+    { key: "Seller", label: "Sellers", icon: "building2" },
     { key: "Renter", label: "Renters", icon: "home" },
   ];
   // A lead is optional now; the picker offers every lead not already in a deal.
@@ -553,8 +573,21 @@ function DealsInner() {
       <div className="wc-pagehead">
         <div>
           <h1>Deals</h1>
-          <p>{deals.length} {deals.length === 1 ? "transaction" : "transactions"} in the pipeline · {deals.length}/{MAX_DEALS.toLocaleString()} max</p>
+          <p>
+            {deals.length} {deals.length === 1 ? "transaction" : "transactions"} ·{" "}
+            {aiCount > 0
+              ? <span style={{ color: "var(--accent-strong)", fontWeight: 600 }}>{aiCount} AI stage {aiCount === 1 ? "suggestion" : "suggestions"}</span>
+              : <>{aiCount} AI stage suggestions</>}
+          </p>
         </div>
+        {view === "pipeline" && (
+          <div className="wc-pagehead-actions">
+            <button className="wc-primary" style={{ fontSize: 15, padding: "12px 20px" }}
+              onClick={() => onAdd(tab, STAGE_SETS[tab][0].key)}>
+              <Icon name="plus" size={16} />Add Deal
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="wc-tabs" style={{ marginBottom: 18 }}>
@@ -593,7 +626,19 @@ function DealsInner() {
         ))}
       </div>
 
-      <DealBoard type={tab} deals={deals} onMove={onMove} onAdd={onAdd} onEdit={setEditDeal} onDelete={setConfirmDel} />
+      <DealBoard type={tab} deals={deals} onMove={onMove} onDismissAi={onDismissAi} onAdd={onAdd} onEdit={setEditDeal} onDelete={setConfirmDel} />
+
+      {/* AI suggestion toast (deals.prompt.md §4) - shown while suggestions are pending. */}
+      {aiCount > 0 && aiToast && (
+        <div className="wc-aitoast">
+          <span className="wc-aitoast-ic"><Icon name="sparkles" size={16} /></span>
+          <div className="wc-aitoast-body">
+            <div className="wc-aitoast-title">AI suggests {aiCount} stage {aiCount === 1 ? "move" : "moves"}</div>
+            <div className="wc-aitoast-sub">WarmChats watched the conversations and is ready to advance these deals — accept on a card to move it.</div>
+          </div>
+          <button className="wc-aitoast-x" onClick={() => setAiToast(false)} aria-label="Dismiss"><Icon name="x" size={14} /></button>
+        </div>
+      )}
         </>
       )}
 

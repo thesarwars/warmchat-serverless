@@ -27,10 +27,6 @@ import {
   Calendar,
   Eye,
   ImageIcon,
-  Bold,
-  Italic,
-  List,
-  ListOrdered,
   Loader2,
   Lock,
   MessageSquare,
@@ -54,13 +50,11 @@ import {
   SMS_SEGMENT_LENGTH,
 } from "../../utils/smsSegments";
 import {
-  insertTokenAtCursor,
   renderPersonalizedText,
   validatePersonalization,
 } from "../../utils/personalization";
 import { callAiImprove } from "@/utils/aiImprove";
 import {
-  EMAIL_PERSONALIZE_TOKENS,
 } from "./utils/personalizeTokens";
 import {
   uploadMessageAttachments,
@@ -76,7 +70,6 @@ import NewMessageModal from "./components/NewMessageModal";
 import BookingMessageModal from "./components/BookingMessageModal";
 import { isHotStage, getLeadType } from "@/components/leads/utils/leadDisplay";
 import AttachmentChips from "./components/AttachmentChips";
-import PersonalizeOptionsMenu from "./components/PersonalizeOptionsMenu";
 import AppointmentThreadCard from "./components/AppointmentThreadCard";
 import DeleteLeadConfirmModal from "./components/DeleteLeadConfirmModal";
 import MessageBubble from "./components/MessageBubble";
@@ -98,7 +91,6 @@ import {
 } from "./utils/formatters";
 import {
   composerInnerPlain,
-  execRichCommand,
   sanitizePastedHtml,
 } from "./utils/composerUtils";
 import { loadNotifPrefs, type InboxNotifPrefs } from "./utils/notifications";
@@ -2242,41 +2234,6 @@ export default function Inbox() {
     }
   };
 
-  const handleInsertToken = (field: "subject" | "body", tokenValue: string) => {
-    if (!tokenValue) return;
-    if (field === "subject") {
-      const start = subjectRef.current?.selectionStart;
-      const end = subjectRef.current?.selectionEnd;
-      setComposeSubject((current) =>
-        insertTokenAtCursor(current, tokenValue, start, end),
-      );
-      return;
-    }
-
-    const el = bodyRef.current;
-    if (!el) return;
-    // Always append the token at the end of the draft. Add a leading space when
-    // the existing text doesn't already end with whitespace so tokens never run
-    // straight into the previous word.
-    const existing = composerInnerPlain(el);
-    const needsSpace = existing.length > 0 && !/\s$/.test(existing);
-    const insertText = `${needsSpace ? " " : ""}${tokenValue}`;
-    el.focus();
-    // Move the caret to the very end before inserting.
-    const selection = window.getSelection();
-    if (selection) {
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-    const ok = document.execCommand("insertText", false, insertText);
-    if (!ok) {
-      el.appendChild(document.createTextNode(insertText));
-    }
-    setComposeBody(composerInnerPlain(el));
-  };
 
   // const handleGenerateComposeAi = async () => {
   //   if (!contactForView) {
@@ -2595,27 +2552,6 @@ export default function Inbox() {
   // hoisted handler to keep react-hooks/immutability happy and because this
   // is the action's only call site.
 
-  const applyComposeFormat = (
-    kind: "bold" | "italic" | "bullet" | "number" | "link",
-  ) => {
-    const el = bodyRef.current;
-    if (!el) return;
-    el.focus();
-    if (kind === "link") {
-      const url = window.prompt("Paste link URL", "https://");
-      if (!url) return;
-      execRichCommand("createLink", url);
-    } else if (kind === "bold") {
-      execRichCommand("bold");
-    } else if (kind === "italic") {
-      execRichCommand("italic");
-    } else if (kind === "bullet") {
-      execRichCommand("insertUnorderedList");
-    } else {
-      execRichCommand("insertOrderedList");
-    }
-    setComposeBody(composerInnerPlain(el));
-  };
 
   // AI Assist ▾ presets. Each rewrites the current draft in place by calling
   // callAiImprove with `tone` as the steering instruction. "Follow-up
@@ -3462,44 +3398,6 @@ export default function Inbox() {
                         </div>
                       ) : (
                         <>
-                          {currentChannel === "email" ? (
-                            <div className="mt-2 block text-sm text-gray-600 2xl:mt-0">
-                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                <span className="font-medium text-gray-900">
-                                  Subject:
-                                </span>
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className={`max-w-45 truncate rounded-2xl px-3 py-1.5 text-xs font-semibold 2xl:max-w-none ${
-                                      hasVerifiedBusinessEmail
-                                        ? "bg-emerald-50 text-emerald-700"
-                                        : "bg-blue-50 text-blue-700"
-                                    }`}
-                                  >
-                                    {hasVerifiedBusinessEmail
-                                      ? `Business Email${domainEmail ? ` * ${domainEmail}` : ""}`
-                                      : "Gmail"}
-                                  </div>
-                                  <PersonalizeOptionsMenu
-                                    tokens={EMAIL_PERSONALIZE_TOKENS}
-                                    onInsertBody={(token) =>
-                                      handleInsertToken("subject", token)
-                                    }
-                                  />
-                                </div>
-                              </div>
-                              <input
-                                ref={subjectRef}
-                                value={composeSubject}
-                                onChange={(event) =>
-                                  setComposeSubject(event.target.value)
-                                }
-                                className="w-full rounded-2xl border border-gray-200 px-3 py-2 outline-hidden transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100 2xl:px-4 2xl:py-3"
-                                placeholder="Hello {firstname}"
-                              />
-                            </div>
-                          ) : null}
-
                           {/* <div className="mt-2 flex flex-wrap items-center gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1.5">
                            
                           </div> */}
@@ -3616,59 +3514,18 @@ export default function Inbox() {
                                   </span>
                                 </button>
                               </div>
-                              <div className="wc-compose-tools flex items-center gap-1">
-                                {currentChannel !== "sms" ? (
-                                  <>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          applyComposeFormat("bold");
-                                        }}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                        title="Bold"
-                                      >
-                                        <Bold size={16} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          applyComposeFormat("italic");
-                                        }}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                        title="Italic"
-                                      >
-                                        <Italic size={16} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          applyComposeFormat("bullet");
-                                        }}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                        title="Bullet list"
-                                      >
-                                        <List size={16} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onMouseDown={(e) => {
-                                          e.preventDefault();
-                                          applyComposeFormat("number");
-                                        }}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-700 hover:bg-white hover:shadow-xs 2xl:h-9 2xl:w-9"
-                                        title="Numbered list"
-                                      >
-                                        <ListOrdered size={16} />
-                                      </button>
-                                    </div>
-                                  </>
-                                ) : null}
-                              </div>
                             </div>
+                            {currentChannel === "email" ? (
+                              <input
+                                ref={subjectRef}
+                                value={composeSubject}
+                                onChange={(event) =>
+                                  setComposeSubject(event.target.value)
+                                }
+                                className="mb-2 w-full rounded-2xl border border-gray-200 px-3 py-2 text-sm outline-hidden transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100 2xl:px-4 2xl:py-2.5"
+                                placeholder={`Subject — to ${contactForView?.email || "the lead"}`}
+                              />
+                            ) : null}
                             <div className="relative rounded-3xl border border-gray-200 bg-white transition focus-within:border-orange-300 focus-within:ring-2 focus-within:ring-orange-100">
                               {/* Uploaded files/images preview INSIDE the textbox. */}
                               {composeAttachments.length > 0 ? (

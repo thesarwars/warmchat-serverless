@@ -222,13 +222,33 @@ async function sendEmail(env: CronEnv, row: DueRow): Promise<boolean> {
     listUnsubHeader = `<${url}>`;
   }
 
+  // Send from the agent's verified business address with replies routed to
+  // the inbound domain - same resolution as the scheduled-message dispatcher.
+  // A drip answered by the lead must land back in the WarmChats inbox, not in
+  // the platform's From mailbox.
+  let fromEmail = env.ELASTIC_SENDER_EMAIL;
+  let replyTo: string | null = null;
+  if (row.user_id != null) {
+    const conn = await env.D1DB.prepare(
+      `SELECT id, email_address, elastic_from_email
+         FROM inbox_connection
+        WHERE user_id = ? AND provider = 'elastic'
+          AND (status IS NULL OR status IN ('verified', 'active'))
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(row.user_id).first<{ id: number; email_address: string | null; elastic_from_email: string | null }>();
+    if (conn) {
+      fromEmail = (conn.elastic_from_email || conn.email_address || "").trim() || env.ELASTIC_SENDER_EMAIL;
+      replyTo = `inbound+${conn.id}@${(env.REPLY_DOMAIN || "mail.warmchats.com").trim()}`;
+    }
+  }
+
   if (await isMockSendsEnabled(env, orgId)) {
     await env.D1DB.prepare(
       `INSERT INTO mock_send_log
          (channel, provider, from_address, to_address, subject, body, org_id, rate_acquired, second_bucket)
        VALUES ('email', 'elastic', ?, ?, ?, ?, ?, 1, ?)`,
     ).bind(
-      env.ELASTIC_SENDER_EMAIL || null,
+      fromEmail || null,
       to,
       subject || null,
       bodyHtml || null,
@@ -241,8 +261,9 @@ async function sendEmail(env: CronEnv, row: DueRow): Promise<boolean> {
   const params = new URLSearchParams();
   params.set("apikey", env.ELASTIC_EMAIL_API_KEY);
   params.set("subject", subject || "(no subject)");
-  params.set("from", env.ELASTIC_SENDER_EMAIL);
-  params.set("fromName", env.ELASTIC_SENDER_NAME);
+  params.set("from", fromEmail);
+  params.set("fromName", row.sender_name || env.ELASTIC_SENDER_NAME);
+  if (replyTo) params.set("replyTo", replyTo);
   params.set("to", to);
   params.set("bodyHtml", bodyHtml);
   if (listUnsubHeader) {

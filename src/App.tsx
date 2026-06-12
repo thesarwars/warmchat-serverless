@@ -66,6 +66,7 @@ import { syncSubscriptionOnBoot, setupServiceWorkerUpdates } from "./utils/webPu
 import { toast as sonnerToast } from "sonner";
 import { PwaInstallModal } from "./components/notifications/PwaInstallModal";
 import { DesktopNotifPrompt } from "./components/notifications/DesktopNotifPrompt";
+import MicPermissionPrompt from "./components/notifications/MicPermissionPrompt";
 import { NotificationActionBridge } from "./components/notifications/NotificationActionBridge";
 import CookieConsentBanner from "./components/CookieConsentBanner";
 import { refreshAuthSession, shouldRefreshAccessToken, clearStoredAuthState, hasRefreshToken, isSessionActive } from "./utils/authSession";
@@ -74,6 +75,13 @@ const App: React.FC = () => {
   const [sessionExpired, setSessionExpired] = useState(false);
   const location = useLocation();
   const hideChatWidget = location.pathname.startsWith("/inbox") || location.pathname.startsWith("/leads");
+
+  // SPA navigations keep the previous page's scroll depth, so a deep link
+  // (e.g. dashboard "Launch sequence" -> /ai/agent) used to land mid-page.
+  // Reset to the top whenever the route path changes.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
@@ -278,6 +286,10 @@ const App: React.FC = () => {
             don't want a full-screen modal blocking work, just this compact
             nudge that re-appears on every refresh until granted. */}
         <DesktopNotifPrompt />
+
+        {/* One-time mic pre-grant so answering a call never stalls behind a
+            permission popup. Shows only while the permission is undecided. */}
+        <MicPermissionPrompt />
 
         {/* Bridges native notification action buttons (Reply / Answer /
             Decline) into the running app - the service worker hands the action

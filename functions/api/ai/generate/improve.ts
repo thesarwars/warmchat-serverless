@@ -38,9 +38,18 @@ PERSONALIZATION:
 
 CHANNEL RULES:
 - SMS: short, conversational, no signature. HARD LIMIT - ${SMS_MAX_CHARS} characters maximum (2 segments). Count before returning. If you're over, rewrite tighter until it fits. Aim for ≤160 chars (1 segment) when possible. Never pad with emoji or filler to hit a length.
-- Email: include a subject line ONLY if the raw draft had one. Tight body, soft sign-off using {agent_name} or the agent's real name from lead_data.
+- Email: include a subject line ONLY if the raw draft had one. Tight body.
 - WhatsApp: conversational, light emoji optional, keep ≤${SMS_MAX_CHARS} chars.
 - LinkedIn: professional, no emoji.
+
+STRUCTURE - GREETING & SIGNATURE (MANDATORY):
+- ALWAYS open with a short greeting plus the lead's FIRST NAME followed by a comma and a space, then continue ("Hi John, just wanted to see if..."). Vary the greeting naturally (Hi / Hey / Good morning / Good afternoon). If Lead Data has no first name, use {firstname}.
+- Email ONLY: end with a sign-off on its own lines, separated from the body by ONE BLANK LINE, exactly in this shape:
+
+Best,
+<agent's real name>
+
+Use the agent's REAL name from the "Agent name:" line of the prompt - NEVER output a placeholder like {AgentName} or {agent_name} when the real name is given. SMS: no signature.
 
 VOICE & SUBSTANCE:
 - Match the requested Tone (Friendly, Professional, Warm, Consultative, Confident, Persuasive, Direct, Empathetic, Urgent, Luxury).
@@ -59,14 +68,16 @@ function buildUserPrompt(opts: {
   channel: string;
   leadData: unknown[];
   mode: Mode;
+  agentName: string;
 }) {
-  const { message, source, tone, persona, channel, leadData, mode } = opts;
+  const { message, source, tone, persona, channel, leadData, mode, agentName } = opts;
   const leadJson = JSON.stringify(leadData ?? [], null, 2);
   const fullContext = mode === "rewrite_selection" ? `Full message context (do NOT rewrite this, only the selection below):\n${message}\n\n` : "";
   return `Persona: ${persona}
 Tone: ${tone}
 Channel: ${channel}
 Mode: ${mode}
+Agent name: ${agentName || "(unknown - use {agent_name})"}
 Lead Data (weave concrete values in; placeholder only when the field is missing):
 ${leadJson}
 
@@ -130,6 +141,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const leadData = Array.isArray(body?.lead_data) ? body!.lead_data! : [];
   const source = mode === "rewrite_selection" ? selection : message;
 
+  const agentRow = await queryFirst<{ name: string | null }>(
+    env.D1DB, `SELECT name FROM "user" WHERE id = ?`, user.id,
+  );
+  const agentName = (agentRow?.name || "").trim();
+
   const membership = await queryFirst<{ org_id: number }>(
     env.D1DB, `SELECT org_id FROM membership WHERE user_id = ? LIMIT 1`, user.id,
   );
@@ -143,9 +159,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   try {
     const out = await generateWithOpenAI(env, SYSTEM_PROMPT, buildUserPrompt({
-      message, source, tone, persona, channel, leadData, mode,
+      message, source, tone, persona, channel, leadData, mode, agentName,
     }), { orgId: membership?.org_id ?? null });
     let rewritten = sanitizePlaceholders(cleanRewrite(out.text || ""));
+    // Materialize name tokens so the agent sees clean copy, never {AgentName}.
+    if (agentName) {
+      rewritten = rewritten.replace(/\{\{?\s*(agent_?name|agent_?first_?name|agent_?full_?name|sender_?name|sender_?full_?name)\s*\}?\}/gi, agentName);
+    }
+    const lead0 = (leadData[0] ?? null) as Record<string, unknown> | null;
+    const leadFirst = String(lead0?.first_name || String(lead0?.name || "").split(/\s+/)[0] || "").trim();
+    if (leadFirst) {
+      rewritten = rewritten.replace(/\{\{?\s*(first_?name)\s*\}?\}/gi, leadFirst);
+    }
     if (channel === "sms") rewritten = trimToLimit(rewritten, SMS_MAX_CHARS);
     return json({
       improved_message: rewritten,

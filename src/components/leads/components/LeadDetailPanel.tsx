@@ -145,7 +145,9 @@ export default function LeadDetailPanel({
     if (leadId != null) void onUpdateField(leadId, field, value);
   };
 
-  const aiStatus = getAiStatus(lead) || "AI Off";
+  // NULL ai_status = follow the account AI setting (AI does respond),
+  // so it must not be displayed as "AI Off".
+  const aiStatus = getAiStatus(lead) || "AI On";
   const area = getAreaValue(lead);
   const budget = getPriceRange(lead);
   const emailNotif = lead.email_notifications_enabled !== false;

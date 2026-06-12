@@ -123,26 +123,10 @@ export type ComplianceFooterKind =
 
 const STOP_FOOTER = "Reply STOP to opt out";
 const STOP_HINT_RE = /\bstop\b[^.]{0,40}\b(opt[\s-]?out|unsubscribe|cancel|end)\b/i;
-const AUTO_HINT_RE = /\b(automated|auto[\s-]?reply|this is an? (auto|automated)|bot)\b/i;
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** True when the message body already names the agent (whole-word, case-insensitive). */
-function bodyMentionsAgent(body: string, agentName: string | null | undefined): boolean {
-  const trimmed = (agentName || "").trim();
-  if (!trimmed) return false;
-  try {
-    return new RegExp(`\\b${escapeRegex(trimmed)}\\b`, "i").test(body);
-  } catch {
-    return false;
-  }
-}
 
 export interface ComplianceFooterOpts {
   kind: ComplianceFooterKind;
-  /** Sender name shown in the AI-disclosure prefix. Falls back to "WarmChats". */
+  /** Kept for call-site compatibility; the disclosure prefix that used this was removed. */
   agentName?: string | null;
   /**
    * True when the recipient is already opted-in (`sms_consent_status='opted_in'`).
@@ -162,25 +146,16 @@ export function appendComplianceFooter(body: string, opts: ComplianceFooterOpts)
   const kind = opts.kind;
   if (kind === "transactional" || kind === "followup_in_thread") return trimmed;
 
-  const wantDisclosure = kind === "first_auto" || kind === "sequence_first";
   const wantStop = kind === "first_auto" || kind === "sequence_first" || kind === "campaign";
-  // Opted-in leads got the bot-disclosure + STOP language in the consent flow
-  // that earned the opt-in. Re-stating both on every first-of-program message
-  // is noise. Campaign blasts are exempt - they're standalone marketing.
-  const suppressForOptedIn =
-    opts.recipientOptedIn === true && (kind === "first_auto" || kind === "sequence_first");
 
+  // Owner's rule (2026-06): the STOP footer is ONLY for leads not yet opted
+  // in. A consented lead already accepted the program (STOP/HELP language was
+  // part of the consent flow), so re-pasting it on any message - including
+  // campaign blasts - is noise. The "(Automated msg from <agent>)" disclosure
+  // prefix was removed entirely at the same time; sender identity belongs in
+  // the template copy itself.
   let out = trimmed;
-  if (wantDisclosure && !suppressForOptedIn && !AUTO_HINT_RE.test(out)) {
-    const sender = (opts.agentName || "WarmChats").trim() || "WarmChats";
-    // Body-name dedup: "(Automated msg from Joseph V.) Hi Jo, it's Joseph V."
-    // reads weird. If the template already names the agent, the recipient is
-    // identified and we skip the prefix.
-    if (!bodyMentionsAgent(out, sender)) {
-      out = `(Automated msg from ${sender}) ${out}`;
-    }
-  }
-  if (wantStop && !suppressForOptedIn && !STOP_HINT_RE.test(out)) {
+  if (wantStop && opts.recipientOptedIn !== true && !STOP_HINT_RE.test(out)) {
     out = `${out.trimEnd()}\n\n${STOP_FOOTER}`;
   }
   return out;

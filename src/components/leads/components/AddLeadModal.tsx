@@ -402,6 +402,10 @@ export default function AddLeadModal({
                 value={form.ai_status}
                 onChange={(e) => set({ ai_status: e.target.value })}
               >
+                {/* Empty = follow the account-level inbound AI default. Without
+                    this option a NULL-status lead silently rendered (and saved)
+                    as "AI Off". */}
+                <option value="">Default (account AI setting)</option>
                 {AI_STATUS_OPTIONS.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}

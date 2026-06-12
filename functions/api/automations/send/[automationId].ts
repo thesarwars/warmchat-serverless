@@ -48,19 +48,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // Pre-load lead-level data for quiet hours + STOP compliance. We hit `lead`
   // once per lead-id (rather than per channel) so an automation that fans out to
   // both SMS and email doesn't double the read load.
-  interface LeadInfo { timezone: string | null; sms_opt_out: number | null }
+  interface LeadInfo { timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null }
   const leadInfo = new Map<number, LeadInfo>();
   const leadIds = leads
     .map((l) => Number(l.id))
     .filter((n): n is number => Number.isInteger(n));
   if (leadIds.length > 0) {
     const placeholders = leadIds.map(() => "?").join(",");
-    const rows = await queryAll<{ id: number; timezone: string | null; sms_opt_out: number | null }>(
+    const rows = await queryAll<{ id: number; timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null }>(
       env.D1DB,
-      `SELECT id, timezone, sms_opt_out FROM lead WHERE id IN (${placeholders})`,
+      `SELECT id, timezone, sms_opt_out, sms_consent_status FROM lead WHERE id IN (${placeholders})`,
       ...leadIds,
     );
-    for (const r of rows) leadInfo.set(r.id, { timezone: r.timezone, sms_opt_out: r.sms_opt_out });
+    for (const r of rows) leadInfo.set(r.id, { timezone: r.timezone, sms_opt_out: r.sms_opt_out, sms_consent_status: r.sms_consent_status });
   }
 
   // Quiet hours: load the org window ONCE, then evaluate per-lead with no
@@ -107,12 +107,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   if (channels.includes("sms")) {
     // Each automation send is a single marketing blast (no follow-up chain
-    // here - those are handled per-step in queueAutomationForLead). CTIA
-    // requires the STOP footer on standalone marketing broadcasts; we do not
-    // prepend the AI-disclosure (the agent typed the campaign body, not a
-    // bot). Idempotent: bodies already carrying their own STOP wording are
-    // left alone.
-    const smsBody = appendComplianceFooter(body, { kind: "campaign" });
+    // here - those are handled per-step in queueAutomationForLead). The STOP
+    // footer is applied PER LEAD: only recipients without recorded consent
+    // get it; opted-in leads receive the bare campaign body.
     for (const lead of leads) {
       const toPhone = (lead.phone || "").trim();
       if (!toPhone) {
@@ -126,6 +123,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         results.push({ lead: toPhone, status: "skipped_opt_out", channel: "sms" });
         continue;
       }
+      const smsBody = appendComplianceFooter(body, {
+        kind: "campaign",
+        recipientOptedIn: leadId !== null && leadInfo.get(leadId)?.sms_consent_status === "opted_in",
+      });
       const sendAt = scheduledAtFor(leadId);
       stmts.push(env.D1DB.prepare(SMS_SQL).bind(
         user.id, orgId, leadId, id, toPhone, smsBody, sendAt, now, now,

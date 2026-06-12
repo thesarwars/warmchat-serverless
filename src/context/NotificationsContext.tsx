@@ -47,6 +47,11 @@ const NIMBUS_TOAST_CLASSNAMES = {
   toast: "bg-transparent! border-0! shadow-none! p-0! ring-0! overflow-visible!",
 } as const;
 
+// Every in-app notification toast shares this Sonner id: only the MOST RECENT
+// notification is ever on screen (a new one replaces the card in place), never
+// a stack of floating cards. The full history lives in the header bell.
+const WC_NOTIF_TOAST_ID = "wc-notif-card";
+
 interface NotifPrefs {
   notify_in_app_toast: boolean;
   notify_sound: boolean;
@@ -102,17 +107,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // already reading doesn't pop a redundant reply toast - it is silently marked
   // read instead (they can see + reply right there in the thread).
   const activeConversationRef = useRef<number | null>(null);
-  // Live toast ids keyed by the conversation (contact) they belong to, so opening
-  // that conversation can dismiss any reply toast still on screen for it.
-  const toastsByContactRef = useRef<Map<number, string | number>>(new Map());
+  // ONE notification card at a time: every toast reuses this fixed Sonner id,
+  // so a new notification REPLACES the visible card instead of stacking a
+  // column of cards down the screen. The full feed lives in the header bell.
+  const currentToastContactRef = useRef<number | null>(null);
   const setActiveConversation = useCallback((id: number | null) => {
     activeConversationRef.current = id;
-    if (id != null) {
-      const tid = toastsByContactRef.current.get(id);
-      if (tid != null) {
-        toast.dismiss(tid);
-        toastsByContactRef.current.delete(id);
-      }
+    // Opening the conversation the visible card points at dismisses it.
+    if (id != null && currentToastContactRef.current === id) {
+      toast.dismiss(WC_NOTIF_TOAST_ID);
+      currentToastContactRef.current = null;
     }
   }, []);
 
@@ -199,8 +203,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           const t = n.created_at ? Date.parse(n.created_at) : NaN;
           return Number.isNaN(t) || nowMs - t <= RECENT_MS;
         })
-        .sort((a, b) => a.id - b.id) // oldest first so they stack in arrival order
-        .slice(-3); // cap the burst
+        .sort((a, b) => a.id - b.id)
+        // Only the NEWEST missed notification gets the toast (it replaces any
+        // visible card anyway); the rest are in the bell.
+        .slice(-1);
       for (const n of toSurface) {
         surfacedToastIdsRef.current.add(n.id);
         const normalized: NotificationItem = {
@@ -349,12 +355,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             />
           ),
           {
+            id: WC_NOTIF_TOAST_ID,
             duration: 30_000,
             position: isMobile ? "top-center" : "top-right",
             onDismiss: () => void markRead(notif.id),
             onAutoClose: () => void markRead(notif.id),
           },
         );
+        currentToastContactRef.current = notif.contact_id ?? null;
         return;
       }
 
@@ -370,7 +378,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           kind.includes("escalat") ||
           kind.includes("urgent") ||
           kind === "payment_failed";
-        const genericId = toast.custom(
+        toast.custom(
           (t) => (
             <NimbusToast
               title={notif.title}
@@ -389,6 +397,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             />
           ),
           {
+            id: WC_NOTIF_TOAST_ID,
             duration: 8000,
             position: isMobile ? "top-center" : "top-right",
             // Drop Sonner's default white card chrome - the Nimbus card brings
@@ -398,10 +407,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             onAutoClose: () => void markRead(notif.id),
           },
         );
-        if (notif.contact_id != null) toastsByContactRef.current.set(notif.contact_id, genericId);
+        currentToastContactRef.current = notif.contact_id ?? null;
         return;
       }
-      const replyId = toast.custom(
+      toast.custom(
         (t) => (
           <InboxReplyToast
             notification={notif}
@@ -428,6 +437,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           />
         ),
         {
+          id: WC_NOTIF_TOAST_ID,
           duration: 30_000,
           position: isMobile ? "top-center" : "top-right",
           classNames: NIMBUS_TOAST_CLASSNAMES,
@@ -436,7 +446,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           onAutoClose: () => void markRead(notif.id),
         },
       );
-      if (notif.contact_id != null) toastsByContactRef.current.set(notif.contact_id, replyId);
+      currentToastContactRef.current = notif.contact_id ?? null;
     },
     [markRead, navigate],
   );

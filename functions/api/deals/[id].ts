@@ -20,6 +20,8 @@ interface PatchBody {
   status?: string; stage?: string | null; value?: number | null; probability?: number | null;
   name?: string | null; deal_type?: string | null; commission?: number | null;
   close_date?: string | null; description?: string | null; assignee_ids?: number[];
+  /** Dismiss the pending AI stage suggestion without moving the deal. */
+  dismiss_ai_suggestion?: boolean;
 }
 
 const num = (v: unknown): number | null => {
@@ -50,6 +52,12 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
     args.push(status, status === "open" ? null : nowIso());
   }
   if (body.stage !== undefined) { sets.push("stage = ?"); args.push(body.stage); }
+  // A manual stage/status decision (or an explicit dismiss) resolves any
+  // pending AI stage suggestion - accepting IS a stage PATCH, so this covers
+  // both accept and "the agent decided otherwise".
+  if (body.stage !== undefined || body.status !== undefined || body.dismiss_ai_suggestion) {
+    sets.push("ai_suggested_stage = NULL", "ai_suggestion_reason = NULL");
+  }
   if (body.value !== undefined) { sets.push("value = ?"); args.push(num(body.value)); }
   if (body.probability !== undefined) { sets.push("probability = ?"); args.push(num(body.probability)); }
   if (body.name !== undefined) { sets.push("name = ?"); args.push(body.name ? String(body.name) : null); }
