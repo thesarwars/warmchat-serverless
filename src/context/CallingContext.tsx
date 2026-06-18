@@ -154,6 +154,12 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
   const telnyxReconnectAttemptRef = useRef(0);
   const telnyxReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleTelnyxReconnectRef = useRef<() => void>(() => {});
+  // True from the start of initTelnyx until the client is ready or fails - stops
+  // overlapping clients (the getWebRtcToken await window let a second trigger
+  // create a duplicate registration, and two clients on one credential PUNT each
+  // other in a loop). Also debounces forced reconnects.
+  const telnyxConnectingRef = useRef(false);
+  const lastForceReconnectRef = useRef(0);
 
   const [ready, setReady] = useState(false);
   const [telnyxReady, setTelnyxReady] = useState(false);
@@ -202,12 +208,24 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
   const initTelnyx = useCallback(async () => {
     if (!sessionActiveRef.current) return;
     if (telnyxRef.current) return;
+    // Guard the whole async setup, not just telnyxRef: getWebRtcToken() awaits,
+    // and a second trigger in that window would build a duplicate client that
+    // PUNTs the first. One in-flight connect at a time.
+    if (telnyxConnectingRef.current) return;
+    telnyxConnectingRef.current = true;
 
     try {
       const { loginToken } = await callingApi.getWebRtcToken();
 
       const client = new TelnyxRTC({
         login_token: loginToken,
+        // Pin the WebRTC registration to a US region. With the default ("auto")
+        // the browser was registering on the EU edge (ld6-prod / London), while
+        // our number, Call Control app and inbound fork-dial all anchor in the
+        // US - so inbound INVITEs to sip:<cred>@sip.telnyx.com couldn't find the
+        // EU registration and returned SIP 480 (every inbound call missed). The
+        // business numbers are California (747/559), so us-west matches.
+        region: "us-west",
         // The SDK posts periodic call analytics to https://rtc.telnyx.com/call_report.
         // In some environments this can surface as a CORS error (noise) even though
         // calling still works. Disable it by default.
@@ -217,6 +235,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
 
       client.on("telnyx.ready", () => {
         telnyxReadyRef.current = true;
+        telnyxConnectingRef.current = false;
         telnyxReconnectAttemptRef.current = 0;
         setTelnyxReady(true);
         // Diagnostic: no "registered" line in the console = inbound calls
@@ -225,22 +244,29 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       });
       client.on("telnyx.error", (err: unknown) => {
         console.warn("[calling] telnyx.error", err);
-        // "CALL DOES NOT EXIST" (-32002) / BYE_SEND_FAILED (44003) mean the
-        // server lost our session while the socket looked alive - answering
-        // and hanging up silently fail in that state. Re-register immediately.
         const s = (() => {
           try { return JSON.stringify(err ?? ""); } catch { return String(err); }
         })();
-        if (
+        // Socket-level errors (45002 WEBSOCKET_ERROR / "Connection to server
+        // lost") are handled by the SDK's OWN auto-reconnect - the error body
+        // literally says so. Forcing our own teardown here raced the SDK's
+        // reconnect, killing the socket mid-handshake ("closed before
+        // established") and spinning a connect->PUNT->reconnect loop. Let the
+        // SDK recover; the liveness heartbeat is the backstop if it can't.
+        // Only force a re-register for CALL-LEVEL dead sessions, where the
+        // socket looks alive but the server lost our session so answering /
+        // hanging up silently fail.
+        const callLevelDead =
           s.includes("-32002") || s.includes("CALL DOES NOT EXIST") ||
-          s.includes("BYE_SEND_FAILED") || s.includes("44003") ||
-          // 45002 WEBSOCKET_ERROR ("Connection to server lost" / idle timeout)
-          // - the socket itself dropped; don't wait for the SDK's own retry.
-          s.includes("45002") || s.includes("WEBSOCKET_ERROR") || s.includes("Connection to server lost")
-        ) {
-          console.warn("[calling] dead session detected - forcing re-registration");
-          forceTelnyxReconnectRef.current();
-        }
+          s.includes("BYE_SEND_FAILED") || s.includes("44003");
+        if (!callLevelDead) return;
+        // Debounce: at most one forced reconnect per 8s, and never while a
+        // connect is already in flight.
+        const now = Date.now();
+        if (telnyxConnectingRef.current || now - lastForceReconnectRef.current < 8_000) return;
+        lastForceReconnectRef.current = now;
+        console.warn("[calling] dead session detected - forcing re-registration");
+        forceTelnyxReconnectRef.current();
       });
       client.on("telnyx.socket.close", () => {
         telnyxReadyRef.current = false;
@@ -366,6 +392,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       await client.connect();
     } catch (err) {
       console.warn("[calling] telnyx init failed", err);
+      telnyxConnectingRef.current = false;
       // Token fetch / connect failed (offline, expired session blip...) -
       // retry with backoff instead of staying dead.
       scheduleTelnyxReconnectRef.current();
@@ -383,12 +410,14 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
     telnyxReconnectTimerRef.current = setTimeout(() => {
       telnyxReconnectTimerRef.current = null;
       if (!sessionActiveRef.current || telnyxReadyRef.current) return;
+      if (telnyxConnectingRef.current) return; // a connect is already in flight
       try {
         telnyxRef.current?.disconnect();
       } catch {
         /* noop */
       }
       telnyxRef.current = null;
+      telnyxConnectingRef.current = false;
       void initTelnyx();
     }, delay);
   }, [initTelnyx]);
@@ -404,6 +433,10 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
   // registered but couldn't answer or hang up (the -32002 / 44003 errors).
   const forceTelnyxReconnect = useCallback(() => {
     if (!sessionActiveRef.current) return;
+    // Don't tear down a connect that's still establishing - that's exactly what
+    // caused the "closed before established" / PUNT loop. Let it finish (or fail
+    // and clear the flag itself).
+    if (telnyxConnectingRef.current) return;
     if (telnyxReconnectTimerRef.current) {
       clearTimeout(telnyxReconnectTimerRef.current);
       telnyxReconnectTimerRef.current = null;
@@ -417,6 +450,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       /* noop */
     }
     telnyxRef.current = null;
+    telnyxConnectingRef.current = false;
     void initTelnyx();
   }, [initTelnyx]);
   const forceTelnyxReconnectRef = useRef<() => void>(() => {});
@@ -454,6 +488,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       if (!sessionActiveRef.current || telnyxReadyRef.current) return;
+      if (telnyxConnectingRef.current) return; // a connect is already in flight
       if (telnyxReconnectTimerRef.current) {
         clearTimeout(telnyxReconnectTimerRef.current);
         telnyxReconnectTimerRef.current = null;

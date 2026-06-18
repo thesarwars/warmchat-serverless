@@ -69,6 +69,8 @@ function GoalsStyles() {
     .wg-foot-green{color:#0E9F6E;font-weight:700}
     /* main grid */
     .wg-grid{display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:start;margin-bottom:16px}
+    /* left column stacks the agent table + pipeline beside the AI Goal Coach */
+    .wg-left{display:flex;flex-direction:column;gap:16px;min-width:0}
     .wg-tablecard{padding:8px 6px 6px}
     .wg-table{width:100%;border-collapse:collapse}
     .wg-table thead th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding:14px 16px 12px}
@@ -262,6 +264,7 @@ function GoalsBody({ data, navigate, onSetGoal }: { data: GoalsData; navigate: (
       </div>
 
       <div className="wg-grid">
+        <div className="wg-left">
         <div className="wc-panel-card wg-tablecard">
           <table className="wg-table">
             <thead>
@@ -300,6 +303,23 @@ function GoalsBody({ data, navigate, onSetGoal }: { data: GoalsData; navigate: (
           </table>
         </div>
 
+        <div className="wc-panel-card wg-pipe">
+          <div className="wg-pipe-head">Pipeline Toward Goal<button className="wg-info" title="Pipeline contributing toward your annual goal"><Icon name="info" size={14} /></button></div>
+          <div className="wg-pipe-row">
+            {[
+              { icon: "checkCircle", fg: "#0E9F6E", bg: "#E4F7EF", label: "Closed Revenue", value: data.pipeline.closed_revenue },
+              { icon: "handshake", fg: "#0EA5E9", bg: "#E7F6FD", label: "Under Contract", value: data.pipeline.under_contract },
+              { icon: "filter", fg: "#7C5CFC", bg: "#EEEAFE", label: "Active Pipeline", value: data.pipeline.active_pipeline },
+            ].map((p, i) => (
+              <div className="wg-pipe-cell" key={i}>
+                <span className="wg-pipe-ic" style={{ color: p.fg, background: p.bg }}><Icon name={p.icon} size={20} /></span>
+                <div><div className="wg-pipe-label">{p.label}</div><div className="wg-pipe-val wc-mono">{fmtUSD0(p.value)}</div></div>
+              </div>
+            ))}
+          </div>
+        </div>
+        </div>{/* wg-left */}
+
         <div className="wc-panel-card wg-coach">
           <div className="wg-coach-head">
             <span className="wg-coach-spark"><Icon name="sparkles" size={18} /></span>
@@ -333,22 +353,6 @@ function GoalsBody({ data, navigate, onSetGoal }: { data: GoalsData; navigate: (
             })}
           </div>
           <button className="wg-action" onClick={() => navigate("/tasks")}>View Action Plan<Icon name="arrowRight" size={17} /></button>
-        </div>
-      </div>
-
-      <div className="wc-panel-card wg-pipe">
-        <div className="wg-pipe-head">Pipeline Toward Goal<button className="wg-info" title="Pipeline contributing toward your annual goal"><Icon name="info" size={14} /></button></div>
-        <div className="wg-pipe-row">
-          {[
-            { icon: "checkCircle", fg: "#0E9F6E", bg: "#E4F7EF", label: "Closed Revenue", value: data.pipeline.closed_revenue },
-            { icon: "handshake", fg: "#0EA5E9", bg: "#E7F6FD", label: "Under Contract", value: data.pipeline.under_contract },
-            { icon: "filter", fg: "#7C5CFC", bg: "#EEEAFE", label: "Active Pipeline", value: data.pipeline.active_pipeline },
-          ].map((p, i) => (
-            <div className="wg-pipe-cell" key={i}>
-              <span className="wg-pipe-ic" style={{ color: p.fg, background: p.bg }}><Icon name={p.icon} size={20} /></span>
-              <div><div className="wg-pipe-label">{p.label}</div><div className="wg-pipe-val wc-mono">{fmtUSD0(p.value)}</div></div>
-            </div>
-          ))}
         </div>
       </div>
     </>

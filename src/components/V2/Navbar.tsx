@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuthSession } from "@/hooks/useAuthSession";
 
-type NavLink = { label: string; href: string };
+type NavLink = { label: string; href: string; external?: boolean };
 
 const HamburgerButton = ({
   className = "",
@@ -34,25 +34,29 @@ const DesktopLinks = ({
   isVisible: boolean;
 }) => (
   <ul className="hidden xl:flex items-center gap-6.25 ml-auto mr-auto">
-    {navLinks.map((link, i) => (
-      <li key={link.label}>
-        <Link
-          to={link.href || "#"}
-            className={`text-base font-medium leading-6 whitespace-nowrap transition-all duration-500 ease-out ${
-            link.href && link.href === pathname
-              ? "text-[#F97316]"
-              : "text-[#101828] hover:text-[#F97316] duration-100"
-          } hover:opacity-80 ${
-            isVisible
-              ? "translate-y-0 opacity-100"
-              : "translate-y-3 opacity-0"
-          }`}
-          style={{ transitionDelay: `${300 + i * 80}ms` }}
-        >
-          {link.label}
-        </Link>
-      </li>
-    ))}
+    {navLinks.map((link, i) => {
+      const linkClass = `text-base font-medium leading-6 whitespace-nowrap transition-all duration-500 ease-out ${
+        link.href && link.href === pathname
+          ? "text-[#F97316]"
+          : "text-[#101828] hover:text-[#F97316] duration-100"
+      } hover:opacity-80 ${
+        isVisible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
+      }`;
+      const linkStyle = { transitionDelay: `${300 + i * 80}ms` };
+      return (
+        <li key={link.label}>
+          {link.external ? (
+            <a href={link.href} target="_blank" rel="noopener noreferrer" className={linkClass} style={linkStyle}>
+              {link.label}
+            </a>
+          ) : (
+            <Link to={link.href || "#"} className={linkClass} style={linkStyle}>
+              {link.label}
+            </Link>
+          )}
+        </li>
+      );
+    })}
   </ul>
 );
 
@@ -83,7 +87,9 @@ const DesktopButtons = ({
       {ctaLabel}
     </Link>
     <a
-      href="/waitlist"
+      href="https://calendly.com/jvrealestate2/15min"
+      target="_blank"
+      rel="noopener noreferrer"
       className={`btn-outline-hover relative flex items-center justify-center 2xl:h-13 h-10 2xl:px-10.5 px-8 rounded-full border border-[#F97316] 2xl:text-xl text-base font-semibold leading-7.5 whitespace-nowrap ${
         isVisible ? " opacity-100 " : " opacity-0 "
       }`}
@@ -113,7 +119,7 @@ const Navbar = ({ isVisible }: { isVisible: boolean }) => {
     { label: "Features", href: "/features" },
     { label: "Pricing", href: "/pricing" },
     { label: "Get Started", href: ctaHref },
-    { label: "See It In Action", href: "/waitlist" },
+    { label: "See It In Action", href: "https://calendly.com/jvrealestate2/15min", external: true },
   ];
 
   useEffect(() => {
@@ -229,25 +235,39 @@ const Navbar = ({ isVisible }: { isVisible: boolean }) => {
           <div className="flex flex-col gap-6.25">
             {navLinks
               .filter((l) => l.label !== "Home")
-              .map((link, i) => (
-                <Link
-                  key={link.label}
-                  to={link.href || "#"}
-                  onClick={() => setIsMobileOpen(false)}
-                  className={`text-base font-medium leading-6 text-center transition-all duration-400 ease-out ${
-                    link.href && link.href === pathname
-                      ? " text-[#F97316]"
-                      : "text-[#101828]"
-                  } ${
-                    isMobileOpen
-                      ? "translate-y-0 opacity-100"
-                      : "translate-y-4 opacity-0"
-                  }`}
-                  style={{ transitionDelay: `${150 + i * 80}ms` }}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              .map((link, i) => {
+                const mobileClass = `text-base font-medium leading-6 text-center transition-all duration-400 ease-out ${
+                  link.href && link.href === pathname
+                    ? " text-[#F97316]"
+                    : "text-[#101828]"
+                } ${
+                  isMobileOpen ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+                }`;
+                const mobileStyle = { transitionDelay: `${150 + i * 80}ms` };
+                return link.external ? (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setIsMobileOpen(false)}
+                    className={mobileClass}
+                    style={mobileStyle}
+                  >
+                    {link.label}
+                  </a>
+                ) : (
+                  <Link
+                    key={link.label}
+                    to={link.href || "#"}
+                    onClick={() => setIsMobileOpen(false)}
+                    className={mobileClass}
+                    style={mobileStyle}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              })}
           </div>
 
           <div className="flex flex-col gap-4 mt-auto">
@@ -268,7 +288,9 @@ const Navbar = ({ isVisible }: { isVisible: boolean }) => {
               {isLoggedIn ? "Dashboard" : "Start Free"}
             </a>
             <a
-              href="/waitlist"
+              href="https://calendly.com/jvrealestate2/15min"
+              target="_blank"
+              rel="noopener noreferrer"
               className={`flex items-center justify-center h-12 w-full rounded-full border border-[#F97316] text-sm font-semibold leading-5 text-[#F97316] transition-all duration-400 ease-out ${
                 isMobileOpen
                   ? "translate-y-0 opacity-100"

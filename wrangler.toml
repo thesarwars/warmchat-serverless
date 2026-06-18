@@ -37,9 +37,14 @@ ENV = "prod"
 
 MOCK_SEND_APIS = "0"
 # ---- App identity / URLs ----
-FRONTEND_URL = "https://warmchats-700.pages.dev"
-PUBLIC_SITE_URL = "https://warmchats-700.pages.dev"
-PUBLIC_BASE_URL = "https://warmchats-700.pages.dev"
+# Canonical user-facing domain is dev.warmchats.com (custom domain on this Pages
+# project). Keep these on that domain so OAuth callbacks + app links don't bounce
+# the user across origins (which split the session pages.dev <-> dev.warmchats.com).
+# NOTE: provider webhooks (Telnyx/Elastic) still target the *.pages.dev origin and
+# are configured separately - do not change those here.
+FRONTEND_URL = "https://dev.warmchats.com"
+PUBLIC_SITE_URL = "https://dev.warmchats.com"
+PUBLIC_BASE_URL = "https://dev.warmchats.com"
 REPLY_DOMAIN = "mail.warmchats.com"
 SUPPORT_EMAIL = "hello@warmchats.com"
 
@@ -56,13 +61,13 @@ TURNSTILE_SECRET_KEY = "0x4AAAAAADgl7_57of-sLZz-fBzHDwFhq0Y"
 
 # ---- Google OAuth (login) & Gmail OAuth ----
 GOOGLE_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
-GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
-GMAIL_OAUTH_CLIENT_SECRET = "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"
-GMAIL_OAUTH_REDIRECT_URI = "https://warmchats-700.pages.dev/api/gmail/oauth/callback"
+GMAIL_OAUTH_CLIENT_ID = "371782771740-oq7htlbjcmggu3a97alhmao9beg8sjt7.apps.googleusercontent.com"
+GMAIL_OAUTH_CLIENT_SECRET = "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"
+GMAIL_OAUTH_REDIRECT_URI = "https://dev.warmchats.com/api/gmail/oauth/callback"
 GMAIL_PUBSUB_TOPIC_FULL_NAME = "projects/warmchats-496922/topics/gmail-replies"
 
 # ---- AI provider (OpenAI) ----
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 
 # ---- Billing (Stripe) ----
 STRIPE_SECRET_KEY = "sk_test_51Sdk7vFk4wccBvlXDZ3yougIsx3L59BqbTavZmRcmqfhUBnEJCfXhrRvGsjn15Xt2rYbaGYKJQg2dAKIgrOEE6xa004Y9WJnvn"
@@ -74,8 +79,8 @@ STRIPE_WEBHOOK_SECRET = "whsec_JtuIn0EKVBDep24RkALZ5V9HmLijuPUq"
 # STRIPE_PRICE_GROWTH  = "price_1TZJ0oFk4wccBvlXse5j4Okr"
 # Sandbox:
 STRIPE_PRICE_FREE = "price_1TatIwFk4wccBvlXdQb2JZIe"
-STRIPE_PRICE_STARTER = "price_1TatIdFk4wccBvlXxo4ESlZW"
-STRIPE_PRICE_GROWTH = "price_1TatIoFk4wccBvlXzmTA3Bzi"
+STRIPE_PRICE_STARTER = "price_1TbOAPFk4wccBvlXWI4DBvGD"
+STRIPE_PRICE_GROWTH = "price_1TbOBKFk4wccBvlXgImS2XxD"
 
 
 # ---- SMS: Telnyx (current 10DLC) ----

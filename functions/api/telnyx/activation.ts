@@ -40,12 +40,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
   if (missing.length > 0) return error(`Missing required fields: ${missing.join(", ")}`, 400);
 
+  // EIN / SSN are OPTIONAL: the umbrella model registers numbers under a shared
+  // master brand + campaign (no per-agent Telnyx brand registration), so agents
+  // don't need to supply EIN/SSN. The onboarding form no longer collects them.
+  // When a value IS provided, still validate its format.
   if (businessType === "registered_business") {
-    if (!data.ein) return error("ein is required for registered_business", 400);
-    if (!/^\d{9}$/.test(data.ein)) return error("ein must be 9 digits", 400);
+    if (data.ein && !/^\d{9}$/.test(data.ein)) return error("ein must be 9 digits", 400);
   } else {
-    if (!data.ssn_last4) return error("ssn_last4 is required for sole_proprietor", 400);
-    if (!/^\d{4}$/.test(data.ssn_last4.replace(/\D/g, "").slice(0, 4))) {
+    if (data.ssn_last4 && !/^\d{4}$/.test(data.ssn_last4.replace(/\D/g, "").slice(0, 4))) {
       return error("ssn_last4 must be 4 digits", 400);
     }
   }

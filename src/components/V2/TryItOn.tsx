@@ -77,7 +77,7 @@ const TryItOn = () => {
           style={{ transitionDelay: "300ms" }}
         >
           <a
-            href="/waitlist"
+            href="/signup"
             className="btn-gradient-hover flex items-center justify-center h-13 px-10.5 rounded-full text-lg lg:text-xl font-semibold leading-7.5 text-white whitespace-nowrap"
             style={{
               backgroundImage:

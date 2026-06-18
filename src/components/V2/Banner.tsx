@@ -107,7 +107,7 @@ const Banner = () => {
             style={{ transitionDelay: "1000ms" }}
           >
             <a
-              href="/waitlist"
+              href="/signup"
               className="btn-gradient-hover flex items-center justify-center h-12 lg:h-13 w-full lg:w-auto px-10.5 rounded-full text-sm lg:text-xl font-semibold leading-5 lg:leading-7.5 text-white whitespace-nowrap"
               style={{
                 backgroundImage:
@@ -118,7 +118,9 @@ const Banner = () => {
               Start Free
             </a>
             <a
-              href="/waitlist"
+              href="https://calendly.com/jvrealestate2/15min"
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex items-center justify-center h-12 lg:h-13 w-full lg:w-auto px-10.5 rounded-full bg-white text-sm lg:text-xl font-semibold leading-5 lg:leading-7.5 text-[#171717] whitespace-nowrap transition-all duration-300 hover:shadow-md hover:-translate-y-0.5"
             >
               Watch Demo

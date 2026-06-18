@@ -8,6 +8,8 @@ import {
   Info,
   Loader2,
   MessageSquare,
+  Minus,
+  Search,
   Sparkles,
   Tag,
   Upload,
@@ -43,6 +45,9 @@ export type ImportLeadsModalProps = {
   csvTotalRows: number;
   csvHeaders: string[];
   csvPreview: Record<string, string>[];
+  importRows: Record<string, string>[];
+  importExcludedRows: Set<number>;
+  setImportExcludedRows: React.Dispatch<React.SetStateAction<Set<number>>>;
   mapping: Record<string, string>;
   setMapping: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   duplicateHandling: DuplicateHandling;
@@ -107,6 +112,9 @@ export default function ImportLeadsModal({
   csvTotalRows,
   csvHeaders,
   csvPreview,
+  importRows,
+  importExcludedRows,
+  setImportExcludedRows,
   mapping,
   setMapping,
   duplicateHandling,
@@ -155,6 +163,7 @@ export default function ImportLeadsModal({
 }: ImportLeadsModalProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [leadSearch, setLeadSearch] = useState("");
   // Tags input draft (committed tags render as chips). Must stay above the
   // early `if (!open) return null` so hook order is stable (React #310).
   const [tagDraft, setTagDraft] = useState("");
@@ -210,6 +219,54 @@ export default function ImportLeadsModal({
 
   const usedHeaders = new Set(Object.values(mapping).filter(Boolean));
 
+  // ---- Step 2 "Leads to import" selection -------------------------------
+  // Derive a display lead per parsed row using the current mapping. id = index
+  // into the full parsed set (so excluding it removes it from the import).
+  const impInitials = (n: string) =>
+    n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+  const cell = (row: Record<string, string>, field: string) =>
+    (mapping[field] ? (row[mapping[field]] ?? "").trim() : "");
+  const leadRows = importRows.map((row, i) => {
+    const name =
+      [cell(row, "first_name"), cell(row, "last_name")].filter(Boolean).join(" ") ||
+      cell(row, "name") || "Unnamed lead";
+    const contact = cell(row, "phone") || cell(row, "email") || cell(row, "phone_or_email") || "—";
+    // Use the mapped source column if present; otherwise default to "Imported"
+    // to match what the backend persists for sheet imports (see import/[orgId].ts).
+    const source = cell(row, "source") || "Imported";
+    const type = cell(row, "lead_type") || cell(row, "type") || "";
+    return { id: i, name, contact, source, type };
+  });
+  const leadQuery = leadSearch.trim().toLowerCase();
+  const shownLeads = leadQuery
+    ? leadRows.filter((l) =>
+        (l.name + " " + l.contact + " " + l.source).toLowerCase().includes(leadQuery))
+    : leadRows;
+  const selectedCount = Math.max(0, csvTotalRows - importExcludedRows.size);
+  const shownSelectedCount = shownLeads.filter((l) => !importExcludedRows.has(l.id)).length;
+  const allShownSelected = shownLeads.length > 0 && shownSelectedCount === shownLeads.length;
+  const someShownSelected = shownSelectedCount > 0 && !allShownSelected;
+  const toggleLead = (id: number) =>
+    setImportExcludedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAllShown = () =>
+    setImportExcludedRows((prev) => {
+      const next = new Set(prev);
+      if (allShownSelected) {
+        // Deselect all currently shown.
+        for (const l of shownLeads) next.add(l.id);
+      } else {
+        // Select all currently shown.
+        for (const l of shownLeads) next.delete(l.id);
+      }
+      return next;
+    });
+  const hiddenLeadCount = Math.max(0, csvTotalRows - leadRows.length);
+
   const consentNeedsAttest =
     (importSmsConsent === "opted_in" || !!mapping.sms_consent) &&
     !importConsentAttested;
@@ -217,6 +274,8 @@ export default function ImportLeadsModal({
   const continueDisabled =
     (importStep === 1 && !csvFile) ||
     (importStep === 2 && !hasContact) ||
+    // At least one lead must stay selected in the "Leads to import" table.
+    (importStep === 2 && selectedCount === 0) ||
     // TCPA attestation gate: when the agent claims "Already opted in" (globally
     // or via a per-row CSV column) the attestation checkbox must be ticked
     // before continuing. The SMS consent + attestation now live on the merged
@@ -227,7 +286,7 @@ export default function ImportLeadsModal({
 
   const ctaLabel =
     importStep === TOTAL_STEPS
-      ? `Import ${formatNum(csvTotalRows)} Lead${csvTotalRows === 1 ? "" : "s"}`
+      ? `Import ${formatNum(selectedCount)} Lead${selectedCount === 1 ? "" : "s"}`
       : importStep === TOTAL_STEPS - 1
         ? "Continue to Review"
         : "Continue";
@@ -239,9 +298,8 @@ export default function ImportLeadsModal({
         : "Select a CSV or XLSX file to begin";
     }
     if (importStep === 2) {
-      return hasContact
-        ? `${mappedEntries.length} column${mappedEntries.length === 1 ? "" : "s"} mapped`
-        : "Map a contact field to continue";
+      if (!hasContact) return "Map a contact field to continue";
+      return `${mappedEntries.length} column${mappedEntries.length === 1 ? "" : "s"} mapped · ${formatNum(selectedCount)} lead${selectedCount === 1 ? "" : "s"} selected`;
     }
     if (importStep === TOTAL_STEPS) {
       return `${formatNum(csvTotalRows)} row${csvTotalRows === 1 ? "" : "s"} in file · Inbound AI ${importInboundEnabled ? "ON" : "OFF"}`;
@@ -734,66 +792,109 @@ export default function ImportLeadsModal({
                       </div>
                     )}
 
-                    {csvPreview.length > 0 && (
-                      <div style={{ marginTop: 16 }}>
-                        <div className="wc-imp-stat-l" style={{ marginBottom: 6 }}>
-                          Preview (first {csvPreview.length} rows)
-                          {importPreviewLoading ? " · loading…" : ""}
+                    {/* Leads to import — pick which detected leads get imported
+                        + enrolled. Unchecked leads are not imported. */}
+                    {leadRows.length > 0 && (
+                      <div className="wc-imp-leadsec">
+                        <div className="wc-imp-leadhead">
+                          <div>
+                            <div className="wc-imp-leadhead-t">Leads to import</div>
+                            <div className="wc-band-d">
+                              Uncheck anyone you don't want imported — unchecked leads
+                              are skipped entirely.
+                            </div>
+                          </div>
+                          <span className="wc-imp-leadcount">
+                            {formatNum(selectedCount)} selected
+                          </span>
                         </div>
-                        <div
-                          style={{
-                            overflow: "auto",
-                            border: "1px solid var(--line)",
-                            borderRadius: 10,
-                            maxHeight: 180,
-                          }}
-                        >
-                          <table
-                            style={{
-                              minWidth: "100%",
-                              fontSize: 12,
-                              borderCollapse: "collapse",
-                            }}
+
+                        <div className="wc-imp-leadsearch">
+                          <Search size={16} />
+                          <input
+                            placeholder="Search leads…"
+                            value={leadSearch}
+                            onChange={(e) => setLeadSearch(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="wc-imp-leadtable">
+                          <button
+                            type="button"
+                            className="wc-imp-leadrow head"
+                            onClick={toggleAllShown}
                           >
-                            <thead>
-                              <tr>
-                                {csvHeaders.map((h) => (
-                                  <th
-                                    key={h}
-                                    style={{
-                                      padding: "6px 8px",
-                                      textAlign: "left",
-                                      fontWeight: 700,
-                                      color: "var(--ink-3)",
-                                      whiteSpace: "nowrap",
-                                      background: "var(--line-soft)",
-                                    }}
+                            <span
+                              className={
+                                "wc-imp-check2" +
+                                (allShownSelected ? " is-on" : someShownSelected ? " is-some" : "")
+                              }
+                            >
+                              {allShownSelected ? (
+                                <Check size={13} />
+                              ) : someShownSelected ? (
+                                <Minus size={13} />
+                              ) : null}
+                            </span>
+                            <span className="wc-imp-leadhcell">
+                              {allShownSelected ? "Deselect all" : "Select all"}
+                            </span>
+                            <span className="wc-imp-leadhcell">Source</span>
+                            <span className="wc-imp-leadhcell">Type</span>
+                          </button>
+                          <div className="wc-imp-leadscroll">
+                            {shownLeads.length === 0 ? (
+                              <div className="wc-imp-leadempty">
+                                No leads match "{leadSearch}".
+                              </div>
+                            ) : (
+                              shownLeads.map((l) => {
+                                const on = !importExcludedRows.has(l.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={l.id}
+                                    className={"wc-imp-leadrow" + (on ? " is-on" : "")}
+                                    onClick={() => toggleLead(l.id)}
                                   >
-                                    {h}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {csvPreview.map((row, i) => (
-                                <tr key={i}>
-                                  {csvHeaders.map((h) => (
-                                    <td
-                                      key={h}
-                                      style={{
-                                        padding: "6px 8px",
-                                        color: "var(--ink-2)",
-                                        whiteSpace: "nowrap",
-                                        borderTop: "1px solid var(--line-soft)",
-                                      }}
+                                    <span className={"wc-imp-check2" + (on ? " is-on" : "")}>
+                                      {on && <Check size={13} />}
+                                    </span>
+                                    <span className="wc-imp-leadinfo">
+                                      <span className="wc-imp-leadav">
+                                        {impInitials(l.name)}
+                                      </span>
+                                      <span style={{ minWidth: 0 }}>
+                                        <span className="wc-imp-leadname">{l.name}</span>
+                                        <span className="wc-imp-leadcontact">{l.contact}</span>
+                                      </span>
+                                    </span>
+                                    <span className="wc-imp-leadsrc">{l.source}</span>
+                                    <span
+                                      className={
+                                        "wc-imp-leadtype " + (l.type ? l.type.toLowerCase() : "")
+                                      }
                                     >
-                                      {row[h]}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                                      {l.type || "—"}
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="wc-band-d" style={{ marginTop: 10 }}>
+                          <strong>{formatNum(selectedCount)}</strong> of{" "}
+                          {formatNum(csvTotalRows)} lead{csvTotalRows === 1 ? "" : "s"} will be
+                          imported.
+                          {hiddenLeadCount > 0 && (
+                            <>
+                              {" "}
+                              Showing the first {formatNum(leadRows.length)}; the remaining{" "}
+                              {formatNum(hiddenLeadCount)} are imported too.
+                            </>
+                          )}
                         </div>
                       </div>
                     )}

@@ -132,7 +132,12 @@ export interface AutomationLead {
  * column and fanned out one scheduled_message per lead at send time, so an
  * unbounded array would blow the request body / subrequest / CPU limits.
  */
-export const MAX_AUTOMATION_LEADS = 5000;
+// Up to 20,000 leads per campaign (client requirement). NOTE: enrolling that many
+// in one request does ~N/50 D1 batch writes; on the Workers FREE plan the per-
+// invocation subrequest ceiling means very large single enrollments should be
+// chunked (the client can enroll in batches) - or run on Workers Paid where the
+// ceiling is high enough to enroll 20k in one pass.
+export const MAX_AUTOMATION_LEADS = 20000;
 // Bound the free-text automation fields so a runaway body can't blow CPU/storage.
 // The client enforces a 5-SMS-segment cap on messages; these are generous backstops.
 export const MAX_AUTOMATION_NAME = 80;

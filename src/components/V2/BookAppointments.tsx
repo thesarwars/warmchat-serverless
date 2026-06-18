@@ -235,7 +235,7 @@ WarmChats makes sure you're always the first to respond.`}
             style={{ transitionDelay: "200ms" }}
           >
             <a
-              href="/waitlist"
+              href="/signup"
               className="btn-gradient-hover flex items-center justify-center h-12 lg:h-13 w-full lg:w-auto px-10.5 rounded-full text-sm lg:text-xl font-semibold leading-5 lg:leading-7.5 text-white whitespace-nowrap"
               style={{
                 backgroundImage:

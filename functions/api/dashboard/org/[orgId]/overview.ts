@@ -74,12 +74,46 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   // ---- Appointments by type (top 5, non-cancelled) -------------------------
-  const apptTypes = await queryAll<{ label: string | null; value: number }>(
+  // appointment_type is stored inconsistently: the manual modal saves keys
+  // ("showing", "buyer", "listing", "call") while the AI saves labels
+  // ("Buyer Consult", "Consultation", "Listing Appt"). Normalise both into
+  // canonical display buckets so e.g. listing appointments aren't split/hidden.
+  const apptTypesRaw = await queryAll<{ label: string | null; value: number }>(
     env.D1DB,
     `SELECT COALESCE(NULLIF(TRIM(appointment_type),''), 'Other') AS label, COUNT(*) AS value
        FROM lead_appointment
       WHERE org_id = ? AND COALESCE(status,'') != 'cancelled'
-      GROUP BY label ORDER BY value DESC LIMIT 5`, orgId);
+      GROUP BY label`, orgId);
+  const canonicalApptType = (raw: string): string => {
+    const s = raw.toLowerCase().replace(/[^a-z]/g, "");
+    if (s.includes("listing") || s.includes("seller")) return "Listing Appointment";
+    if (s.includes("buyer") || s.includes("consult")) return "Buyer Consult";
+    if (s.includes("show") || s.includes("tour")) return "Showing";
+    if (s.includes("call") || s.includes("phone")) return "Call";
+    const t = raw.trim();
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : "Other";
+  };
+  // Seed the core real-estate types so Showing / Buyer Consult / Listing
+  // Appointment always appear in the breakdown (with a real count, 0 if none).
+  const apptTypeMap = new Map<string, number>([
+    ["Showing", 0],
+    ["Buyer Consult", 0],
+    ["Listing Appointment", 0],
+  ]);
+  let apptTypeTotal = 0;
+  for (const r of apptTypesRaw) {
+    const key = canonicalApptType(r.label || "Other");
+    apptTypeMap.set(key, (apptTypeMap.get(key) ?? 0) + Number(r.value));
+    apptTypeTotal += Number(r.value);
+  }
+  // No appointments at all -> empty so the card shows its "No appointments yet"
+  // state instead of three zero rows.
+  const apptTypes = apptTypeTotal === 0
+    ? []
+    : [...apptTypeMap.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
 
   // ---- Upcoming appointments (next 5) --------------------------------------
   const upcoming = await queryAll<{

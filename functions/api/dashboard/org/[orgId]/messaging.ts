@@ -79,18 +79,27 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const smsSent = Number(sms?.sent ?? 0);
 
   // ---------------------------- EMAIL --------------------------------------
+  // Outbound volume + pixel opens live on inbox_messages (org-scoped via
+  // thread->inbox). Delivery OUTCOMES (bounced / failed / clicked + provider
+  // opens) are only reliably populated in `email_events` by the ElasticEmail
+  // notifications webhook (/api/webhooks/elastic). The webhook that writes
+  // inbox_messages.delivery_status/bounced_at (/api/elastic/status) is a
+  // *separate* ElasticEmail URL and only one notifications URL can be
+  // configured - so reading outcomes off inbox_messages silently reports 0
+  // bounces / ~100% delivered. We source outcomes from email_events instead
+  // (joined to lead by recipient email, the same key the rest of the app
+  // trusts) so the KPIs stay correct regardless of which webhook is wired up.
   const EMAIL_FROM = `FROM inbox_messages im
        JOIN thread t ON im.thread_id = t.id
        JOIN inbox i ON t.inbox_id = i.id`;
-  const email = await queryFirst<{ sent: number; bounced: number; failed: number; opened: number }>(
+  const email = await queryFirst<{ sent: number; opened: number }>(
     env.D1DB,
     `SELECT
-       SUM(CASE WHEN im.direction='outbound' THEN 1 ELSE 0 END) AS sent,
-       SUM(CASE WHEN im.direction='outbound' AND (im.bounced_at IS NOT NULL OR im.delivery_status='bounced') THEN 1 ELSE 0 END) AS bounced,
-       SUM(CASE WHEN im.direction='outbound' AND im.delivery_status='failed' THEN 1 ELSE 0 END) AS failed,
-       SUM(CASE WHEN im.direction='outbound' AND im.opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened
+       COUNT(*) AS sent,
+       SUM(CASE WHEN im.opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened
      ${EMAIL_FROM}
-     WHERE i.org_id = ? AND strftime('%Y-%m', COALESCE(im.message_date, im.created_at)) = strftime('%Y-%m','now')`, orgId);
+     WHERE i.org_id = ? AND im.direction='outbound' AND im.channel='email'
+       AND strftime('%Y-%m', COALESCE(im.message_date, im.created_at)) = strftime('%Y-%m','now')`, orgId);
   const emailTypes = await queryFirst<{ ai: number; automation: number; manual: number }>(
     env.D1DB,
     `SELECT
@@ -98,25 +107,35 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
        SUM(CASE WHEN im.automation_id IS NOT NULL THEN 1 ELSE 0 END) AS automation,
        SUM(CASE WHEN im.sent_by_ai=0 AND im.automation_id IS NULL THEN 1 ELSE 0 END) AS manual
      ${EMAIL_FROM}
-     WHERE i.org_id = ? AND im.direction='outbound' AND strftime('%Y-%m', COALESCE(im.message_date, im.created_at)) = strftime('%Y-%m','now')`, orgId);
+     WHERE i.org_id = ? AND im.direction='outbound' AND im.channel='email' AND strftime('%Y-%m', COALESCE(im.message_date, im.created_at)) = strftime('%Y-%m','now')`, orgId);
   const emailChartRows = await queryAll<{ d: string; n: number }>(
     env.D1DB,
     `SELECT date(COALESCE(im.message_date, im.created_at)) AS d, COUNT(*) AS n
      ${EMAIL_FROM}
-     WHERE i.org_id = ? AND im.direction='outbound' AND date(COALESCE(im.message_date, im.created_at)) >= date('now','-13 days')
+     WHERE i.org_id = ? AND im.direction='outbound' AND im.channel='email' AND date(COALESCE(im.message_date, im.created_at)) >= date('now','-13 days')
      GROUP BY d`, orgId);
-  const emailClicks = await queryFirst<{ n: number }>(
+  // Engagement outcomes from provider events, counted as UNIQUE recipients per
+  // outcome (raw COUNT(*) double-counts repeat opens/clicks and can push a
+  // "rate" past 100%).
+  const emailEng = await queryFirst<{ opened: number; clicked: number; bounced: number; failed: number }>(
     env.D1DB,
-    `SELECT COUNT(*) AS n FROM email_events ee JOIN lead l ON LOWER(l.email) = LOWER(ee.to_email)
-      WHERE l.org_id = ? AND ee.event_type = 'clicked'
-        AND strftime('%Y-%m', COALESCE(ee.occurred_at, ee.created_at)) = strftime('%Y-%m','now')`, orgId);
+    `SELECT
+       COUNT(DISTINCT CASE WHEN ee.event_type='opened'  THEN LOWER(ee.to_email) END) AS opened,
+       COUNT(DISTINCT CASE WHEN ee.event_type='clicked' THEN LOWER(ee.to_email) END) AS clicked,
+       COUNT(DISTINCT CASE WHEN ee.event_type='bounced' THEN LOWER(ee.to_email) END) AS bounced,
+       COUNT(DISTINCT CASE WHEN ee.event_type IN ('error','abuse') THEN LOWER(ee.to_email) END) AS failed
+     FROM email_events ee JOIN lead l ON LOWER(l.email) = LOWER(ee.to_email)
+     WHERE l.org_id = ? AND strftime('%Y-%m', COALESCE(ee.occurred_at, ee.created_at)) = strftime('%Y-%m','now')`, orgId);
 
   const emSent = Number(email?.sent ?? 0);
-  const emBounced = Number(email?.bounced ?? 0);
-  const emFailed = Number(email?.failed ?? 0);
+  const emBounced = Math.min(emSent, Number(emailEng?.bounced ?? 0));
+  const emFailed = Math.min(emSent, Number(emailEng?.failed ?? 0));
   const emDelivered = Math.max(0, emSent - emBounced - emFailed);
-  const emOpened = Number(email?.opened ?? 0);
-  const emClicked = Number(emailClicks?.n ?? 0);
+  // Opens: tracking pixel (inbox_messages.opened_at) OR a provider 'opened'
+  // event - take whichever recorded more so a blocked pixel or an unconfigured
+  // status webhook doesn't zero the metric. Both capped at sent.
+  const emOpened = Math.min(emSent, Math.max(Number(email?.opened ?? 0), Number(emailEng?.opened ?? 0)));
+  const emClicked = Math.min(emSent, Number(emailEng?.clicked ?? 0));
 
   return json({
     sms: {

@@ -60,8 +60,11 @@ const PROCESS_CONCURRENCY = 12;
 // Rows left in status='sending' by a crashed / timed-out previous tick are
 // stranded forever (the due query only selects 'scheduled'). Reclaim any that
 // have sat in 'sending' longer than this back to 'scheduled' so the next pass
-// retries them. Generous enough that it never races a tick still in flight.
-const STUCK_SENDING_GRACE_SECONDS = 90;
+// retries them. MUST exceed DRAIN_TIMEOUT_MS (120s in index.ts): if it's shorter
+// than the max pass duration, a still-running pass's in-flight 'sending' rows get
+// reclaimed and re-dispatched by the next pass -> duplicate send. 180s leaves a
+// 60s margin over the 120s drain budget.
+const STUCK_SENDING_GRACE_SECONDS = 180;
 
 /** Run `fn` over `items` with at most `limit` in flight at once. */
 async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -110,10 +113,20 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
   // persist helpers are idempotent on the contact/conversation, so the retry
   // fills the conversation that was created but left empty.
   try {
+    // (a) Rows already DISPATCHED (sent_message_id set) but stuck in 'sending'
+    // because the pass died before the final status write: these were sent, so
+    // finalize them as 'sent'. Re-scheduling them would re-dispatch -> duplicate.
+    await env.D1DB.prepare(
+      `UPDATE scheduled_message
+          SET status = 'sent', sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'sending' AND sent_message_id IS NOT NULL
+          AND updated_at <= datetime('now', ?)`,
+    ).bind(`-${STUCK_SENDING_GRACE_SECONDS} seconds`).run();
+    // (b) Rows NOT yet confirmed dispatched (sent_message_id NULL): safe to retry.
     const reclaimed = await env.D1DB.prepare(
       `UPDATE scheduled_message
           SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP
-        WHERE status = 'sending'
+        WHERE status = 'sending' AND sent_message_id IS NULL
           AND updated_at <= datetime('now', ?)`,
     ).bind(`-${STUCK_SENDING_GRACE_SECONDS} seconds`).run();
     const n = Number((reclaimed.meta as { changes?: number } | undefined)?.changes ?? 0);
@@ -284,8 +297,19 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         return;
       }
 
-      await env.D1DB.prepare(`UPDATE scheduled_message SET status = 'sending', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .bind(row.id).run();
+      // ATOMIC CLAIM. Flip 'scheduled' -> 'sending' ONLY if it's still
+      // 'scheduled', and dispatch only if WE won the flip (changes === 1).
+      // The old unconditional `WHERE id = ?` let two overlapping passes (a tick
+      // that overran 60s into the next tick, or a reclaim racing a still-running
+      // pass) both dispatch the same row -> duplicate send. The status guard
+      // makes the claim exclusive, so each row is sent by exactly one drainer.
+      const claim = await env.D1DB.prepare(
+        `UPDATE scheduled_message SET status = 'sending', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'scheduled'`,
+      ).bind(row.id).run();
+      if (Number((claim.meta as { changes?: number } | undefined)?.changes ?? 0) !== 1) {
+        // Lost the race - another pass already claimed/sent this row. Skip.
+        return;
+      }
 
       let ok = false;
       let errMsg: string | null = null;
@@ -301,6 +325,16 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
       }
 
       if (ok) {
+        // IDEMPOTENCY MARKER. Record that this row was dispatched BEFORE the
+        // (slower) persist + final status write. If the pass dies after the
+        // provider accepted the send but before status='sent', the reclaim sees
+        // sent_message_id and finalizes the row as 'sent' instead of re-sending
+        // it -> no duplicate. Without this marker the reclaim re-dispatched
+        // crash-stranded rows (the residual dupes seen at 20k scale).
+        try {
+          await env.D1DB.prepare(`UPDATE scheduled_message SET sent_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+            .bind(providerMessageId ?? "sent", row.id).run();
+        } catch { /* non-fatal; final update below also sets it */ }
         // Materialize the inbox / SMS row so the conversation view shows it.
         // Failures here are logged but do not flip the scheduled_message
         // status back - the provider already accepted the send.
@@ -317,9 +351,9 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
 
       await env.D1DB.prepare(
         `UPDATE scheduled_message
-           SET status = ?, error_message = ?, sent_at = ?, sent_message_id = NULL, updated_at = CURRENT_TIMESTAMP
+           SET status = ?, error_message = ?, sent_at = ?, sent_message_id = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-      ).bind(ok ? "sent" : "failed", errMsg, ok ? new Date().toISOString() : null, row.id).run();
+      ).bind(ok ? "sent" : "failed", errMsg, ok ? new Date().toISOString() : null, ok ? providerMessageId : null, row.id).run();
       if (ok) sent++; else failed++;
       console.log(`[cron:scheduledMessages] msg=${row.id} ${row.channel} -> ${ok ? "sent" : `failed (${errMsg})`}`);
 

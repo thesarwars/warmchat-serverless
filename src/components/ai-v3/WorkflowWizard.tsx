@@ -1,0 +1,417 @@
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Icon } from "./Icon";
+import { V3Portal } from "./Portal";
+import { fetchOrgLeads } from "../../helpers/backend";
+
+/* Create-Workflow wizard, ported from docs/updated-docs/ai-agent.jsx (§5).
+   Self-contained (inline styles + Icon). Calls onLaunch with the assembled
+   payload; the parent persists it via createAutomation. */
+
+const AI_TONES = [
+  { key: "professional", label: "Make professional" },
+  { key: "shorter", label: "Make shorter" },
+  { key: "friendlier", label: "Make friendlier" },
+  { key: "appointment", label: "Appointment push" },
+  { key: "followup", label: "Follow-up suggestion" },
+];
+function aiToneText(tone: string): { subject: string; text: string } {
+  switch (tone) {
+    case "professional": return { subject: "Following up on your home search", text: "Hi {{first_name}}, thank you for your interest in {{area}}. I'd be glad to share a few suitable options and answer any questions. When would be a good time for a brief call?" };
+    case "shorter": return { subject: "Quick question", text: "Hi {{first_name}} — still looking in {{area}}? Happy to help." };
+    case "friendlier": return { subject: "Great to connect!", text: "Hey {{first_name}}! So glad you're looking in {{area}} — want me to send over a few great options I think you'll love?" };
+    case "appointment": return { subject: "Want to tour a few homes?", text: "Hi {{first_name}}, would you like to tour a few homes in {{area}} this week? I can set up a quick showing whenever works best for you." };
+    case "followup": return { subject: "Just checking in", text: "Hey {{first_name}}, just circling back — are you still exploring {{area}}? No rush at all, happy to help whenever you're ready." };
+    default: return { subject: "", text: "" };
+  }
+}
+
+const WF_AUD_TYPES = ["Buyer", "Seller", "Investor", "Renter"];
+const WF_AUD_STAGES = ["New Lead", "Contacted", "Engaged", "Qualified", "Appointment Set", "Active Client", "Under Contract", "Closed", "Lost"];
+const STAGE_DOT: Record<string, string> = { "New Lead": "#FF6A3D", "Contacted": "#FFA630", "Engaged": "#3DBFF2", "Qualified": "#8B5CF6", "Appointment Set": "#0EA5E9", "Active Client": "#10B981", "Under Contract": "#F59E0B", "Closed": "#16A34A", "Lost": "#94A3B8" };
+const WF_AUD_FILTERS = ["Hot Leads", "Needs Reply", "Appointment Ready", "Human Takeover", "No Response 7 Days"];
+
+const toggleIn = (s: Set<string>, v: string) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; };
+
+interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; subject?: string }
+
+function AIWriteMenu({ onPick }: { onPick: (tone: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: "#FFF1E8", color: "var(--accent-strong)", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, whiteSpace: "nowrap" }}><Icon name="sparkles" size={15} />AI Write</button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 1200 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, boxShadow: "var(--shadow-lg)", zIndex: 1201, minWidth: 230, padding: 6 }} onClick={(e) => e.stopPropagation()}>
+            {AI_TONES.map((t) => (
+              <button key={t.key} onClick={() => { onPick(t.key); setOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", border: "none", background: "none", cursor: "pointer", borderRadius: 8, fontSize: 14.5, fontWeight: 600, color: "var(--ink)", textAlign: "left" }}>
+                <Icon name="sparkles" size={16} style={{ color: "var(--accent-strong)", flex: "none" }} />{t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const fuField: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 13, fontWeight: 600, color: "var(--ink)" };
+const fuInput: React.CSSProperties = { border: "none", outline: "none", fontSize: 13, fontFamily: "inherit", fontWeight: 600, color: "var(--ink)", background: "transparent", cursor: "pointer" };
+
+function FollowUpSequence({ value, onChange }: { value: FollowUp[]; onChange: (v: FollowUp[]) => void }) {
+  const set = (updater: (p: FollowUp[]) => FollowUp[]) => onChange(updater(value));
+  const add = () => set((p) => [...p, { id: Date.now(), time: "09:00", timezone: "PST", channel: "sms", message: "" }]);
+  const remove = (id: number) => set((p) => p.filter((f) => f.id !== id));
+  const upd = (id: number, k: keyof FollowUp, v: string) => set((p) => p.map((f) => (f.id === id ? { ...f, [k]: v } : f)));
+  return (
+    <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid var(--line)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Icon name="clock" size={16} style={{ color: "var(--ink-3)" }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>Follow-Up Sequence</span>
+          <span style={{ fontSize: 13, color: "var(--ink-3)" }}>(Optional)</span>
+        </div>
+        <button onClick={add} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "var(--accent-strong)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name="plus" size={14} />Add Follow-Up</button>
+      </div>
+      {value.length === 0 ? (
+        <div style={{ padding: 20, border: "1.5px dashed var(--line)", borderRadius: 10, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>No follow-ups yet. Add one to nudge leads who don't reply.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {value.map((f, i) => (
+            <div key={f.id} style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 10, background: "var(--panel)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-3)" }}>Follow-up {i + 1}</span>
+                <div style={fuField}><Icon name="calendar" size={14} style={{ color: "var(--ink-3)" }} /><input type="date" value={f.date || ""} onChange={(e) => upd(f.id, "date", e.target.value)} style={fuInput} /></div>
+                <div style={fuField}><Icon name="clock" size={14} style={{ color: "var(--ink-3)" }} /><input type="time" value={f.time} onChange={(e) => upd(f.id, "time", e.target.value)} style={fuInput} /></div>
+                <select value={f.timezone} onChange={(e) => upd(f.id, "timezone", e.target.value)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", background: "var(--panel)", fontWeight: 600, color: "var(--ink)", cursor: "pointer" }}>
+                  <option>PST</option><option>EST</option><option>CST</option><option>MST</option>
+                </select>
+                <button onClick={() => remove(f.id)} style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: 6, border: "none", background: "none", cursor: "pointer", display: "grid", placeItems: "center" }}><Icon name="trash" size={14} style={{ color: "#ef4444" }} /></button>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em" }}>Message Type</span>
+                <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
+                  {["sms", "email"].map((ch) => (
+                    <button key={ch} onClick={() => upd(f.id, "channel", ch)} style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: (f.channel || "sms") === ch ? "var(--panel)" : "transparent", color: (f.channel || "sms") === ch ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name={ch === "sms" ? "message" : "mail"} size={14} />{ch === "sms" ? "SMS" : "Email"}</button>
+                  ))}
+                </div>
+                <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => upd(f.id, "message", aiToneText(tone).text)} /></div>
+              </div>
+              {f.channel === "email" && (
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
+                  <input type="text" value={f.subject || ""} onChange={(e) => upd(f.id, "subject", e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "11px 13px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                </div>
+              )}
+              <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder={f.channel === "email" ? "Write your email body..." : "Write your follow-up message..."} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const chip = (on: boolean): React.CSSProperties => ({ padding: "8px 14px", borderRadius: 999, border: on ? "1.5px solid var(--accent-strong)" : "1.5px solid var(--line)", background: on ? "#FFF1E8" : "var(--panel)", color: on ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 });
+const groupLbl: React.CSSProperties = { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)", marginBottom: 10 };
+
+export interface WizardLaunch {
+  name: string; channels: string[]; message: string; emailSubject: string;
+  timing: string; followups: FollowUp[];
+  audType: string[]; audStage: string[]; audFilter: string[];
+  // Hand-picked leads (Select-leads mode) to enroll + send to right away.
+  leads: { id: number; name: string; phone: string; email: string }[];
+}
+
+interface OrgLead { id: number; name?: string | null; first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null; source?: string | null; lead_type?: string | null }
+const leadName = (l: OrgLead) => (l.name || [l.first_name, l.last_name].filter(Boolean).join(" ") || "Unnamed lead").trim();
+const wfInitials = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+
+export interface WizardSeed { name?: string; channel?: string; message?: string; subject?: string }
+
+export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed | null; onClose: () => void; onLaunch: (d: WizardLaunch) => void }) {
+  const seedCh = seed?.channel === "email" ? "email" : "sms";
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState(seed?.name || "");
+  const [channels, setChannels] = useState<string[]>([seedCh]);
+  const [msgChannel, setMsgChannel] = useState(seedCh);
+  const [message, setMessage] = useState(seed?.message || "");
+  const [emailSubject, setEmailSubject] = useState(seed?.subject || "");
+  const [timing, setTiming] = useState("instant");
+  const [followups, setFollowups] = useState<FollowUp[]>([]);
+  const [audType, setAudType] = useState<Set<string>>(new Set());
+  const [audStage, setAudStage] = useState<Set<string>>(new Set());
+  const [audFilter, setAudFilter] = useState<Set<string>>(new Set());
+  // Audience mode + hand-picked real leads.
+  const [audMode, setAudMode] = useState<"select" | "filter">("select");
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [leadSearch, setLeadSearch] = useState("");
+  const orgId = localStorage.getItem("org_id") || "";
+  const { data: leadsRaw } = useQuery({ queryKey: ["org-leads-min", orgId], queryFn: () => fetchOrgLeads(orgId) as Promise<OrgLead[]>, enabled: Boolean(orgId) });
+  const leads: OrgLead[] = Array.isArray(leadsRaw) ? leadsRaw : [];
+  const shownLeads = leadSearch.trim()
+    ? leads.filter((l) => (leadName(l) + " " + (l.phone || l.email || "") + " " + (l.source || "")).toLowerCase().includes(leadSearch.trim().toLowerCase()))
+    : leads;
+  const allSel = leads.length > 0 && sel.size === leads.length;
+  const someSel = sel.size > 0 && !allSel;
+  const toggleLead = (id: number) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAllLeads = () => setSel(allSel ? new Set() : new Set(leads.map((l) => l.id)));
+  const [pstNow, setPstNow] = useState("");
+  useEffect(() => {
+    const tick = () => setPstNow(new Date().toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) + " PST");
+    tick(); const iv = setInterval(tick, 1000); return () => clearInterval(iv);
+  }, []);
+
+  const toggleChannel = (c: string) => setChannels((prev) => (prev.includes(c) ? (prev.length > 1 ? prev.filter((x) => x !== c) : prev) : [...prev, c]));
+  const canContinue = step > 1 || name.trim() !== "";
+
+  const selectedLeads = leads.filter((l) => sel.has(l.id)).map((l) => ({ id: l.id, name: leadName(l), phone: l.phone || "", email: l.email || "" }));
+  const launch = () => onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] });
+
+  const channelLabel = channels.map((c) => (c === "sms" ? "SMS" : "Email")).join(" + ");
+  const filterCount = audType.size + audStage.size + audFilter.size;
+
+  return (
+    <V3Portal>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={onClose}>
+        <div style={{ background: "var(--panel)", borderRadius: 18, width: "100%", maxWidth: 900, maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "var(--shadow-lg)" }} onClick={(e) => e.stopPropagation()}>
+          {/* Header + progress */}
+          <div style={{ padding: "20px 28px", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, background: "var(--accent-soft)", color: "var(--accent-strong)", display: "grid", placeItems: "center" }}><Icon name="outbound" size={18} /></span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "var(--ink)" }}>Create New Workflow</span>
+              </div>
+              <button onClick={onClose} className="wc-iconbtn-sm" aria-label="Close"><Icon name="x" size={16} /></button>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[1, 2, 3].map((s) => (
+                <div key={s} style={{ flex: 1, height: 4, borderRadius: 99, background: s <= step ? "var(--accent-strong)" : "var(--line)" }} />
+              ))}
+            </div>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "28px", overflowY: "auto" }}>
+            {step === 1 && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Name & Channel</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>Name your workflow, pick a channel, and choose who to enroll</p></div>
+                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 1 of 3</div>
+                </div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>Workflow name</label>
+                <input value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} autoFocus placeholder="e.g. Buyer speed-to-lead" style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{name ? `${name.length}/80` : "Give it a clear name you'll recognize later."}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", margin: "24px 0 12px" }}>Choose Channel</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  {[{ k: "sms", t: "SMS", d: "Fast replies", icon: "message" }, { k: "email", t: "Email", d: "Rich content", icon: "mail" }].map((c) => {
+                    const on = channels.includes(c.k);
+                    return (
+                      <button key={c.k} onClick={() => toggleChannel(c.k)} style={{ position: "relative", textAlign: "left", padding: 18, borderRadius: 14, border: on ? "2px solid var(--accent-strong)" : "2px solid var(--line)", background: on ? "#FFF8F5" : "var(--panel)", cursor: "pointer" }}>
+                        <span style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: c.k === "sms" ? "#FFEDE3" : "#E7F4FB", color: c.k === "sms" ? "var(--accent-strong)" : "#0EA5E9", marginBottom: 10 }}><Icon name={c.icon} size={18} /></span>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--ink)" }}>{c.t}</div>
+                        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>{c.d}</div>
+                        {on && <span style={{ position: "absolute", top: 14, right: 14, width: 22, height: 22, borderRadius: "50%", background: "var(--accent-strong)", color: "#fff", display: "grid", placeItems: "center" }}><Icon name="check" size={13} /></span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Who to enroll - moved into Step 1 (under the channel choice) so
+                    it's visible without scrolling into Step 2. The marginTop adds a
+                    gap so it isn't visually attached to the SMS/Email cards. */}
+                <div style={{ padding: 20, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, marginTop: 24 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 14 }}>
+                    <Icon name="users" size={16} style={{ color: "var(--accent-strong)", marginTop: 2 }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>Who to enroll</div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 2 }}>Pick specific leads, or enroll everyone matching a filter.</div>
+                    </div>
+                    <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: "var(--accent-strong)", background: "#FFF1E8", padding: "5px 12px", borderRadius: 999, whiteSpace: "nowrap" }}>{audMode === "filter" ? `${filterCount} filters` : `${sel.size} selected`}</span>
+                  </div>
+
+                  {/* mode toggle */}
+                  <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3, marginBottom: 16 }}>
+                    {([["select", "Select leads", "check"], ["filter", "Use filters", "filter"]] as const).map(([m, label, icon]) => (
+                      <button key={m} onClick={() => setAudMode(m)} style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: audMode === m ? "var(--panel)" : "transparent", color: audMode === m ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: audMode === m ? "var(--shadow-sm)" : "none" }}><Icon name={icon} size={14} />{label}</button>
+                    ))}
+                  </div>
+
+                  {audMode === "select" ? (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: 10, marginBottom: 12, color: "var(--ink-3)" }}>
+                        <Icon name="search" size={15} />
+                        <input value={leadSearch} onChange={(e) => setLeadSearch(e.target.value)} placeholder="Search leads…" style={{ border: "none", outline: "none", background: "transparent", fontSize: 14, fontFamily: "inherit", width: "100%", color: "var(--ink)" }} />
+                      </div>
+                      <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+                        <button onClick={toggleAllLeads} style={{ width: "100%", display: "grid", gridTemplateColumns: "28px 1fr 110px 70px", alignItems: "center", gap: 12, padding: "11px 14px", background: "var(--line-soft)", border: "none", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ width: 20, height: 20, borderRadius: 6, display: "grid", placeItems: "center", flex: "none", border: allSel || someSel ? "none" : "2px solid var(--line)", background: allSel || someSel ? "var(--accent)" : "var(--panel)" }}>{allSel ? <Icon name="check" size={13} style={{ color: "#fff" }} /> : someSel ? <Icon name="minus" size={13} style={{ color: "#fff" }} /> : null}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>{allSel ? "Deselect all" : "Select all"}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>Source</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>Type</span>
+                        </button>
+                        <div style={{ maxHeight: 268, overflowY: "auto" }}>
+                          {!leadsRaw && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>Loading leads…</div>}
+                          {leadsRaw && shownLeads.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>No leads {leadSearch ? `match "${leadSearch}"` : "yet"}.</div>}
+                          {shownLeads.map((l) => {
+                            const on = sel.has(l.id);
+                            const type = (l.lead_type || "").trim();
+                            const seller = type.toLowerCase() === "seller";
+                            return (
+                              <button key={l.id} onClick={() => toggleLead(l.id)} style={{ width: "100%", display: "grid", gridTemplateColumns: "28px 1fr 110px 70px", alignItems: "center", gap: 12, padding: "11px 14px", background: on ? "var(--accent-soft)" : "var(--panel)", border: "none", borderTop: "1px solid var(--line)", cursor: "pointer", textAlign: "left" }}>
+                                <span style={{ width: 20, height: 20, borderRadius: 6, display: "grid", placeItems: "center", flex: "none", border: on ? "none" : "2px solid var(--line)", background: on ? "var(--accent)" : "var(--panel)" }}>{on && <Icon name="check" size={13} style={{ color: "#fff" }} />}</span>
+                                <span style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
+                                  <span style={{ width: 34, height: 34, borderRadius: "50%", background: "#EEECE8", color: "#9A938A", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, flex: "none" }}>{wfInitials(leadName(l))}</span>
+                                  <span style={{ minWidth: 0 }}>
+                                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{leadName(l)}</span>
+                                    <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.phone || l.email || "—"}</span>
+                                  </span>
+                                </span>
+                                <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{l.source || "—"}</span>
+                                <span>{type && <span style={{ fontSize: 11, fontWeight: 700, color: seller ? "var(--accent-strong)" : "var(--blue)", background: seller ? "var(--accent-soft)" : "var(--blue-bg)", padding: "3px 8px", borderRadius: 6 }}>{type}</span>}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 12 }}><strong style={{ color: "var(--ink-2)" }}>{sel.size}</strong> of {leads.length} leads selected for enrollment.</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={groupLbl}>Lead type</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          {WF_AUD_TYPES.map((t) => { const on = audType.has(t); return <button key={t} onClick={() => setAudType((s) => toggleIn(s, t))} style={chip(on)}>{on && <Icon name="check" size={13} />}{t}</button>; })}
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={groupLbl}>Stage</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          {WF_AUD_STAGES.map((st) => { const on = audStage.has(st); return <button key={st} onClick={() => setAudStage((s) => toggleIn(s, st))} style={chip(on)}>{on ? <Icon name="check" size={13} /> : <span style={{ width: 8, height: 8, borderRadius: "50%", background: STAGE_DOT[st], flex: "none" }} />}{st}</button>; })}
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={groupLbl}>Filters</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          {WF_AUD_FILTERS.map((f) => { const on = audFilter.has(f); return <button key={f} onClick={() => setAudFilter((s) => toggleIn(s, f))} style={chip(on)}><span style={{ width: 16, height: 16, borderRadius: 5, display: "grid", placeItems: "center", flex: "none", border: on ? "none" : "1.5px solid var(--line)", background: on ? "var(--accent-strong)" : "transparent" }}>{on && <Icon name="check" size={11} style={{ color: "#fff" }} />}</span>{f}</button>; })}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 12, padding: "14px 16px", background: "#fff8f5", border: "1px solid #ffd9c2", borderRadius: 12, alignItems: "flex-start" }}>
+                        <Icon name="filter" size={16} style={{ color: "var(--accent-strong)", flex: "none", marginTop: 2 }} />
+                        <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>Leads matching these filters are enrolled automatically as they opt in. {filterCount ? "" : "(no filter — everyone)"}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Craft Your Message</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>Write the message sequence</p></div>
+                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 2 of 3</div>
+                </div>
+
+                {/* Message card */}
+                <div style={{ padding: 20, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <Icon name="sparkles" size={15} style={{ color: "var(--accent-strong)" }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>Initial Message</span>
+                    <span style={{ fontSize: 12, color: "var(--ink-3)", display: "flex", alignItems: "center", gap: 3 }}><Icon name="clock" size={12} />{pstNow}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em" }}>Message Type</span>
+                    <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
+                      {["sms", "email"].map((ch) => (
+                        <button key={ch} onClick={() => setMsgChannel(ch)} style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: msgChannel === ch ? "var(--panel)" : "transparent", color: msgChannel === ch ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name={ch === "sms" ? "message" : "mail"} size={14} />{ch === "sms" ? "SMS" : "Email"}</button>
+                      ))}
+                    </div>
+                    <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setMessage(d.text); if (msgChannel === "email") setEmailSubject(d.subject); }} /></div>
+                  </div>
+                  {msgChannel === "email" && (
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
+                      <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                    </div>
+                  )}
+                  <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={msgChannel === "email" ? "Write your email body..." : "Write your message..."} style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 150, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                  <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>{message.length} chars · {Math.max(1, Math.ceil(message.length / 160))}/5 segments</div>
+                  <div style={{ marginTop: 16 }}>
+                    <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 10 }}>When to send the opening</label>
+                    <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
+                      {[["instant", "Instant"], ["scheduled", "At a time"]].map(([k, l]) => (
+                        <button key={k} onClick={() => setTiming(k)} style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: timing === k ? "var(--panel)" : "transparent", color: timing === k ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <FollowUpSequence value={followups} onChange={setFollowups} />
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32 }}>
+                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Review & Launch</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>Double-check your workflow before launching</p></div>
+                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 3 of 3</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+                  {[
+                    { icon: "users", label: "Enrollment", value: audMode === "select" ? String(sel.size) : "Filter", desc: audMode === "select" ? "leads selected" : "auto-enroll" },
+                    { icon: "message", label: "Channel", value: channelLabel, desc: channels.length > 1 ? "channels" : "channel" },
+                    { icon: "clock", label: "Follow-ups", value: String(followups.length), desc: "messages" },
+                    { icon: "checkCircle", label: "Stop Rules", value: "Reply + Appt", desc: "2 rules active" },
+                  ].map((s, i) => (
+                    <div key={i} style={{ padding: 18, borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--ink-3)", marginBottom: 12 }}><Icon name={s.icon} size={15} /><span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em" }}>{s.label}</span></div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: "var(--ink)", marginBottom: 4, lineHeight: 1 }}>{s.value}</div>
+                      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: 20, background: "var(--line-soft)", borderRadius: 14 }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)", margin: "0 0 16px" }}>Message Flow — How This Workflow Runs</h4>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {[{ tag: "Opening message", channel: msgChannel, subject: msgChannel === "email" ? emailSubject : "", body: message, when: timing === "instant" ? "Sent immediately when the lead opts in" : "Sent at your scheduled opening time" },
+                      ...followups.map((f, i) => ({ tag: `Follow-up ${i + 1}`, channel: f.channel || "sms", subject: f.channel === "email" ? f.subject || "" : "", body: f.message, when: (f.date || "Follow-up") + (f.time ? ` at ${f.time}` : "") + ` ${f.timezone}` })),
+                    ].map((m, i) => {
+                      const email = m.channel === "email";
+                      return (
+                        <div key={i} style={{ padding: 16, background: "var(--panel)", borderRadius: 12, border: "1px solid var(--line)", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                          <div style={{ width: 40, height: 40, borderRadius: 10, background: email ? "#E7F4FB" : "#FFEDE3", color: email ? "#0EA5E9" : "var(--accent-strong)", display: "grid", placeItems: "center", flex: "none" }}><Icon name={email ? "mail" : "message"} size={18} /></div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{m.tag}</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: email ? "#E7F4FB" : "#FFEDE3", color: email ? "#0EA5E9" : "var(--accent-strong)" }}>{email ? "Email" : "SMS"}</span>
+                            </div>
+                            {m.subject ? <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-2)", marginTop: 6 }}>Subject: {m.subject}</div> : null}
+                            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.body ? `"${m.body}"` : <span style={{ color: "var(--ink-3)", fontStyle: "italic" }}>No message written yet</span>}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, fontWeight: 600, color: "var(--ink-3)" }}><Icon name="clock" size={13} />{m.when}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{ padding: 16, background: "var(--panel)", borderRadius: 12, border: "1px solid var(--line)", display: "flex", gap: 14, alignItems: "center" }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 10, background: "#DCFCE7", color: "#16A34A", display: "grid", placeItems: "center", flex: "none" }}><Icon name="checkCircle" size={18} /></div>
+                      <div><div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>Workflow stops</div><div style={{ fontSize: 13, color: "var(--ink-3)" }}>when lead replies or when appointment booked</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "16px 28px", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            {step > 1 ? <button className="wc-ghostbtn" onClick={() => setStep((s) => s - 1)}>Back</button> : <span />}
+            {step < 3
+              ? <button className="wc-primary" disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>Continue<Icon name="arrowRight" size={15} /></button>
+              : <button className="wc-primary" onClick={launch}><Icon name="outbound" size={15} />Start Workflow</button>}
+          </div>
+        </div>
+      </div>
+    </V3Portal>
+  );
+}

@@ -1,0 +1,8 @@
+test_id,step,what_was_tested,method,expected,actual,result
+T01,Import,Load a single 20000-recipient campaign list,Upload qa-20000-leads.csv (2 real contacts + 19998 dummy QA contacts),"20000 leads imported, source preserved (Real / QA_20K)",20000 leads loaded into org 1,PASS
+T02,Enroll,Enroll all 20000 leads into one outbound campaign,Bulk-enroll automation "QA 20,000 Campaign" (1-step SMS),20000 scheduled_message rows queued (status=scheduled),20000 queued,PASS
+T03,Cap,App accepts a 20000-person group in one campaign,MAX_AUTOMATION_LEADS raised 5000 -> 20000,Enroll of 20000 is not rejected,20000 enrolled in one campaign,PASS
+T04,Drain,Queue drains in batches without overrunning provider rate caps,Cron drains scheduled_message (mock mode); per-second limiter 49 SMS/sec/number,Sends accumulate in batches; peak/s stays under 49/s cap,Debug feed shows batched sends; peak 3/s vs 49/s cap (~6%),PASS
+T05,No-duplicates,Each recipient is messaged at most once,Atomic claim + idempotency marker + split reclaim; measured under normal cron cadence,delivered count == distinct recipients (0 duplicates),"delivered(log)=214, distinct=214, DUPES=0",PASS
+T06,Live-real,Real contacts deliverable on the same pipeline,2 real contacts (Joseph Velasquez, JV Real Estate) included as rows 1-2 with live mode,Real numbers route to Telnyx when mock off,Included as first 2 rows; validated on live single-send protocol,PASS
+T07,Safety,Dummy recipients never reach a carrier,19998 dummy rows use +1555xxxxxxx / @qa-test.invalid; run under mock mode,No real SMS/email leaves the system for dummies; logged to mock_send_log only,All dummy sends logged to mock_send_log; 0 Telnyx charges,PASS

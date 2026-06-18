@@ -32,6 +32,7 @@ const AdminPage = lazy(() => import("./components/admin/AdminPage"));
 const DebugSendLogs = lazy(() => import("./components/admin/DebugSendLogs"));
 const BlockedPhoneNumbers = lazy(() => import("./components/admin/BlockedPhoneNumbers"));
 const AgentV2Page = lazy(() => import("./components/ai-v2/AgentV2Page"));
+const AgentV3Page = lazy(() => import("./components/ai-v3/AgentV3Page"));
 const ForgotPassword = lazy(() => import("./components/ForgotPassword"));
 const ResetPassword = lazy(() => import("./components/ResetPassword"));
 const ConfirmEmail = lazy(() => import("./components/ConfirmEmail"));
@@ -442,8 +443,20 @@ const App: React.FC = () => {
               Activity, Inbound, Outbound, Action Center, Knowledge Base, AI
               Settings). The old per-agent /ai/{agent,inbound,outbound,settings}
               pages were removed. */}
+          {/* AI Agent: V3 (spec rebuild) is the live page; V2 kept in the
+              codebase + reachable at /ai/agent-v2 during the rebuild. */}
           <Route
             path="/ai/agent"
+            element={
+              <RoleProtectedRoute
+                allowedRoles={[ROLES.ADMIN, ROLES.MANAGER, ROLES.REPRESENTATIVE, ROLES.GUEST]}
+              >
+                <AgentV3Page />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path="/ai/agent-v2"
             element={
               <RoleProtectedRoute
                 allowedRoles={[ROLES.ADMIN, ROLES.MANAGER, ROLES.REPRESENTATIVE, ROLES.GUEST]}

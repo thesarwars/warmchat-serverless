@@ -30,6 +30,34 @@ const Signup: React.FC = () => {
   const navigate = useNavigate();
   const { roleName } = useRole();
 
+  // Plan picked on the public pricing page (?plan=starter|growth). Free plans
+  // carry no param and go straight to onboarding; paid plans must pay first.
+  const PAID_PLANS = ["starter", "growth"];
+  const selectedPlan = (new URLSearchParams(window.location.search).get("plan") || "").toLowerCase();
+  const isPaidPlan = PAID_PLANS.includes(selectedPlan);
+
+  // Kick off Stripe checkout for a paid plan. successPath threads through Stripe
+  // -> /billing/success so the user lands in onboarding (SMS + email) once paid.
+  // Returns true if we redirected to Stripe (caller should stop).
+  const startCheckoutForPlan = async (planId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE}/billing/create-checkout-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ planId, cancelPath: "/pricing", successPath: "/onboarding" }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.assign(data.checkout_url);
+        return true;
+      }
+    } catch (err) {
+      console.error("checkout init failed:", err);
+    }
+    return false;
+  };
+
   // Already-logged-in users that browse to /signup should not see the form
   // again - bounce them to onboarding or the dashboard depending on progress.
   useEffect(() => {
@@ -37,6 +65,18 @@ const Signup: React.FC = () => {
     const userId = localStorage.getItem("user_id");
     if (!userId) return;
     let cancelled = false;
+    // Already signed in and arriving with a paid plan selected (e.g. clicked
+    // "Start Now" on pricing) -> send straight to checkout instead of onboarding.
+    if (isPaidPlan) {
+      startCheckoutForPlan(selectedPlan).then((redirected) => {
+        if (!redirected && !cancelled) {
+          resolvePostAuthDestination(API_BASE, userId).then((dest) => {
+            if (!cancelled) navigate(dest, { replace: true });
+          });
+        }
+      });
+      return () => { cancelled = true; };
+    }
     resolvePostAuthDestination(API_BASE, userId)
       .then((dest) => { if (!cancelled) navigate(dest, { replace: true }); })
       .catch((err) => {
@@ -75,6 +115,13 @@ const Signup: React.FC = () => {
 
     storeAuthSession(data);
     toast.success("Account created successfully!");
+
+    // Paid plan selected on pricing -> pay first, then onboarding sets up SMS+email.
+    if (isPaidPlan) {
+      const redirected = await startCheckoutForPlan(selectedPlan);
+      if (redirected) return;
+      toast.error("Couldn't start checkout - you can upgrade from onboarding.");
+    }
 
     try {
       const dest = await resolvePostAuthDestination(API_BASE, data.user_id);

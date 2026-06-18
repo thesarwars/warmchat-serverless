@@ -6,29 +6,16 @@ import {
   MessageSquare,
   CalendarDays,
   StickyNote,
-  Download,
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { callingApi } from "@/api/calling";
 import { useCalling } from "@/context/useCalling";
-import type { CallDetails, CallTaskType } from "@/types/calling";
-import { formatCallTime, formatDuration, sentimentStyle, taskTypeLabel } from "./callFormat";
+import type { CallDetails } from "@/types/calling";
+import { formatCallTime, formatDuration } from "./callFormat";
 
 interface Props {
   callId: string;
-}
-
-function formatBudget(min: number | null, max: number | null): string | null {
-  if (min == null && max == null) return null;
-  const fmt = (n: number) =>
-    n >= 1_000_000
-      ? `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
-      : n >= 1_000
-        ? `$${Math.round(n / 1_000)}K`
-        : `$${n}`;
-  if (min != null && max != null) return `${fmt(min)} - ${fmt(max)}`;
-  return fmt((min ?? max) as number);
 }
 
 export function CallDetailPanel({ callId }: Props) {
@@ -53,12 +40,6 @@ export function CallDetailPanel({ callId }: Props) {
         : 15_000,
   });
 
-  const toggleTask = useMutation({
-    mutationFn: (vars: { taskId: string; done: boolean }) =>
-      callingApi.toggleCallTask(callId, vars.taskId, vars.done),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["call-insights", callId] }),
-  });
-
   const addNote = useMutation({
     mutationFn: (body: string) => callingApi.addCallNote(callId, body),
     onSuccess: () => {
@@ -80,9 +61,6 @@ export function CallDetailPanel({ callId }: Props) {
   const counterparty = c.direction === "INBOUND" ? c.fromNumber : c.toNumber;
   const displayName = c.lead?.name || counterparty;
   const leadId = c.lead?.id;
-  const ai = insights?.insight ?? null;
-  const aiPending = !ai || ai.status === "PENDING" || ai.status === "PROCESSING";
-  const budget = ai ? formatBudget(ai.budgetMin, ai.budgetMax) : null;
 
   const callBack = async () => {
     if (!counterparty) return;
@@ -123,80 +101,6 @@ export function CallDetailPanel({ callId }: Props) {
         <ActionButton icon={CalendarDays} label="Schedule" onClick={() => leadId && navigate(`/appointments?lead=${leadId}`)} disabled={!leadId} />
         <ActionButton icon={StickyNote} label="Add note" onClick={() => document.getElementById(`note-${callId}`)?.focus()} />
       </div>
-
-      {/* Recording */}
-      <Section title="Recording" badge={c.isVoicemail ? "Voicemail" : ai && !aiPending ? "AI Transcribed" : undefined}>
-        {c.hasRecording || (c.isVoicemail && insights) ? (
-          <div className="space-y-2">
-            <audio
-              controls
-              className="w-full"
-              src={callingApi.recordingUrl(callId, c.isVoicemail ? "voicemail" : "recording")}
-            />
-            <a
-              href={callingApi.recordingUrl(callId, c.isVoicemail ? "voicemail" : "recording")}
-              download
-              className="inline-flex items-center gap-1 text-xs font-medium text-[#FF6B35] hover:underline"
-            >
-              <Download className="h-3.5 w-3.5" /> Download
-            </a>
-          </div>
-        ) : (
-          <p className="text-sm text-[#98A2B3]">-</p>
-        )}
-      </Section>
-
-      {/* AI summary */}
-      <Section title="AI Summary" badge={aiPending ? undefined : "AI"}>
-        {aiPending ? (
-          <p className="flex items-center gap-2 text-sm text-[#98A2B3]">
-            {ai?.status === "FAILED" ? "-" : (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing call...</>)}
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm leading-relaxed text-[#344054]">{ai?.summary || "-"}</p>
-            <div className="flex flex-wrap gap-3 text-xs">
-              {ai?.sentiment && (
-                <span className={`rounded-full px-2 py-0.5 font-medium ${sentimentStyle(ai.sentiment)}`}>
-                  {ai.sentiment[0].toUpperCase() + ai.sentiment.slice(1)} sentiment
-                </span>
-              )}
-              {ai?.intent && (
-                <span className="text-[#667085]">Intent: <span className="font-medium text-[#344054]">{ai.intent}</span></span>
-              )}
-              {budget && (
-                <span className="text-[#667085]">Budget: <span className="font-medium text-[#344054]">{budget}</span></span>
-              )}
-            </div>
-          </div>
-        )}
-      </Section>
-
-      {/* Next steps */}
-      <Section title="Next Steps" badge={insights?.tasks.length ? "AI detected" : undefined}>
-        {insights && insights.tasks.length > 0 ? (
-          <ul className="space-y-2">
-            {insights.tasks.map((t) => (
-              <li key={t.id} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={t.done}
-                  onChange={(e) => toggleTask.mutate({ taskId: t.id, done: e.target.checked })}
-                  className="h-4 w-4 rounded border-[#D0D5DD] text-[#FF6B35] focus:ring-[#FF6B35]"
-                />
-                <span className={`flex-1 text-sm ${t.done ? "text-[#98A2B3] line-through" : "text-[#344054]"}`}>
-                  {t.label}
-                </span>
-                <span className="rounded bg-[#F2F4F7] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#667085]">
-                  {taskTypeLabel(t.type as CallTaskType)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-[#98A2B3]">-</p>
-        )}
-      </Section>
 
       {/* Notes */}
       <Section title="Notes">

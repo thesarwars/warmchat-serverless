@@ -849,7 +849,7 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
   const call = await queryFirst<CallTerminalRow>(
     env.D1DB,
     `SELECT id, agent_id, org_id, lead_id, business_number_id, customer_number, direction, status,
-            web_leg_sid, phone_leg_sid
+            web_leg_sid, phone_leg_sid, answered_at
        FROM calls WHERE provider_call_sid = ? LIMIT 1`,
     callControlId,
   );
@@ -862,8 +862,21 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
 
   const cause = String(payload.hangup_cause || "").toLowerCase();
   const status = mapHangupToStatus(call.status, cause);
-  const duration = Math.max(0, Number(payload.call_duration_secs ?? payload.duration_secs ?? 0));
   const now = nowIso();
+  // Telnyx's call.hangup event does NOT include a duration field, so
+  // call_duration_secs/duration_secs are virtually always absent -> 0, which was
+  // leaving every call at duration=0 and skipping the usage_records insert below
+  // (so calling minutes never accrued). Fall back to billable talk time computed
+  // from the call's own timestamps: answered_at -> hangup. A call that was never
+  // answered has no answered_at, so it correctly bills 0.
+  let duration = Math.max(0, Number(payload.call_duration_secs ?? payload.duration_secs ?? 0));
+  if (duration === 0 && call.answered_at) {
+    const answeredMs = Date.parse(call.answered_at);
+    const endMs = Date.parse(now);
+    if (Number.isFinite(answeredMs) && endMs > answeredMs) {
+      duration = Math.round((endMs - answeredMs) / 1000);
+    }
+  }
 
   // Anchor died while still ringing (caller gave up, or we ended it): stop the
   // ringing modal on every open tab AND kill the still-ringing fork legs at
@@ -1078,4 +1091,5 @@ type CallTerminalRow = {
   status: string;
   web_leg_sid: string | null;
   phone_leg_sid: string | null;
+  answered_at: string | null;
 };

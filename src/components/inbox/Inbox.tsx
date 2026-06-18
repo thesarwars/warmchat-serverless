@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -53,7 +54,7 @@ import {
   renderPersonalizedText,
   validatePersonalization,
 } from "../../utils/personalization";
-import { callAiImprove } from "@/utils/aiImprove";
+import { callAiImprove, fetchAiCredits, type AiCredits } from "@/utils/aiImprove";
 import {
 } from "./utils/personalizeTokens";
 import {
@@ -607,6 +608,13 @@ export default function Inbox() {
   const [assistOpen, setAssistOpen] = useState(false);
   const [assistBusy, setAssistBusy] = useState(false);
   const assistWrapRef = useRef<HTMLDivElement | null>(null);
+  // AI Assist credits (monthly AI quota). `remaining: null` => unlimited.
+  const [aiCredits, setAiCredits] = useState<AiCredits | null>(null);
+  const refreshAiCredits = useCallback(() => {
+    if (!token) return;
+    fetchAiCredits(token).then(setAiCredits).catch(() => {/* non-fatal */});
+  }, [token]);
+  useEffect(() => { refreshAiCredits(); }, [refreshAiCredits]);
   const [showSendLaterModal, setShowSendLaterModal] = useState(false);
   const [showDeleteLeadConfirm, setShowDeleteLeadConfirm] = useState(false);
   const unreadBaselineRef = useRef<Map<
@@ -2553,6 +2561,10 @@ export default function Inbox() {
   // is the action's only call site.
 
 
+  // Warn (confirm) before generating once the post-spend balance would be at or
+  // below this many AI credits, so the user isn't surprised when they run out.
+  const AI_CREDITS_LOW_THRESHOLD = 10;
+
   // AI Assist ▾ presets. Each rewrites the current draft in place by calling
   // callAiImprove with `tone` as the steering instruction. "Follow-up
   // suggestion" / "Appointment push" can draft from scratch when empty; the
@@ -2606,6 +2618,37 @@ export default function Inbox() {
       return;
     }
     if (assistBusy) return;
+
+    // Credit check/warning before generating. SMS costs 1, email costs 2 (these
+    // map onto the org's monthly AI quota). remaining === null => unlimited.
+    const cost = aiCredits?.cost?.[currentChannel === "email" ? "email" : "sms"]
+      ?? (currentChannel === "email" ? 2 : 1);
+    const remaining = aiCredits?.remaining ?? null;
+    if (remaining !== null) {
+      if (remaining < cost) {
+        toast.error(
+          `Not enough AI credits — this ${currentChannel === "email" ? "email" : "SMS"} needs ${cost}, you have ${remaining} left this month.`,
+        );
+        return;
+      }
+      if (remaining - cost <= AI_CREDITS_LOW_THRESHOLD) {
+        const ok = window.confirm(
+          `You have ${remaining} AI credits left this month. This will use ${cost}. Continue?`,
+        );
+        if (!ok) return;
+      }
+    }
+
+    // Recent thread context (last 10 real messages, oldest first) so the draft
+    // continues the conversation instead of guessing.
+    const history = selectedMessages
+      .filter((m) => m.direction !== "system" && (m.body || "").trim())
+      .slice(-10)
+      .map((m) => ({
+        direction: m.direction === "outbound" ? ("outbound" as const) : ("inbound" as const),
+        text: (m.body || "").trim(),
+      }));
+
     setAssistBusy(true);
     try {
       const res = await callAiImprove(token, {
@@ -2615,8 +2658,15 @@ export default function Inbox() {
         tone: preset.tone,
         persona: "Real Estate Agent",
         lead_data: contactForView ? [contactForView] : [],
+        want_subject: currentChannel === "email",
+        history,
       });
+      // Email: drop the generated subject into the subject field, body into the
+      // composer. SMS: body only.
+      if (currentChannel === "email" && res.subject) setComposeSubject(res.subject);
       setComposerDraft(res.improved_message);
+      // Credits were spent only on success — refresh the meter.
+      refreshAiCredits();
     } catch (error) {
       toast.error(
         (error as Error)?.message || "AI Assist failed. Try again.",

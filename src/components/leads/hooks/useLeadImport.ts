@@ -28,6 +28,10 @@ type UseLeadImportOptions = {
 // parallel, so each chunk's duplicate check sees the prior chunk's committed
 // leads. The whole file is still capped (MAX_IMPORT_ROWS in sheetParse).
 const IMPORT_CHUNK_SIZE = 1500;
+// Cap how many leads the Step-2 "Leads to import" table renders/lets you
+// deselect. Beyond this, leads still import (a note tells the user). Keeps the
+// checkbox table responsive for very large files.
+const IMPORT_SELECT_LIMIT = 500;
 
 export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptions) {
   const location = useLocation();
@@ -39,6 +43,12 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
   const [csvTotalRows, setCsvTotalRows] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvPreview, setCsvPreview] = useState<CsvRow[]>([]);
+  // Step-2 "Leads to import" selection: the parsed rows shown in the selectable
+  // table (capped for perf) + the indices the user UNCHECKED (excluded from
+  // import). Indices are 0-based into the full parsed row set, so the import can
+  // filter them out directly.
+  const [importRows, setImportRows] = useState<CsvRow[]>([]);
+  const [importExcludedRows, setImportExcludedRows] = useState<Set<number>>(new Set());
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [duplicateHandling, setDuplicateHandling] =
     useState<DuplicateHandling>("skip");
@@ -156,6 +166,10 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
         return false;
       }
       applyImportPreview(buildImportPreview(parsed));
+      // Seed the Step-2 lead-selection table from the full parse (capped), all
+      // selected by default (nothing excluded).
+      setImportRows((parsed.rows as CsvRow[]).slice(0, IMPORT_SELECT_LIMIT));
+      setImportExcludedRows(new Set());
       return true;
     } catch (e) {
       parsedRef.current = null;
@@ -342,7 +356,12 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     setImporting(true);
     setImportProgress("");
 
-    const allRows = parsed.rows;
+    // Honor the Step-2 "Leads to import" selection: drop the rows the user
+    // unchecked (indices into the full parsed set) so only selected leads are
+    // imported/enrolled.
+    const allRows = importExcludedRows.size
+      ? parsed.rows.filter((_, i) => !importExcludedRows.has(i))
+      : parsed.rows;
     // Shared on every chunk. has_header drives the reported row numbers in skip
     // reasons; we re-base them per chunk below so they map to the source file.
     const basePayload = {
@@ -467,6 +486,8 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     setCsvFile(null);
     setCsvHeaders([]);
     setCsvPreview([]);
+    setImportRows([]);
+    setImportExcludedRows(new Set());
     setCsvTotalRows(0);
     setMapping({});
     setImportSmsConsent("opted_in");
@@ -577,6 +598,9 @@ export function useLeadImport({ fetchLeads, refreshSummary }: UseLeadImportOptio
     csvTotalRows,
     csvHeaders,
     csvPreview,
+    importRows,
+    importExcludedRows,
+    setImportExcludedRows,
     mapping,
     setMapping,
     duplicateHandling,
