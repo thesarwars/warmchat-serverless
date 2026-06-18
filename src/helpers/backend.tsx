@@ -185,6 +185,12 @@ export const fetchAgentSystemPrompt = (key: AgentKey) => get(`/ai/agents/${key}/
 export const fetchAiRules = () => get(`/ai/rules`);
 export const updateAiRules = (data: Record<string, unknown>) => patch(`/ai/rules`, data, {}, true);
 
+// Inbound auto-response settings (auto_response_settings): the AI Agent → AI
+// Settings toggles (auto reply, qualification, booking handoff, stop-on-reply,
+// missed call, behavior flags). GET returns booleans; PUT accepts booleans.
+export const fetchAutoResponse = () => get(`/auto-response`);
+export const updateAutoResponse = (data: Record<string, unknown>) => put(`/auto-response`, data, {}, true);
+
 // Custom inbound auto-responders (AI Agent -> Inbound -> Workflows). Real CRUD;
 // injected into the inbound system prompt so the AI applies them.
 export const fetchInboundResponders = () => get(`/ai/responders`);

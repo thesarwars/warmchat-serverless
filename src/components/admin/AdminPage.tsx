@@ -6,7 +6,7 @@ import { Icon } from "@/components/ai-v2/Icon";
 import AdminOverviewTab from "@/components/admin/AdminOverviewTab";
 import AdminMessagingTab from "@/components/admin/AdminMessagingTab";
 import AdminGoalsTab from "@/components/admin/AdminGoalsTab";
-import { BillingTab as SettingsBillingTab, NotificationsCard, PasswordCard, TimezoneCard, DealDefaultsCard, EmailChannelCard, SmsChannelCard } from "@/components/settings/SettingsPage";
+import { BillingTab as SettingsBillingTab, ProfileCard, NotificationsCard, PasswordCard, TimezoneCard, DealDefaultsCard, EmailChannelCard, SmsChannelCard } from "@/components/settings/SettingsPage";
 import { fetchConnectedAccounts } from "@/api/connectedAccounts";
 import { inviteUser } from "@/helpers/backend";
 import toast from "react-hot-toast";
@@ -165,6 +165,7 @@ function UsersTab() {
           </div>
         </Card>
 
+        <ProfileCard />
         <NotificationsCard />
       </div>
 

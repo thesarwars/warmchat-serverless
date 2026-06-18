@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 
 const steps = [
   {
@@ -196,8 +195,10 @@ const HowItWorks = () => {
               : "translate-y-8 opacity-0 scale-95"
           }`}
         >
-          <Link
-            to="/waitlist"
+          <a
+            href="https://calendly.com/jvrealestate2/15min"
+            target="_blank"
+            rel="noopener noreferrer"
             className="btn-gradient-hover flex items-center justify-center h-12 lg:h-13 w-full lg:w-auto px-10.5 rounded-full text-sm lg:text-xl font-semibold leading-5 lg:leading-7.5 text-white whitespace-nowrap"
             style={{
               backgroundImage:
@@ -206,7 +207,7 @@ const HowItWorks = () => {
             }}
           >
             See It In Action
-          </Link>
+          </a>
         </div>
       </div>
     </section>

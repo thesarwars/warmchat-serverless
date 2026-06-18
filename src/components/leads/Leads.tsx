@@ -1081,7 +1081,7 @@ export default function Leads() {
         <div className="wc-kpis">
           {/* Total Leads - all-time pipeline size */}
           <div className="wc-kpi">
-            <span className="wc-kpi-icon" style={{ color: "#7C3AED", background: "#EDE9FE" }}>
+            <span className="wc-kpi-icon" style={{ color: "var(--accent-strong)", background: "var(--accent-soft)" }}>
               <Users size={18} />
             </span>
             <div className="wc-kpi-body">
@@ -1108,7 +1108,7 @@ export default function Leads() {
                 </button>
               ))}
             </div>
-            <span className="wc-kpi-icon" style={{ color: "rgb(14, 165, 233)", background: "#E0F2FE" }}>
+            <span className="wc-kpi-icon" style={{ color: "var(--accent-strong)", background: "var(--accent-soft)" }}>
               <Sparkles size={18} />
             </span>
             <div className="wc-kpi-body">
@@ -1858,6 +1858,9 @@ export default function Leads() {
         csvTotalRows={leadImport.csvTotalRows}
         csvHeaders={leadImport.csvHeaders}
         csvPreview={leadImport.csvPreview}
+        importRows={leadImport.importRows}
+        importExcludedRows={leadImport.importExcludedRows}
+        setImportExcludedRows={leadImport.setImportExcludedRows}
         mapping={leadImport.mapping}
         setMapping={leadImport.setMapping}
         duplicateHandling={leadImport.duplicateHandling}

@@ -103,10 +103,10 @@ const initialsOf = (n: string) => n.split(" ").map((w) => w[0]).join("").slice(0
 function Prio({ p }: { p: DispPrio }) { return <span className="wc-prio" style={{ color: PRIO[p].c, background: PRIO[p].bg }}>{p}</span>; }
 
 const STAT_META = {
-  open: { label: "Open", icon: "tasks", fg: "#7C5CFC", bg: "#EEEAFE" },
-  ai: { label: "AI Recommended", icon: "sparkles", fg: "#0EA5E9", bg: "#E7F6FD" },
-  urgent: { label: "Urgent", icon: "flame", fg: "#DC2626", bg: "#FEE2E2" },
-  due: { label: "Due Today", icon: "calendarCheck", fg: "#0D9488", bg: "#E3F6F2" },
+  open: { label: "Open", icon: "tasks", fg: "#EA580C", bg: "#FFF3EA" },
+  ai: { label: "AI Recommended", icon: "sparkles", fg: "#EA580C", bg: "#FFF3EA" },
+  urgent: { label: "Urgent", icon: "flame", fg: "#EA580C", bg: "#FFF3EA" },
+  due: { label: "Due Today", icon: "calendarCheck", fg: "#EA580C", bg: "#FFF3EA" },
 } as const;
 
 function AiPriorityCard({ task, onPrimary, onOpen, onDone, onDismiss, busy }: { task: TaskRecord; onPrimary: () => void; onOpen: () => void; onDone: () => void; onDismiss: () => void; busy: boolean }) {

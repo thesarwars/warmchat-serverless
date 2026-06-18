@@ -1,19 +1,54 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
-const navLinks = [
+const navLinks: { label: string; href: string; external?: boolean }[] = [
   { label: "Features", href: "/features" },
   { label: "Pricing", href: "/pricing" },
   { label: "Support", href: "/support" },
   { label: "Get Started", href: "/login" },
-  { label: "See It In Action", href: "/waitlist" },
+  { label: "See It In Action", href: "https://calendly.com/jvrealestate2/15min", external: true },
 ];
 
 const Footer = () => {
   const [isFooterVisible, setIsFooterVisible] = useState(false);
   const footerRef = useRef<HTMLDivElement | null>(null);
+
+  // Newsletter signup -> Google Sheet via an Apps Script web app bound to the
+  // sheet. Posted client-side (no-cors) just like the Waitlist form, so we
+  // can't read the response; treat a completed request as success.
+  const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [newsletterStatus, setNewsletterStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const newsletterScriptURL = import.meta.env.VITE_NEWSLETTER_SCRIPT_URL as string | undefined;
+
+  const handleNewsletterSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const email = newsletterEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setNewsletterStatus("error");
+      return;
+    }
+    if (!newsletterScriptURL) {
+      // Not configured yet (awaiting the Apps Script deployment URL).
+      console.error("VITE_NEWSLETTER_SCRIPT_URL is not set");
+      setNewsletterStatus("error");
+      return;
+    }
+    setNewsletterStatus("loading");
+    try {
+      await fetch(newsletterScriptURL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, source: "newsletter" }),
+      });
+      setNewsletterEmail("");
+      setNewsletterStatus("done");
+    } catch {
+      setNewsletterStatus("error");
+    }
+  };
 
   useEffect(() => {
     const element = footerRef.current;
@@ -61,20 +96,21 @@ const Footer = () => {
             </div>
 
             <div className="flex items-center gap-4.25 lg:gap-6.25 flex-wrap">
-              {navLinks.map((link, i) => (
-                <Link
-                  key={link.label}
-                  to={link.href}
-                  className={`text-sm lg:text-base font-medium leading-5.5 lg:leading-6 text-white hover:text-[#F97316] transition-all duration-500 ease-out ${
-                    isFooterVisible
-                      ? "translate-y-0 opacity-100"
-                      : "translate-y-4 opacity-0"
-                  }`}
-                  style={{ transitionDelay: `${300 + i * 100}ms` }}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {navLinks.map((link, i) => {
+                const footerClass = `text-sm lg:text-base font-medium leading-5.5 lg:leading-6 text-white hover:text-[#F97316] transition-all duration-500 ease-out ${
+                  isFooterVisible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+                }`;
+                const footerStyle = { transitionDelay: `${300 + i * 100}ms` };
+                return link.external ? (
+                  <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer" className={footerClass} style={footerStyle}>
+                    {link.label}
+                  </a>
+                ) : (
+                  <Link key={link.label} to={link.href} className={footerClass} style={footerStyle}>
+                    {link.label}
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
@@ -89,22 +125,40 @@ const Footer = () => {
             <p className="text-base font-medium leading-6 text-white">
               Newsletter
             </p>
-            <div className="flex items-center gap-2.5 lg:gap-5">
+            <form onSubmit={handleNewsletterSubmit} className="flex items-center gap-2.5 lg:gap-5">
               <input
                 type="email"
+                required
+                value={newsletterEmail}
+                onChange={(e) => {
+                  setNewsletterEmail(e.target.value);
+                  if (newsletterStatus !== "idle") setNewsletterStatus("idle");
+                }}
                 placeholder="Your E-mail Address"
                 className="flex-1 lg:w-58.5 bg-[rgba(141,141,141,0.4)] rounded-[66px] px-4 py-3 text-xs lg:text-base font-semibold leading-6 text-white placeholder:text-white/70 outline-hidden focus:ring-1 focus:ring-[#F97316] transition-all duration-300"
               />
               <button
-                className="px-4 py-3 rounded-[34px] text-xs lg:text-base font-semibold leading-6 text-white whitespace-nowrap transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer"
+                type="submit"
+                disabled={newsletterStatus === "loading"}
+                className="px-4 py-3 rounded-[34px] text-xs lg:text-base font-semibold leading-6 text-white whitespace-nowrap transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{
                   backgroundImage:
                     "linear-gradient(90deg, #FB923C 0%, #F97316 86%)",
                 }}
               >
-                Subscribe Now
+                {newsletterStatus === "loading" ? "Subscribing..." : "Subscribe Now"}
               </button>
-            </div>
+            </form>
+            {newsletterStatus === "done" && (
+              <p className="text-xs lg:text-sm font-medium text-[#22C55E]">
+                You're subscribed - thanks for joining!
+              </p>
+            )}
+            {newsletterStatus === "error" && (
+              <p className="text-xs lg:text-sm font-medium text-[#F97316]">
+                Couldn't subscribe. Please check your email and try again.
+              </p>
+            )}
           </div>
         </div>
 

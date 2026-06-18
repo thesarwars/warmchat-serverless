@@ -681,7 +681,7 @@ function formatZoneClock(timezone: string, at: Date): { time: string; hour: numb
 
 // Custom Brokerage is sales-led - "Book demo" opens this Calendly (same link
 // the onboarding + pricing pages use).
-const BROKERAGE_DEMO_URL = "https://calendly.com/velasquezjojo7/30min";
+const BROKERAGE_DEMO_URL = "https://calendly.com/jvrealestate2/15min";
 
 // Plan comparison cards. Price + the "current" badge derive from real billing;
 // the feature bullets are static marketing copy (they describe the plans).
@@ -699,7 +699,7 @@ const PLAN_CARDS: { key: string; name: string; tag: string; feats: string[]; loc
     feats: ["Multi-agent onboarding", "Team management", "AI follow-up automation", "Shared templates", "Priority support", "Custom onboarding", "Volume pricing"] },
 ];
 
-function ProfileCard() {
+export function ProfileCard() {
   const qc = useQueryClient();
   const location = useLocation();
   const { profile } = useBoot();
@@ -758,7 +758,7 @@ function ProfileCard() {
     <Card icon="user" title="Profile">
       <div className="wc-formgrid">
         <div className="wc-modal-field"><div className="wc-modal-lbl">Full Name</div><input className="wc-modal-input" value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <div className="wc-modal-field"><div className="wc-modal-lbl">Company Name</div><input className="wc-modal-input" value={companyName} onChange={(e) => setCompanyName(e.target.value)} /></div>
+        <div className="wc-modal-field"><div className="wc-modal-lbl">Brokerage Name</div><input className="wc-modal-input" value={companyName} onChange={(e) => setCompanyName(e.target.value)} /></div>
       </div>
       <div className="wc-modal-fieldfull"><div className="wc-modal-lbl">About the company</div><textarea className="wc-modal-textarea" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="What do you offer? Who do you serve?" /></div>
       <div className="wc-modal-fieldfull" id="business-address" style={{ scrollMarginTop: 96 }}>

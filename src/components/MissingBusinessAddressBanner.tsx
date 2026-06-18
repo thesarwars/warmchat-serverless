@@ -40,7 +40,7 @@ export default function MissingBusinessAddressBanner() {
         </p>
       </div>
       <Link
-        to="/settings?tab=workspace#business-address"
+        to="/admin?tab=org#business-address"
         className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-700"
       >
         Add address

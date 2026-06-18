@@ -41,20 +41,6 @@ const FILTER_GROUPS: { heading: string; items: Filter[] }[] = [
       { key: "voicemail", type: "voicemail", label: "Voicemails" },
     ],
   },
-  {
-    heading: "Direction",
-    items: [
-      { key: "incoming", type: "all", direction: "incoming", label: "Incoming" },
-      { key: "outgoing", type: "all", direction: "outgoing", label: "Outgoing" },
-    ],
-  },
-  {
-    heading: "Workflow",
-    items: [
-      { key: "follow-up", type: "follow-up", label: "Follow-Up" },
-      { key: "ai-task", type: "ai-task", label: "AI Call Tasks" },
-    ],
-  },
 ];
 
 export default function CallsPage({ embedded = false }: { embedded?: boolean } = {}) {

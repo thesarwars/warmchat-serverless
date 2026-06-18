@@ -42,6 +42,12 @@ const Onboarding: React.FC = () => {
   // Editable later in Settings -> Workspace -> Average Sale Price & Commission.
   const [avgSalePrice, setAvgSalePrice] = useState("");
   const [avgCommission, setAvgCommission] = useState("");
+  // Redesigned wizard: Step 1 = business profile, Step 2 = lead & pipeline.
+  const [brokerage, setBrokerage] = useState("");
+  const [market, setMarket] = useState("");
+  const [bizRole, setBizRole] = useState("agent");
+  const [goalAppts, setGoalAppts] = useState("");
+  const [goalDeals, setGoalDeals] = useState("");
   useEffect(() => {
     const orgId = localStorage.getItem("org_id");
     if (!orgId) return;
@@ -138,6 +144,7 @@ const Onboarding: React.FC = () => {
   // plus the inline "turn on texting" loading flag for the Step 2 SMS card.
   const [smsAssignError, setSmsAssignError] = useState("");
   const [turningOnTexting, setTurningOnTexting] = useState(false);
+  const [moreEmailOptions, setMoreEmailOptions] = useState(false);
   const [businessEmail, setBusinessEmail] = useState("");
   const [businessEmailStatus, setBusinessEmailStatus] = useState<BusinessEmailStatus>("unknown");
   const [businessOtp, setBusinessOtp] = useState("");
@@ -185,14 +192,18 @@ const Onboarding: React.FC = () => {
     })
       .then((r) => r.json())
       .then((data) => {
+        // Keep the route-guard's cached onboarding step in sync with the server.
+        // Without this, a stale `onboardingStep` (e.g. set on a different origin)
+        // makes RoleProtectedRoute bounce /dashboard -> /onboarding while this
+        // effect bounces back -> infinite loop.
+        localStorage.setItem("onboardingStep", String(Number(data.step) || 0));
         if (data.step && data.step >= 5) {
           navigate("/dashboard");
           return;
         }
-        // Onboarding is two steps (preset / channels). The business mailing
-        // address is collected on Account & Usage and enforced app-wide, so
-        // older saved steps (incl. the retired step 3) clamp back to step 2.
-        setStep((Math.min(Number(data.step) || 1, 2) as Step));
+        // Onboarding is three steps (business profile / lead & pipeline /
+        // connect tools). Older saved steps clamp into range.
+        setStep((Math.min(Number(data.step) || 1, 3) as Step));
         setConnected({
           email: data.email_connected || false,
           sms: data.sms_connected || false,
@@ -200,6 +211,11 @@ const Onboarding: React.FC = () => {
         if (data.selected_preset) {
           setSelectedPresetId(data.selected_preset);
         }
+        if (data.brokerage) setBrokerage(String(data.brokerage));
+        if (data.market) setMarket(String(data.market));
+        if (data.role) setBizRole(String(data.role));
+        if (data.goal_appts) setGoalAppts(String(data.goal_appts));
+        if (data.goal_deals) setGoalDeals(String(data.goal_deals));
         if (data.plan) setOrgPlan(data.plan);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -652,6 +668,9 @@ const Onboarding: React.FC = () => {
       },
       body: JSON.stringify({ step: 5 }),
     });
+    // Refresh the route-guard cache so /dashboard isn't bounced back to
+    // /onboarding by a stale step (the cause of the post-finish redirect loop).
+    localStorage.setItem("onboardingStep", "5");
     if (navigationState) {
       navigate(destination, { state: navigationState });
       return;
@@ -663,12 +682,29 @@ const Onboarding: React.FC = () => {
   const hasSmsAccess = orgPlan && orgPlan !== "free_channel";
   const smsApproved = smsTelnyxStatus === "approved";
   const canContinue = (currentStep: Step) => {
-    if (currentStep === 1 && !selectedPresetId) return false;
-    if (currentStep === 2 && !emailSetupReady) return false;
+    // Step 1 business profile: brokerage + market + a valid commission %.
+    if (currentStep === 1 && !(brokerage.trim() && market.trim() && Number(avgCommission) > 0)) return false;
+    // Step 2 lead & pipeline: both goals set.
+    if (currentStep === 2 && !(Number(goalDeals) > 0 && Number(goalAppts) > 0)) return false;
+    // Step 3 connect tools: a connected email is required.
+    if (currentStep === 3 && !emailSetupReady) return false;
     return true;
   };
 
-  const totalSteps = 2;
+  const totalSteps = 3;
+
+  // Live pipeline projection for the Step 2 calc panel.
+  const fmtMoney = (n: number) => {
+    if (!Number.isFinite(n) || n <= 0) return "$0";
+    if (n >= 1e6) return "$" + (n / 1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return "$" + Math.round(n / 1e3) + "K";
+    return "$" + Math.round(n).toLocaleString();
+  };
+  const projDeals = Number(goalDeals) || 0;
+  const projPrice = Number(avgSalePrice) || 0;
+  const projPct = Number(avgCommission) || 0;
+  const projPipeline = projDeals * projPrice;
+  const projCommission = projDeals * projPrice * (projPct / 100);
 
   // Map preset title → lead_type stored on backend
   const PRESET_LEAD_TYPE: Record<string, string> = {
@@ -682,15 +718,15 @@ const Onboarding: React.FC = () => {
   const getPresetIcon = (titleKey: string) => {
     switch (titleKey) {
       case "buyer lead follow-up":
-        return <Home className="w-5 h-5 text-orange-600" />;
+        return <Home className="w-5 h-5 text-[#e25a09]" />;
       case "open house follow-up":
-        return <MessageCircle className="w-5 h-5 text-orange-600" />;
+        return <MessageCircle className="w-5 h-5 text-[#e25a09]" />;
       case "seller lead follow-up":
-        return <DollarSign className="w-5 h-5 text-orange-600" />;
+        return <DollarSign className="w-5 h-5 text-[#e25a09]" />;
       case "past client re-engagement":
-        return <Handshake className="w-5 h-5 text-orange-600" />;
+        return <Handshake className="w-5 h-5 text-[#e25a09]" />;
       default:
-        return <ClipboardList className="w-5 h-5 text-orange-600" />;
+        return <ClipboardList className="w-5 h-5 text-[#e25a09]" />;
     }
   };
 
@@ -717,7 +753,13 @@ const Onboarding: React.FC = () => {
 
   /* ---------------- UI ---------------- */
   return (
-    <div className="min-h-screen p-6 bg-orange-50">
+    <div
+      className="min-h-screen p-6"
+      style={{
+        background:
+          "radial-gradient(900px 500px at 12% -8%, #fff3e6 0%, rgba(255,243,230,0) 60%), radial-gradient(800px 600px at 100% 0%, #fdeede 0%, rgba(253,238,222,0) 55%), #faf7f2",
+      }}
+    >
       <Toaster position="top-right" reverseOrder={false} />
       <div className="max-w-4xl mx-auto" ref={popupAnchor}>
         {/* Progress */}
@@ -727,7 +769,7 @@ const Onboarding: React.FC = () => {
             <span>{progress}%</span>
           </div>
           <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
-            <div className="h-full bg-orange-500" style={{ width: `${progress}%` }} />
+            <div className="h-full bg-[#f4731e]" style={{ width: `${progress}%` }} />
           </div>
         </div> */}
         <div className="mb-8">
@@ -745,133 +787,178 @@ const Onboarding: React.FC = () => {
     </div>
   </div>
 
-  {/* Progress bar */}
-  <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
-    <div
-      className="h-full bg-orange-500 transition-all duration-300"
-      style={{ width: `${(Math.min(step, totalSteps) / totalSteps) * 100}%` }}
-    />
+  {/* 3-step rail */}
+  <div className="mt-4 flex items-center">
+    {[
+      { n: 1, label: "Business profile" },
+      { n: 2, label: "Lead & pipeline" },
+      { n: 3, label: "Connect tools" },
+    ].map((s, i) => {
+      const done = step > s.n;
+      const active = step === s.n;
+      return (
+        <div key={s.n} className={i < 2 ? "flex items-center flex-1" : "flex items-center"}>
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all ${
+                done
+                  ? "bg-[#f4731e] text-white"
+                  : active
+                    ? "border-[1.5px] border-[#f7973f] bg-[#fef3ea] text-[#b9450a]"
+                    : "bg-gray-100 text-gray-400"
+              }`}
+            >
+              {done ? <Check size={16} /> : s.n}
+            </div>
+            <div className="hidden sm:block">
+              <div className={`text-[9px] font-bold uppercase tracking-wide ${active || done ? "text-[#e25a09]" : "text-gray-400"}`}>
+                Step {s.n}
+              </div>
+              <div className={`text-xs font-semibold ${active ? "text-gray-900" : done ? "text-gray-700" : "text-gray-400"}`}>
+                {s.label}
+              </div>
+            </div>
+          </div>
+          {i < 2 && (
+            <div className={`mx-3 h-0.5 flex-1 rounded transition-colors ${step > s.n ? "bg-[#fbc193]" : "bg-gray-200"}`} />
+          )}
+        </div>
+      );
+    })}
   </div>
 </div>
 
         <Card className="shadow-xl border border-white/40 bg-white/70 backdrop-blur-md">
-          <CardHeader>
-            <CardTitle className="text-xl">
-              {(
-                {
-                  1: "Step 1: Choose your follow-up",
-                  2: "Step 2: Connect your channels",
-                } as Record<number, string>
-              )[step]}
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent>
+          <CardContent className="pt-6">
             {step === 1 && (
-              <div className="space-y-6 text-left">
+              <div className="space-y-5 text-left">
                 <div className="space-y-1">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Choose your first follow-up type
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Start with one proven playbook. This controls your AI tone, message templates, and follow-up spacing.
-                  </p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#e25a09]">Welcome to WarmChats</p>
+                  <h2 className="text-lg font-semibold text-gray-900">Tell us about your business</h2>
+                  <p className="text-sm text-gray-600">We'll tailor your AI agents to how you work.</p>
                 </div>
 
-                {availablePresets.length === 0 && !_loadingPresets && (
-                  <div className="text-center text-sm text-gray-400 py-6">-</div>
-                )}
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-700">Brokerage name</span>
+                  <input
+                    value={brokerage}
+                    onChange={(e) => setBrokerage(e.target.value)}
+                    placeholder="e.g. JOV Realty"
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  />
+                </label>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {availablePresets.map((preset) => {
-                    const isSelected = selectedPresetId === preset.id;
-                    const titleKey = preset.title.toLowerCase();
-                    const caption = PRESET_CAPTIONS[titleKey];
-                    return (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-700">Market / City</span>
+                  <input
+                    value={market}
+                    onChange={(e) => setMarket(e.target.value)}
+                    placeholder="e.g. San Francisco, CA"
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  />
+                </label>
+
+                <div>
+                  <span className="mb-1.5 block text-xs font-medium text-gray-700">Your role</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: "agent", label: "Agent", sub: "I sell my own deals" },
+                      { id: "broker", label: "Broker", sub: "I run a team / office" },
+                    ].map((o) => (
                       <button
-                        key={preset.id}
-                        onClick={() => selectPreset(preset.id)}
-                        className={`relative w-full text-left p-4 rounded-xl border transition-all ${
-                          isSelected
-                            ? "border-orange-500 bg-orange-50"
-                            : "border-gray-200 bg-white hover:border-orange-400"
+                        key={o.id}
+                        type="button"
+                        onClick={() => setBizRole(o.id)}
+                        className={`rounded-xl border p-3 text-left transition ${
+                          bizRole === o.id ? "border-[#f7973f] bg-[#fef3ea] ring-2 ring-orange-100" : "border-gray-200 bg-white hover:border-orange-300"
                         }`}
                       >
-                        {preset.recommended && (
-                          <span className="absolute top-3 right-3 text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 font-medium flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3" />
-                            Default
-                          </span>
-                        )}
-
-                        <div className="flex items-center gap-2 mb-1">
-                          {getPresetIcon(titleKey)}
-                          <div className="text-sm font-semibold text-gray-900">
-                            {preset.title}
-                          </div>
-                        </div>
-                        {preset.description && (
-                          <div className="text-xs text-gray-600 mt-1">
-                            {preset.description}
-                          </div>
-                        )}
-                        <div className="text-xs text-gray-400 mt-2">
-                          {preset.avgReplies} avg replies * {preset.messages}
-                        </div>
-                        {caption && (
-                          <div className="text-xs text-orange-600 mt-1.5">
-                            {caption.detail}
-                          </div>
-                        )}
-
-                        {isSelected && (
-                          <div className="absolute bottom-3 right-3 text-orange-500">
-                            <Check size={16} />
-                          </div>
-                        )}
+                        <div className={`text-sm font-semibold ${bizRole === o.id ? "text-[#b9450a]" : "text-gray-900"}`}>{o.label}</div>
+                        <div className="text-[11px] text-gray-500">{o.sub}</div>
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
 
-                {selectedPresetId && (
-                  <div className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs text-orange-700">
-                    <span className="font-semibold">What this controls:</span> AI tone * Message templates * Automation style * Follow-up spacing
-                  </div>
-                )}
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-700">Average commission (%)</span>
+                  <input
+                    type="number" min="0" max="100" step="0.1" placeholder="2.5"
+                    value={avgCommission}
+                    onChange={(e) => setAvgCommission(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  />
+                  <span className="mt-1 block text-[11px] text-gray-500">Your typical commission rate per closed deal.</span>
+                </label>
+              </div>
+            )}
 
-                {/* Deal defaults - drive the Pipeline Value KPI. Editable later
-                    in Settings. */}
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-gray-900">Your deal defaults</h3>
-                  <p className="text-xs text-gray-600">
-                    Used to estimate your pipeline value. You can change these anytime in Settings.
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-700">Average sale price ($)</span>
-                      <input
-                        type="number" min="0" step="1000" placeholder="400000"
-                        value={avgSalePrice}
-                        onChange={(e) => setAvgSalePrice(e.target.value)}
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-700">Average commission (%)</span>
-                      <input
-                        type="number" min="0" max="100" step="0.1" placeholder="2.5"
-                        value={avgCommission}
-                        onChange={(e) => setAvgCommission(e.target.value)}
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-                      />
-                    </label>
-                  </div>
+            {step === 2 && (
+              <div className="space-y-5 text-left">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#e25a09]">Lead &amp; pipeline setup</p>
+                  <h2 className="text-lg font-semibold text-gray-900">Let's size up your pipeline</h2>
+                  <p className="text-sm text-gray-600">We use these to project your revenue and track your goals.</p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-700">Average sale price ($)</span>
+                    <input
+                      type="number" min="0" step="1000" placeholder="400000"
+                      value={avgSalePrice}
+                      onChange={(e) => setAvgSalePrice(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-700">Goal appointments / month</span>
+                    <input
+                      type="number" min="0" step="1" placeholder="20"
+                      value={goalAppts}
+                      onChange={(e) => setGoalAppts(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-700">Goal deals closed this year</span>
+                  <input
+                    type="number" min="0" step="1" placeholder="24"
+                    value={goalDeals}
+                    onChange={(e) => setGoalDeals(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  />
+                  <span className="mt-1 block text-[11px] text-gray-500">How many deals you aim to close this year - we use this to project your revenue.</span>
+                </label>
+
+                {/* Calculated-for-you pipeline projection */}
+                <div className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 to-white p-4">
+                  <div className="mb-2 text-[10.5px] font-bold uppercase tracking-wide text-[#b9450a]">Calculated for you</div>
+                  {projDeals > 0 ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-2xl font-bold text-gray-900">{projPrice > 0 ? fmtMoney(projPipeline) : "-"}</div>
+                          <div className="text-xs text-gray-500">Estimated annual pipeline</div>
+                          <div className="mt-0.5 text-[11px] text-gray-400">{projPrice > 0 ? `${projDeals} deals * ${fmtMoney(projPrice)}` : "Add a sale price to project"}</div>
+                        </div>
+                        <div>
+                          <div className="text-2xl font-bold text-[#b9450a]">{projPct > 0 && projPrice > 0 ? fmtMoney(projCommission) : "-"}</div>
+                          <div className="text-xs text-gray-500">Potential annual commission</div>
+                          <div className="mt-0.5 text-[11px] text-gray-400">{projPct > 0 ? `${projPct}% of pipeline` : "Add commission in step 1"}</div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500">Enter your goal deals closed this year to see your projected pipeline and commission.</p>
+                  )}
                 </div>
               </div>
             )}
 
-            {step === 2 && step2Loading && (
+            {step === 3 && step2Loading && (
               <div className="space-y-6">
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold text-gray-900">
@@ -923,25 +1010,23 @@ const Onboarding: React.FC = () => {
               </div>
             )}
 
-            {step === 2 && !step2Loading && (
+            {step === 3 && !step2Loading && (
               <div className="space-y-6">
                 <div className="space-y-1">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Connect your email to start sending
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Start conversations, automate follow-ups, and book appointments from one inbox. Setup takes less than 10 seconds.
-                  </p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#e25a09]">Almost there</p>
+                  <h2 className="text-lg font-semibold text-gray-900">Connect your tools</h2>
+                  <p className="text-sm text-gray-600">Plug in the channels your AI will work across.</p>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {/* Email card - always required */}
-                  <Card className="p-6 border-orange-300 bg-orange-50 sm:col-span-2">
+                <div className="flex flex-col gap-4">
+                  {/* Email block (now first) - a full-width block; the SMS card
+                      below it carries the 1px divider that separates the two. */}
+                  <Card className="rounded-none border-0 bg-transparent p-0 shadow-none">
                     <div className="flex items-start gap-3">
-                      <Mail size={20} className="text-orange-600 mt-0.5 shrink-0" />
+                      <Mail size={20} className="text-[#e25a09] mt-0.5 shrink-0" />
                       <div className="flex-1">
                         <div className="text-sm font-semibold text-gray-900">
-                          Email <span className="text-orange-600">(Required)</span>
+                          Email <span className="text-[#e25a09]">(Required)</span>
                         </div>
                         <div className="text-sm text-gray-600 mt-0.5">
                           Send personalized follow-ups from your inbox
@@ -986,17 +1071,17 @@ const Onboarding: React.FC = () => {
                           window.location.reload();
                         };
                         return (
-                          <div className="rounded-lg border border-orange-200 bg-white px-4 py-3">
+                          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
                             <div className="flex items-start justify-between gap-3 flex-wrap">
                               <div className="flex items-start gap-2 min-w-0">
-                                <Check size={16} className="text-orange-600 mt-0.5 shrink-0" />
+                                <Check size={16} className="text-green-600 mt-0.5 shrink-0" />
                                 <div className="min-w-0">
                                   <div className="text-sm font-semibold text-gray-900">
                                     Email connected
                                   </div>
                                   <div className="mt-0.5 text-xs text-gray-600">
                                     <span className="inline-flex items-center gap-1.5 mr-2">
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium border border-orange-200">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium border border-green-200">
                                         {optionLabel}
                                       </span>
                                     </span>
@@ -1028,14 +1113,15 @@ const Onboarding: React.FC = () => {
                           </div>
                         );
                       })() : (
-                        <div className="grid gap-3 md:grid-cols-2 items-stretch">
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-2 items-stretch">
                           {/* Option 1 - Gmail */}
                           <div className={`rounded-xl border bg-white p-4 flex flex-col h-full ${
                             takeoverInProgress || businessDomainInProgress
                               ? "border-gray-200 opacity-50"
                               : "border-orange-200"
                           }`}>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-orange-600">Option 1 - Fastest</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[#e25a09]">Option 1 - Fastest</div>
                             <div className="mt-1 text-sm font-semibold text-gray-900">Connect Gmail</div>
                             <p className="mt-1 text-xs text-gray-500 italic">Best for agents already using Gmail or Google Workspace.</p>
                             <ul className="mt-2 space-y-1 text-xs text-gray-600">
@@ -1052,19 +1138,19 @@ const Onboarding: React.FC = () => {
                             <button
                               onClick={startGmailOAuth}
                               disabled={emailSetupInProgress}
-                              className="mt-4 w-full rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="mt-4 w-full rounded-lg bg-[#f4731e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {gmailStatus === "needs_reauth" ? "Reconnect with Google" : "Continue with Google"}
                             </button>
                           </div>
 
                           {/* Option 2 - Verify Domain (OTP path) */}
-                          <div className={`rounded-xl border bg-white p-4 flex flex-col h-full ${
+                          <div className={`rounded-xl border p-4 flex flex-col h-full ${
                             takeoverInProgress
-                              ? "border-gray-200 opacity-50"
-                              : "border-gray-200"
+                              ? "border-[#cdd8ee] bg-[#eef2fb] opacity-50"
+                              : "border-[#cdd8ee] bg-[#eef2fb]"
                           }`}>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Option 2 - Best Deliverability</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[#2f6ad0]">Option 2 - Best Deliverability</div>
                             <div className="mt-1 text-sm font-semibold text-gray-900">
                               {option2InProgress ? "Finish DNS setup" : "Verify Your Domain"}
                             </div>
@@ -1092,7 +1178,7 @@ const Onboarding: React.FC = () => {
                               <button
                                 onClick={() => setShowEmailModal(true)}
                                 disabled={takeoverInProgress}
-                                className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex-1 rounded-lg border border-[#aec3e8] bg-white px-4 py-2 text-sm font-semibold text-[#2f6ad0] transition hover:bg-[#e9eef8] disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {option2InProgress ? "Resume DNS setup" : "Verify Domain"}
                               </button>
@@ -1132,15 +1218,29 @@ const Onboarding: React.FC = () => {
                             </div>
                           </div>
 
+                          </div>
+                          {/* Advanced email paths (WarmChats Inbox + buy-a-domain)
+                              collapse here so Gmail + Verify Domain lead. Auto-opens
+                              when one of those paths is mid-setup. */}
+                          <button
+                            type="button"
+                            onClick={() => setMoreEmailOptions((v) => !v)}
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+                          >
+                            {(moreEmailOptions || takeoverInProgress || option3DnsInProgress) ? "Hide advanced options" : "Show advanced options"}
+                            <ChevronDown size={14} className={`transition-transform ${(moreEmailOptions || takeoverInProgress || option3DnsInProgress) ? "rotate-180" : ""}`} />
+                          </button>
+                          {(moreEmailOptions || takeoverInProgress || option3DnsInProgress) && (
+                          <div className="space-y-3">
                           {/* Option 3 - Takeover */}
                           <div className={`rounded-xl border p-4 flex flex-col h-full ${
                             takeoverInProgress
-                              ? "border-purple-300 bg-purple-50"
+                              ? "border-[#c3b3ef] bg-[#efebf9]"
                               : option2InProgress
                                 ? "border-gray-200 bg-white opacity-50"
-                                : "border-purple-200 bg-purple-50/40"
+                                : "border-[#d8cdf3] bg-transparent"
                           }`}>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[#6849cf]">
                               Option 3 - {option3DnsInProgress ? "DNS records pending" : takeoverInProgress ? "In progress" : "No Email Provider"}
                             </div>
                             <div className="mt-1 text-sm font-semibold text-gray-900">
@@ -1183,7 +1283,7 @@ const Onboarding: React.FC = () => {
                                   else setShowTakeoverModal(true);
                                 }}
                                 disabled={option2InProgress && !takeoverInProgress}
-                                className="flex-1 rounded-lg border border-purple-300 bg-white px-4 py-2 text-sm font-semibold text-purple-700 transition hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex-1 rounded-lg border border-[#c3b3ef] bg-white px-4 py-2 text-sm font-semibold text-[#6849cf] transition hover:bg-[#efebf9] disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {option3DnsInProgress
                                   ? "Resume DNS setup"
@@ -1259,144 +1359,130 @@ const Onboarding: React.FC = () => {
                               )}
                             </div>
                           </div>
-
-                          {/* Option 4 - Registrars */}
-                          <div className={`rounded-xl border bg-white p-4 flex flex-col h-full ${
-                            emailSetupInProgress ? "border-gray-200 opacity-50" : "border-gray-200"
-                          }`}>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Option 4 - Need a Domain?</div>
-                            <div className="mt-1 text-sm font-semibold text-gray-900">Get a Domain</div>
-                            <p className="mt-1 text-xs text-gray-500 italic">Don't have a business domain yet?</p>
-                            <ul className="mt-2 space-y-1 text-xs text-gray-600">
-                              <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />Buy a custom domain in minutes</li>
-                              <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />Recommended places to buy included</li>
-                              <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />Come back and connect it to WarmChats</li>
-                            </ul>
-                            <div className="grow" />
-                            <button
-                              onClick={() => setShowRegistrarsModal(true)}
-                              disabled={emailSetupInProgress}
-                              className="mt-4 w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Browse Domains
-                            </button>
                           </div>
+                          )}
                         </div>
                       )}
                     </div>
                   </Card>
 
-                  {/* SMS card - locked unless paid plan */}
-                  <Card className={`p-6 ${hasSmsAccess ? "border-orange-200 bg-orange-50" : "border-gray-200 bg-gray-50"}`}>
-                    <div className="flex items-start gap-3">
-                      <MessageCircle size={20} className={`mt-0.5 shrink-0 ${hasSmsAccess ? "text-orange-600" : "text-gray-400"}`} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <div className="text-sm font-semibold text-gray-900">SMS Automation</div>
-                          {/* Always show the current plan badge so the user
-                              knows where they stand (free vs paid) even when
-                              SMS is locked. */}
-                          <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium border capitalize ${
-                            hasSmsAccess
-                              ? "bg-purple-100 text-purple-700 border-purple-200"
-                              : "bg-gray-100 text-gray-600 border-gray-200"
-                          }`}>
-                            {orgPlan === "free_channel" ? "Free plan" : `${orgPlan.replace("_channel", "")} plan`}
-                          </span>
-                          {!hasSmsAccess && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium border border-orange-200">
-                              SMS requires upgrade
-                            </span>
-                          )}
-                          {hasSmsAccess && smsPhone && smsApproved && (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">
-                              <Check className="w-3 h-3" />
-                              Approved
-                            </span>
-                          )}
-                          {hasSmsAccess && smsPhone && !smsApproved && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">
-                              Pending approval
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-600 mt-0.5">
-                          Automatically text leads from a verified business number.
-                        </div>
-                        <ul className="mt-1.5 space-y-0.5 text-xs text-gray-600">
-                          <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />AI follow-ups and appointment booking</li>
-                          <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />Requires SMS setup + 10DLC approval</li>
-                          <li className="flex items-start gap-1.5"><Check size={11} className="text-green-500 mt-0.5 shrink-0" />Available on paid plans</li>
-                        </ul>
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      {!hasSmsAccess ? (
-                        <button
-                          onClick={() => setShowUpgradeModal(true)}
-                          className="px-4 py-2 rounded-md text-sm font-medium text-orange-700 border border-orange-300 hover:bg-orange-100 transition"
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            Upgrade to Enable SMS <ArrowRight className="w-3.5 h-3.5" />
-                          </span>
-                        </button>
-                      ) : smsPhone ? (
-                        <div className="rounded-lg border border-orange-200 bg-white px-4 py-3">
-                          <div className="flex items-start gap-2">
-                            <Check size={16} className="text-orange-600 mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-gray-900">
-                                {smsApproved ? "SMS number active" : "One last step: switch on texting"}
-                              </div>
-                              <div className="mt-0.5 font-mono text-sm text-gray-800">
-                                {formatDisplayPhone(smsPhone)}
-                              </div>
-                            </div>
+                  {/* SMS card - sits BELOW the Email block, separated by a 1px
+                      divider. Styled per docs/updated-docs/sms-automation-prompt.md,
+                      wired to the real plan/registration state: free -> Upgrade,
+                      paid+no number -> Register, reserved -> Turn On Texting,
+                      approved -> Enabled (green). */}
+                  <div className="border-t border-[#ece6dd] pt-6">
+                  {(() => {
+                    const smsEnabled = Boolean(hasSmsAccess && smsPhone && smsApproved);
+                    const pill = (tone: "grey" | "orange" | "green" | "amber", text: React.ReactNode) => {
+                      const tones: Record<string, string> = {
+                        grey: "bg-[#f4efe8] text-[#6a5d50]",
+                        orange: "bg-[#fef3ea] text-[#b9450a]",
+                        green: "bg-[#e8f1ea] text-[#1f7a52]",
+                        amber: "bg-[#f8efd9] text-[#a87400]",
+                      };
+                      return (
+                        <span className={`whitespace-nowrap rounded-full px-2.5 py-[3px] text-[11px] font-semibold ${tones[tone]}`}>{text}</span>
+                      );
+                    };
+                    const arrow = (
+                      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                    );
+                    return (
+                      <div
+                        style={{
+                          border: "1px solid " + (smsEnabled ? "#c7e0ce" : "#ece6dd"),
+                          borderRadius: 16,
+                          padding: 18,
+                          background: smsEnabled ? "#fff" : "#faf7f2",
+                          transition: "all .2s",
+                        }}
+                      >
+                        <div className="flex items-start gap-[13px]">
+                          <div
+                            className="grid shrink-0 place-items-center"
+                            style={{ width: 36, height: 36, borderRadius: 10, background: "#fff", border: "1px solid #ece6dd", color: smsEnabled ? "#1f7a52" : "#6a5d50" }}
+                          >
+                            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.5 8.5 0 01-12.2 7.7L3 21l1.8-5.8A8.5 8.5 0 1121 11.5z" /></svg>
                           </div>
-                          <p className="mt-1.5 text-xs text-gray-600">
-                            {smsApproved
-                              ? "Approved and ready to text leads."
-                              : "Your number is reserved. Switch on texting to start sending and receiving messages."}
-                          </p>
-                          {!smsApproved && smsAssignError && (
-                            <p className="mt-1.5 text-xs text-orange-700">
-                              We couldn't switch it on automatically - new numbers can take a minute. Tap Turn On Texting to try again.
-                              <span className="text-orange-600/70"> ({smsAssignError})</span>
-                            </p>
-                          )}
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {!smsApproved && (
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[16px] font-bold text-[#211a14]">SMS Automation</span>
+                              {pill("grey", orgPlan === "free_channel" ? "Free Plan" : `${orgPlan.replace("_channel", "")} plan`)}
+                              {!hasSmsAccess
+                                ? pill("orange", "SMS requires upgrade")
+                                : smsEnabled
+                                  ? pill("green", "SMS enabled")
+                                  : smsPhone
+                                    ? pill("amber", "Pending approval")
+                                    : null}
+                            </div>
+                            <div className="mt-1.5 mb-3 text-[13.5px] leading-[1.45] text-[#6a5d50]">
+                              Automatically text leads from a verified business number.
+                            </div>
+                            <ul className="mb-3.5 flex flex-col gap-[7px]">
+                              {["AI follow-ups and appointment booking", "Requires SMS setup + 10DLC approval", "Available on paid plans"].map((t) => (
+                                <li key={t} className="flex items-start gap-2 text-[12.5px] leading-[1.4] text-[#463b31]">
+                                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" className="mt-[2.5px] shrink-0 text-[#1f7a52]"><path d="M5 12.5l4.5 4.5L19 7" /></svg>
+                                  <span>{t}</span>
+                                </li>
+                              ))}
+                            </ul>
+
+                            {!hasSmsAccess ? (
+                              <button
+                                onClick={() => setShowUpgradeModal(true)}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-[11px] border border-[#f7973f] bg-transparent px-3 py-3 text-[14px] font-bold text-[#e25a09] transition hover:bg-[#fef3ea]"
+                              >
+                                Upgrade to Enable SMS {arrow}
+                              </button>
+                            ) : smsEnabled ? (
+                              <button
+                                onClick={connectSMS}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-[11px] border border-[#c7e0ce] bg-white px-3 py-3 text-[14px] font-bold text-[#1f7a52] transition hover:bg-[#e8f1ea]"
+                              >
+                                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7" /></svg>
+                                SMS Enabled
+                              </button>
+                            ) : smsPhone ? (
                               <button
                                 onClick={turnOnTexting}
                                 disabled={turningOnTexting}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-300 transition"
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-[11px] border border-[#f7973f] bg-[#f4731e] px-3 py-3 text-[14px] font-bold text-white transition hover:bg-[#e25a09] disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {turningOnTexting ? "Switching on..." : "Turn On Texting"}
-                                {!turningOnTexting && <ArrowRight className="w-3.5 h-3.5" />}
+                                {turningOnTexting ? "Switching on..." : <>Turn On Texting {arrow}</>}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={connectSMS}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-[11px] border border-[#f7973f] bg-[#f4731e] px-3 py-3 text-[14px] font-bold text-white transition hover:bg-[#e25a09]"
+                              >
+                                Register SMS Number {arrow}
                               </button>
                             )}
-                            <button
-                              onClick={connectSMS}
-                              className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 transition"
-                            >
-                              View registration status
-                            </button>
+
+                            {hasSmsAccess && smsPhone && (
+                              <div className="mt-[11px] rounded-[11px] border border-[#ece6dd] bg-white px-3 py-3 font-mono text-[14px] text-[#211a14]">
+                                {formatDisplayPhone(smsPhone)}
+                              </div>
+                            )}
+                            {hasSmsAccess && smsPhone && !smsApproved && smsAssignError && (
+                              <p className="mt-1.5 text-[11.5px] text-[#b9450a]">
+                                Couldn't switch on automatically - new numbers can take a minute. Tap Turn On Texting to retry.{" "}
+                                <span className="opacity-70">({smsAssignError})</span>
+                              </p>
+                            )}
                           </div>
                         </div>
-                      ) : (
-                        <button
-                          onClick={connectSMS}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium text-white bg-orange-500 hover:opacity-90 transition"
-                        >
-                          Register SMS Number <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </Card>
+                      </div>
+                    );
+                  })()}
+                  </div>
                 </div>
 
-                <p className="text-xs text-gray-600">
-                  You can proceed with email only - SMS can be added at any time from Settings.
+                <p className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <Check size={13} className="text-green-500 shrink-0" />
+                  You can connect or change these anytime in Settings.
                 </p>
               </div>
             )}
@@ -1404,9 +1490,9 @@ const Onboarding: React.FC = () => {
           </CardContent>
 
           <CardFooter className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {step === 2 && (
+            {step > 1 && (
               <button
-                onClick={() => updateStep(1)}
+                onClick={() => updateStep((step - 1) as Step)}
                 className="border px-4 py-2 rounded-md"
               >
                 Back
@@ -1417,13 +1503,12 @@ const Onboarding: React.FC = () => {
               <button
                 disabled={!canContinue(step)}
                 onClick={async () => {
-                  if (selectedPresetId) {
-                    await selectPreset(selectedPresetId);
-                    await saveDealDefaults();
-                  }
-                  updateStep(2);
+                  // Business profile -> persist brokerage (org name) + market/role
+                  // and the commission rate (deal defaults).
+                  await saveDealDefaults();
+                  updateStep(2, { brokerage: brokerage.trim(), market: market.trim(), role: bizRole });
                 }}
-                className="px-6 py-3 rounded-lg font-semibold text-white bg-orange-500 hover:opacity-90 transition disabled:opacity-40 sm:ml-auto"
+                className="px-6 py-3 rounded-lg font-semibold text-white bg-[#f4731e] hover:opacity-90 transition disabled:opacity-40 sm:ml-auto"
               >
                 Continue →
               </button>
@@ -1431,9 +1516,32 @@ const Onboarding: React.FC = () => {
 
             {step === 2 && (
               <button
+                disabled={!canContinue(step)}
+                onClick={async () => {
+                  // Lead & pipeline -> persist sale price (deal defaults) + goals.
+                  await saveDealDefaults();
+                  updateStep(3, { goal_appts: Number(goalAppts) || 0, goal_deals: Number(goalDeals) || 0 });
+                }}
+                className="px-6 py-3 rounded-lg font-semibold text-white bg-[#f4731e] hover:opacity-90 transition disabled:opacity-40 sm:ml-auto"
+              >
+                Continue →
+              </button>
+            )}
+
+            {step === 3 && (
+              <button
                 disabled={!canContinue(step) || completingOnboarding}
-                onClick={() => completeOnboarding("/dashboard")}
-                className="px-6 py-3 rounded-lg font-semibold text-white bg-orange-500 hover:opacity-90 transition disabled:opacity-40 sm:ml-auto inline-flex items-center gap-2"
+                onClick={async () => {
+                  // The follow-up playbook chooser was removed; default every new
+                  // workspace to the Buyer playbook so AI tone/templates still seed.
+                  const buyer = availablePresets.find((p) => p.title.toLowerCase() === "buyer lead follow-up");
+                  const presetId = buyer?.id ?? selectedPresetId;
+                  if (presetId) {
+                    try { await selectPreset(presetId); } catch { /* non-fatal */ }
+                  }
+                  await completeOnboarding("/dashboard");
+                }}
+                className="px-6 py-3 rounded-lg font-semibold text-white bg-[#f4731e] hover:opacity-90 transition disabled:opacity-40 sm:ml-auto inline-flex items-center gap-2"
               >
                 {completingOnboarding ? <Loader2 size={16} className="animate-spin" /> : null}
                 Finish setup →
@@ -1752,7 +1860,7 @@ const Onboarding: React.FC = () => {
                     }
                   }}
                   disabled={takeoverIssuing || !takeoverDomain || !takeoverPrefix}
-                  className="w-full rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  className="w-full rounded-lg bg-[#f4731e] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e25a09] disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
                   {takeoverIssuing ? <><Loader2 size={14} className="animate-spin" /> Generating token...</> : "Generate Verification Token"}
                 </button>
@@ -1762,7 +1870,7 @@ const Onboarding: React.FC = () => {
                 </>
               ) : (
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-xs text-orange-900 space-y-3">
+                  <div className="rounded-xl border border-orange-200 bg-[#fef3ea] p-4 text-xs text-orange-900 space-y-3">
                     <div className="space-y-1.5">
                       <p className="font-semibold">Where do you manage <span className="font-mono">{takeoverDomain}</span>?</p>
                       <div className="relative">
@@ -1827,7 +1935,7 @@ const Onboarding: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => copyTakeover("TXT", "type")}
-                          className="text-orange-600 hover:text-orange-800 shrink-0"
+                          className="text-[#e25a09] hover:text-orange-800 shrink-0"
                           title="Copy"
                         >
                           {takeoverCopied.type ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
@@ -1839,7 +1947,7 @@ const Onboarding: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => copyTakeover("@", "host")}
-                          className="text-orange-600 hover:text-orange-800 shrink-0"
+                          className="text-[#e25a09] hover:text-orange-800 shrink-0"
                           title="Copy"
                         >
                           {takeoverCopied.host ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
@@ -1851,7 +1959,7 @@ const Onboarding: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => copyTakeover(takeoverToken, "value")}
-                          className="text-orange-600 hover:text-orange-800 shrink-0 mt-0.5"
+                          className="text-[#e25a09] hover:text-orange-800 shrink-0 mt-0.5"
                           title="Copy"
                         >
                           {takeoverCopied.value ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
@@ -1906,7 +2014,7 @@ const Onboarding: React.FC = () => {
                         }
                       }}
                       disabled={takeoverVerifying}
-                      className="flex-1 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      className="flex-1 rounded-lg bg-[#f4731e] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#e25a09] disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
                       {takeoverVerifying ? <><Loader2 size={14} className="animate-spin" /> Checking...</> : "I've added it - verify now"}
                     </button>
@@ -2012,7 +2120,7 @@ const Onboarding: React.FC = () => {
                   href={r.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 hover:border-orange-300 hover:bg-orange-50/30 transition"
+                  className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 hover:border-orange-300 hover:bg-[#fef3ea]/30 transition"
                 >
                   <img
                     src={`https://www.google.com/s2/favicons?domain=${r.domain}&sz=64`}
@@ -2102,18 +2210,18 @@ const Onboarding: React.FC = () => {
                       <div
                         key={plan.id}
                         className={`border-2 rounded-xl p-5 flex flex-col h-full ${
-                          plan.recommended ? "border-orange-400 bg-orange-50/40" : "border-gray-200 bg-white"
+                          plan.recommended ? "border-[#f7973f] bg-[#fef3ea]/40" : "border-gray-200 bg-white"
                         }`}
                       >
                         <div className="flex items-start justify-between mb-3">
                           <div>
                             <p className="font-bold text-gray-900 text-base">{plan.label}</p>
-                            <p className="text-2xl font-bold text-orange-500 mt-1">
+                            <p className="text-2xl font-bold text-[#f4731e] mt-1">
                               ${plan.price}<span className="text-sm font-normal text-gray-600">/mo</span>
                             </p>
                           </div>
                           {plan.recommended && (
-                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium">Recommended</span>
+                            <span className="text-xs bg-orange-100 text-[#b9450a] px-2 py-1 rounded-full font-medium">Recommended</span>
                           )}
                         </div>
 
@@ -2132,7 +2240,7 @@ const Onboarding: React.FC = () => {
                           disabled={upgradingToCheckout}
                           className={`w-full py-3 rounded-xl font-semibold text-sm transition disabled:opacity-60 flex items-center justify-center gap-2 ${
                             plan.recommended
-                              ? "bg-orange-500 hover:bg-orange-600 text-white"
+                              ? "bg-[#f4731e] hover:bg-[#e25a09] text-white"
                               : "bg-gray-900 hover:bg-gray-800 text-white"
                           }`}
                         >
@@ -2148,14 +2256,14 @@ const Onboarding: React.FC = () => {
 
                   {/* Brokerage / teams - contact-sales, opens Calendly */}
                   <a
-                    href="https://calendly.com/velasquezjojo7/30min"
+                    href="https://calendly.com/jvrealestate2/15min"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="border border-gray-200 rounded-xl p-4 flex items-center justify-between bg-white hover:border-orange-300 hover:bg-orange-50/30 transition group"
+                    className="border border-gray-200 rounded-xl p-4 flex items-center justify-between bg-white hover:border-orange-300 hover:bg-[#fef3ea]/30 transition group"
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-9 h-9 rounded-lg bg-gray-100 group-hover:bg-orange-100 flex items-center justify-center shrink-0 transition">
-                        <Handshake size={18} className="text-gray-700 group-hover:text-orange-600 transition" />
+                        <Handshake size={18} className="text-gray-700 group-hover:text-[#e25a09] transition" />
                       </div>
                       <div className="min-w-0">
                         <p className="font-semibold text-gray-900 text-sm">Brokerage / Team</p>
@@ -2164,7 +2272,7 @@ const Onboarding: React.FC = () => {
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs font-semibold text-orange-600 group-hover:text-orange-700 shrink-0 ml-3 flex items-center gap-1">
+                    <span className="text-xs font-semibold text-[#e25a09] group-hover:text-[#b9450a] shrink-0 ml-3 flex items-center gap-1">
                       Book Demo <ArrowRight size={13} />
                     </span>
                   </a>
@@ -2284,12 +2392,12 @@ const EmailConnectModal = ({
               className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
             {businessEmailStatus === "otp_verified" && !dnsSetupDone && (
-              <p className="mt-3 text-xs font-medium text-orange-600">
+              <p className="mt-3 text-xs font-medium text-[#e25a09]">
                 Email verified. Opening DNS setup next.
               </p>
             )}
             {businessEmailStatus === "registered" && !dnsSetupDone && (
-              <p className="mt-3 text-xs font-medium text-orange-600">
+              <p className="mt-3 text-xs font-medium text-[#e25a09]">
                 Email verified. Finish DNS verification to complete email setup.
               </p>
             )}
@@ -2319,7 +2427,7 @@ const EmailConnectModal = ({
                 <button
                   onClick={onVerifyOtp}
                   disabled={businessVerifying || !businessOtp.trim()}
-                  className="w-full rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded-lg bg-[#f4731e] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {businessVerifying ? "Verifying..." : "Verify code and show DNS records"}
                 </button>

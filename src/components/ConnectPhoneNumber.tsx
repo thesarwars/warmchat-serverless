@@ -331,7 +331,9 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
   const userJustCompletedRef = useRef(false);
 
   const [activationSaved, setActivationSaved] = useState(false);
-  const [businessTypeConfirmed, setBusinessTypeConfirmed] = useState(false);
+  // The EIN/business-type confirmation UI was removed from the form, so this is
+  // implicitly confirmed (no longer gates the save).
+  const [businessTypeConfirmed, setBusinessTypeConfirmed] = useState(true);
   const [businessTypeFinalized, setBusinessTypeFinalized] = useState(false);
   const [showActivationConfirmModal, setShowActivationConfirmModal] = useState(false);
 
@@ -367,12 +369,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
     if (!isBusinessRegistration) {
       required.push(activation.brokerage_name);
     }
-    if (isBusinessRegistration && !activation.ein) {
-      return false;
-    }
-    if (!isBusinessRegistration && !activation.ssn_last4) {
-      return false;
-    }
     return required.every((value) => String(value || "").trim().length > 0);
   }, [activation, isBusinessRegistration]);
 
@@ -401,14 +397,18 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
   const statusDetails = (statusSnapshot?.status || {}) as NonNullable<StatusSnapshot["status"]>;
   const selectedStatusReason = statusDetails.campaign_reason || statusDetails.brand_reason || telnyxIds.telnyx_error_reason || "";
 
-  const step1Complete = activationReady && activationSaved;
-  const step2Complete = Boolean(telnyxIds.telnyx_phone_number);
+  // Reordered flow: Step 1 = Choose Number, Step 2 = Business Verification.
+  const step1Complete = Boolean(telnyxIds.telnyx_phone_number);
+  const step2Complete = activationReady && activationSaved;
   const step3Accessible = step2Complete;
+  // The EIN / business-type lock applies only once the agent's OWN 10DLC brand or
+  // campaign has been submitted (that registration uses the EIN). It must NOT key
+  // off the phone number / messaging profile - those come from the now-first
+  // "Choose Number" step (shared master campaign) and don't involve the EIN, so
+  // locking on them would freeze the EIN choice before Step 2 is even reached.
   const hasActiveComplianceSubmission = Boolean(
-    telnyxIds.telnyx_messaging_profile_id ||
     telnyxIds.telnyx_brand_id ||
-    telnyxIds.telnyx_campaign_id ||
-    telnyxIds.telnyx_phone_number
+    telnyxIds.telnyx_campaign_id
   );
   const businessTypeLocked = loading || businessTypeFinalized || hasActiveComplianceSubmission;
   const allComplete =
@@ -443,7 +443,9 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
 
   const updateActivation = (patch: Partial<typeof activation>) => {
     if (patch.business_type && patch.business_type !== activation.business_type) {
-      setBusinessTypeConfirmed(false);
+      // EIN / business-type confirmation UI was removed - stay implicitly
+      // confirmed so the save buttons never lock up.
+      setBusinessTypeConfirmed(true);
       setShowActivationConfirmModal(false);
     }
     setActivation((prev) => ({ ...prev, ...patch }));
@@ -451,12 +453,14 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
   };
 
   useEffect(() => {
+    // The EIN / business-type confirmation UI was removed from the form, so the
+    // save is no longer gated on it - keep it implicitly confirmed in both the
+    // locked and unlocked states (otherwise Save Activation / Continue stay
+    // permanently disabled with no UI left to re-confirm).
+    setBusinessTypeConfirmed(true);
     if (businessTypeLocked) {
-      setBusinessTypeConfirmed(true);
       setShowActivationConfirmModal(false);
-      return;
     }
-    setBusinessTypeConfirmed(false);
   }, [businessTypeLocked]);
 
   useEffect(() => {
@@ -603,13 +607,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
       !activationPhoneInput && "Business phone",
     ].filter(Boolean) as string[];
 
-    if (isBusinessRegistration && !activation.ein) {
-      requiredMissing.push("EIN");
-    }
-    if (!isBusinessRegistration && !activation.ssn_last4) {
-      requiredMissing.push("SSN last 4");
-    }
-
     if (requiredMissing.length) {
       toast.error(`Missing required fields: ${requiredMissing.join(", ")}`);
       return false;
@@ -639,12 +636,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
     if (!stateIsValid) invalidFields.push("State (2-letter)");
     if (!localPostalValid) invalidFields.push("Postal Code (5 digits)");
     if (!localPhoneValid) invalidFields.push("Business Phone (+1XXXXXXXXXX)");
-    if (!isBusinessRegistration && !ssnLast4IsValid) {
-      invalidFields.push("SSN last 4 (4 digits)");
-    }
-    if (isBusinessRegistration && !einIsValid) {
-      invalidFields.push("EIN (9 digits)");
-    }
     if (invalidFields.length) {
       toast.error(`Invalid fields: ${invalidFields.join(", ")}`);
       return false;
@@ -999,8 +990,8 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
         ? "Use the button above to switch on texting and start sending and receiving messages - it only takes a moment."
         : "Your number has been submitted for carrier review. Most approvals happen within 1-3 business days.";
   const progressSteps = [
-    { step: 1, label: "Business Verification", icon: Building2 },
-    { step: 2, label: "Choose Number", icon: Phone },
+    { step: 1, label: "Choose Number", icon: Phone },
+    { step: 2, label: "Business Verification", icon: Building2 },
     { step: 3, label: "Complete", icon: BadgeCheck },
   ] as const;
   const completionEyebrow = statusLabel === "rejected"
@@ -1067,7 +1058,7 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Final Confirmation</p>
                     <h3 className="mt-2 text-xl font-bold text-gray-900">You only get one active 10DLC application.</h3>
                     <p className="mt-3 text-sm text-gray-600">
-                      After you save Step 1, your selected business type is locked for this application. You will only be able to change it again if the application is rejected and reset.
+                      After you save Step 2, your selected business type is locked for this application. You will only be able to change it again if the application is rejected and reset.
                     </p>
                   </div>
                 </div>
@@ -1112,10 +1103,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
             WarmChats is the platform, but sender compliance is per agent. Complete SMS Activation to provision your
             business texting number.
           </p>
-          <div className="mb-8 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
-            Carrier verification usually takes 1-3 business days. While that's processing, you can fully set up your system so
-            you're ready to go live instantly.
-          </div>
           <div className="mb-6 rounded-2xl border border-gray-200 bg-[#fcfbf8] p-3 shadow-xs">
             <div className="grid gap-2 md:grid-cols-3">
               {progressSteps.map((item) => {
@@ -1162,12 +1149,12 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
           </div>
 
           <div className="grid gap-6">
-            {effectiveStep === 1 && (
+            {effectiveStep === 2 && (
               <section className="border rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-800">Step 1 * Personal Information</h2>
-                    <p className="text-xs text-gray-500">Enter your personal details, confirm your business type, then save Step 1 to generate your website, privacy page, and terms page.</p>
+                    <h2 className="text-lg font-semibold text-gray-800">Step 2 * Personal Information</h2>
+                    <p className="text-xs text-gray-500">Enter your personal details, confirm your business type, then save Step 2 to generate your website, privacy page, and terms page.</p>
                   </div>
                   <span
                     className={`text-xs px-3 py-1 rounded-full border ${activationReady
@@ -1178,67 +1165,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                     {activationReady ? "Ready to Save" : "Required"}
                   </span>
                 </div>
-
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700">Do you have an EIN?</label>
-                  <div className={`mt-3 inline-flex rounded-xl border border-gray-200 p-1 ${businessTypeLocked ? "bg-gray-50" : "bg-white"}`}>
-                    <button
-                      type="button"
-                      disabled={businessTypeLocked}
-                      onClick={() => updateActivation({
-                        business_type: "registered_business",
-                        ssn_last4: "",
-                        brokerage_name: "",
-                        sole_prop_verification_status: "",
-                        sole_prop_verification_id: "",
-                      })}
-                      className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${isBusinessRegistration
-                          ? "bg-orange-500 text-white"
-                          : businessTypeLocked
-                            ? "cursor-not-allowed text-gray-400"
-                            : "text-gray-600 hover:bg-gray-100"
-                        }`}
-                    >
-                      Yes EIN
-                    </button>
-                    <button
-                      type="button"
-                      disabled={businessTypeLocked}
-                      onClick={() => updateActivation({ business_type: "sole_proprietor", ein: "" })}
-                      className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${!isBusinessRegistration
-                          ? "bg-orange-500 text-white"
-                          : businessTypeLocked
-                            ? "cursor-not-allowed text-gray-400"
-                            : "text-gray-600 hover:bg-gray-100"
-                        }`}
-                    >
-                      No EIN
-                    </button>
-                  </div>
-                  {businessTypeLocked && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Your EIN / Sole Proprietor selection is locked after saving activation. If the campaign is rejected, you can change it before resubmitting.
-                    </p>
-                  )}
-                </div>
-
-                {!businessTypeLocked && (
-                  <div className="mb-6 rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                    <p className="text-sm font-semibold text-orange-900">This information cannot be changed after submission.</p>
-                    <p className="mt-1 text-xs text-orange-700">
-                      Make sure your EIN / business type is correct before continuing.
-                    </p>
-                    <label className="mt-4 flex items-start gap-3 text-sm text-orange-900">
-                      <input
-                        type="checkbox"
-                        checked={businessTypeConfirmed}
-                        onChange={(e) => setBusinessTypeConfirmed(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-orange-300 text-orange-500 focus:ring-orange-500"
-                      />
-                      <span>I confirm my business type (EIN or Sole Proprietor) is correct and cannot be changed.</span>
-                    </label>
-                  </div>
-                )}
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
@@ -1270,15 +1196,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                       onChange={(e) => updateActivation({ address_line1: e.target.value })}
                       className="mt-1 w-full border rounded-xl p-3"
                       placeholder="123 Market St"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Address Line 2</label>
-                    <input
-                      value={activation.address_line2}
-                      onChange={(e) => updateActivation({ address_line2: e.target.value })}
-                      className="mt-1 w-full border rounded-xl p-3"
-                      placeholder="Suite 200"
                     />
                   </div>
                   <div>
@@ -1340,34 +1257,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                     )}
                   </div>
 
-                  {isBusinessRegistration ? (
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">EIN</label>
-                      <input
-                        value={activation.ein}
-                        onChange={(e) => updateActivation({ ein: e.target.value })}
-                        className="mt-1 w-full border rounded-xl p-3"
-                        placeholder="12-3456789"
-                      />
-                      {!einIsValid && activation.ein && (
-                        <p className="mt-1 text-xs text-red-600">Use 9 digits (no letters).</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">SSN Last 4</label>
-                      <input
-                        value={activation.ssn_last4}
-                        onChange={(e) => updateActivation({ ssn_last4: e.target.value })}
-                        className="mt-1 w-full border rounded-xl p-3"
-                        placeholder="1234"
-                        maxLength={4}
-                      />
-                      {!ssnLast4IsValid && activation.ssn_last4 && (
-                        <p className="mt-1 text-xs text-red-600">Use 4 digits.</p>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 <div className="mt-6">
@@ -1384,85 +1273,30 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                   ) : !businessTypeLocked && !businessTypeConfirmed ? (
                     <p className="mt-2 text-xs text-gray-500">Confirm your EIN / business type before saving activation.</p>
                   ) : businessTypeLocked && activationSaved ? (
-                    <p className="mt-2 text-xs text-gray-500">Step 1 is activated and your business type is locked. Continue to choose your number.</p>
+                    <p className="mt-2 text-xs text-gray-500">Step 2 is activated and your business type is locked. Continue to finish setup.</p>
                   ) : null}
-                </div>
-
-                <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
-                  <p className="text-sm font-semibold text-gray-900">Generated links</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {activationSaved
-                      ? "Your personalized website, privacy page, and terms of service have been generated below."
-                      : "Enter your personal information above and click Save Activation to generate your personalized website, privacy, and terms links."}
-                  </p>
-                  {activationSaved && (
-                    <div className="mt-4 space-y-3 text-sm">
-                      <div>
-                        <p className="font-medium text-gray-700">Website</p>
-                        {clickableWebsiteUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenGeneratedLink(clickableWebsiteUrl)}
-                            className="text-left text-orange-600 hover:underline break-all"
-                          >
-                            {clickableWebsiteUrl}
-                          </button>
-                        ) : (
-                          <p className="text-gray-400">Website link is being generated...</p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-700">Privacy Policy</p>
-                        {clickablePrivacyUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenGeneratedLink(clickablePrivacyUrl)}
-                            className="text-left text-orange-600 hover:underline break-all"
-                          >
-                            {clickablePrivacyUrl}
-                          </button>
-                        ) : (
-                          <p className="text-gray-400">Privacy page link is being generated...</p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-700">Terms of Service</p>
-                        {clickableTermsUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenGeneratedLink(clickableTermsUrl)}
-                            className="text-left text-orange-600 hover:underline break-all"
-                          >
-                            {clickableTermsUrl}
-                          </button>
-                        ) : (
-                          <p className="text-gray-400">Terms page link is being generated...</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="mt-4">
                   <button
                     type="button"
-                    onClick={() => goToStep(2)}
+                    onClick={() => goToStep(3)}
                     disabled={!activationSaved || loading}
                     className={`px-6 py-3 rounded-xl font-semibold text-white transition ${!activationSaved || loading ? "bg-gray-300 cursor-not-allowed" : "bg-gray-900 hover:bg-gray-800"
                       }`}
                   >
-                    Choose a Number →
+                    Continue →
                   </button>
                 </div>
               </section>
             )}
 
-            {effectiveStep === 2 && (
+            {effectiveStep === 1 && (
               <section className="rounded-4xl border border-[#e8e2d8] bg-white p-6 shadow-[0_28px_65px_rgba(15,23,42,0.06)]">
                 <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Step 2 of 2 - You're Almost Live</p>
-                    <h2 className="mt-2 text-2xl font-bold text-gray-900">Step 2: Choose a Business Texting Number</h2>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Step 1 of 2 - Pick Your Number</p>
+                    <h2 className="mt-2 text-2xl font-bold text-gray-900">Step 1: Choose a Business Texting Number</h2>
                     <p className="mt-2 max-w-2xl text-sm text-gray-500">
                       Search for a local phone number for your business to text from.
                     </p>
@@ -1473,12 +1307,6 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                     </span>
                   )}
                 </div>
-
-                {!telnyxIds.telnyx_phone_number && (
-                  <button type="button" onClick={() => goToStep(1)} className="mb-4 block text-xs font-semibold text-orange-600 hover:text-orange-700">
-                    ← Back to Step 1
-                  </button>
-                )}
 
                 {telnyxIds.telnyx_phone_number ? (
                   <div className="space-y-5">
@@ -1535,7 +1363,7 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                         telnyx_sms_status: assigned ? "approved" : "pending",
                         telnyx_error_reason: assigned ? "" : (result?.assignError || ""),
                       }));
-                      setManualStep(3);
+                      setManualStep(2);
                       if (assigned) {
                         toast.success(`${formatDisplayPhone(phone)} is ready - texting is switched on.`);
                       } else {
@@ -1673,7 +1501,7 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
                             <div className="absolute right-2 bottom-12 rounded-2xl border border-white/90 bg-white/95 px-5 py-3 shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
                               <div className="flex items-center gap-2 text-[15px] font-semibold text-gray-700">
                                 <CheckCircle size={17} className="text-green-600" />
-                                1-3 day approvals
+                                SMS Activated
                               </div>
                             </div>
 

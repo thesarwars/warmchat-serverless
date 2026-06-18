@@ -125,6 +125,9 @@ interface PricingPlanData {
   period?: string;
   subtitle?: string;
   href?: string;
+  // When true the CTA opens in a new tab (e.g. the Calendly demo link). Internal
+  // signup links navigate in the same tab so the post-signup flow stays intact.
+  external?: boolean;
   buttonText: string;
   buttonStyle: "outline-solid" | "gradient";
   features: PlanFeature[];
@@ -141,6 +144,8 @@ const plans: PricingPlanData[] = [
     description: "Best for agents testing AI follow-up",
     price: "$0",
     period: "/month",
+    // Free -> straight to signup -> onboarding (email-only; upgrade later).
+    href: "/signup",
     buttonText: "Start Free",
     buttonStyle: "outline-solid",
     features: [
@@ -166,6 +171,8 @@ const plans: PricingPlanData[] = [
     price: "$89",
     period: "/month",
     description: "Best for new Agents",
+    // Paid -> signup -> Stripe checkout -> onboarding (SMS + email).
+    href: "/signup?plan=starter",
     buttonText: "Start Now",
     buttonStyle: "gradient",
     features: [
@@ -191,6 +198,8 @@ const plans: PricingPlanData[] = [
     price: "$149",
     period: "/month",
     description: "Best for Active Agents",
+    // Paid -> signup -> Stripe checkout -> onboarding (SMS + email).
+    href: "/signup?plan=growth",
     buttonText: "Start Now",
     buttonStyle: "gradient",
     highlighted: true,
@@ -215,7 +224,8 @@ const plans: PricingPlanData[] = [
   {
     icon: <LayerGroupIcon />,
     name: "Custom Brokerage",
-    href: "https://calendly.com/velasquezjojo7/30min",
+    href: "https://calendly.com/jvrealestate2/15min",
+    external: true,
     description:
       "For teams and brokerages looking to scale lead conversion with AI.",
     price: "Custom",
@@ -399,7 +409,8 @@ const PricingPlan = () => {
                   {plan.buttonStyle === "outline-solid" ? (
                     <a
                       href={plan.href || "#"}
-                      target="_blank"
+                      target={plan.external ? "_blank" : undefined}
+                      rel={plan.external ? "noopener noreferrer" : undefined}
                       className="btn-outline-hover relative flex items-center justify-center h-11 rounded-full border border-[#F97316] text-base font-semibold leading-6"
                     >
                       <span className="btn-label">{plan.buttonText}</span>
@@ -408,7 +419,8 @@ const PricingPlan = () => {
                   ) : (
                     <a
                       href={plan.href || "#"}
-                      target="_blank"
+                      target={plan.external ? "_blank" : undefined}
+                      rel={plan.external ? "noopener noreferrer" : undefined}
                       className="btn-gradient-hover flex items-center justify-center h-11 rounded-full text-base font-semibold leading-6 text-white"
                       style={{
                         backgroundImage:
@@ -507,8 +519,9 @@ const PricingPlan = () => {
       </div>
       <div className="flex items-center justify-center">
         <a
-          href="https://calendly.com/velasquezjojo7/30min"
+          href="https://calendly.com/jvrealestate2/15min"
           target="_blank"
+          rel="noopener noreferrer"
           className="btn-gradient-hover px-7 mt-4 flex items-center justify-center h-11 rounded-full text-base font-semibold leading-6 text-white"
           style={{
             backgroundImage:

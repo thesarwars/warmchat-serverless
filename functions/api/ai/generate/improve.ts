@@ -5,7 +5,7 @@ import { requireUser } from "../../../_shared/auth.ts";
 import { generateWithOpenAI } from "../../../_shared/openai.ts";
 import { sanitizePlaceholders } from "../../../_shared/placeholders.ts";
 import { queryFirst } from "../../../_shared/db.ts";
-import { checkUsageLimit, getOrgPlan } from "../../../_shared/usageCounter.ts";
+import { checkUsageLimit, getOrgPlan, incrementUsage } from "../../../_shared/usageCounter.ts";
 import { notifyQuotaExceeded } from "../../../_shared/quotaNotify.ts";
 
 type Mode = "rewrite_full" | "rewrite_selection";
@@ -19,7 +19,33 @@ interface ImproveBody {
   lead_data?: unknown[];
   mode?: Mode;
   selection?: string;
+  // When true (Inbox email AI Assist), generate BOTH an email subject and body
+  // and return them separately so the composer can fill the subject field.
+  want_subject?: boolean;
+  // Recent thread messages (oldest -> newest) so the rewrite/draft fits the
+  // actual conversation instead of guessing in a vacuum.
+  history?: { direction?: string; text?: string }[];
 }
+
+const HISTORY_MAX = 10; // most recent messages to feed the model
+const HISTORY_MSG_CHARS = 500; // truncate each message so a long thread can't blow the prompt
+
+function buildHistoryBlock(history: { direction?: string; text?: string }[]): string {
+  const lines = history
+    .filter((m) => (m?.text || "").trim())
+    .slice(-HISTORY_MAX)
+    .map((m) => {
+      const who = m.direction === "outbound" ? "Agent" : "Lead";
+      const text = (m.text || "").trim().slice(0, HISTORY_MSG_CHARS).replace(/\s+/g, " ");
+      return `${who}: ${text}`;
+    });
+  if (!lines.length) return "";
+  return `Recent conversation (oldest first; "Lead" = the recipient, "Agent" = you - continue this naturally, don't repeat yourself):\n${lines.join("\n")}\n\n`;
+}
+
+// AI Assist credit cost per channel (charged against the org's monthly AI quota
+// in usageCounter). SMS = 1, email = 2.
+const creditCost = (channel: string): number => (channel === "email" ? 2 : 1);
 
 const SMS_MAX_CHARS = 320; // 2 segments, see functions/_shared/smsSegments.ts
 
@@ -60,6 +86,16 @@ VOICE & SUBSTANCE:
 - No markdown asterisks, bold, headers, or bullet lists.
 - Stay on real estate outreach.`;
 
+// Output override appended to the system prompt when the caller wants a subject
+// (email AI Assist). Turns the "body only" contract into a JSON {subject, body}.
+const EMAIL_SUBJECT_OVERRIDE = `
+
+OUTPUT OVERRIDE - EMAIL WITH SUBJECT (this supersedes the "Return ONLY the rewritten message body" rule above):
+- Return ONLY a JSON object, nothing else: {"subject": "<email subject>", "body": "<email body>"}.
+- subject: a concise, compelling subject line - max 70 characters, no "Re:"/"Fwd:", no surrounding quotes. Weave in a concrete lead value (first name, area) when available; otherwise a placeholder token is fine.
+- body: the full email body, following every greeting and "Best, <agent name>" sign-off rule above.
+- No markdown, no code fences, no commentary outside the JSON object.`;
+
 function buildUserPrompt(opts: {
   message: string;
   source: string;
@@ -69,10 +105,19 @@ function buildUserPrompt(opts: {
   leadData: unknown[];
   mode: Mode;
   agentName: string;
+  wantSubject: boolean;
+  history: { direction?: string; text?: string }[];
 }) {
-  const { message, source, tone, persona, channel, leadData, mode, agentName } = opts;
+  const { message, source, tone, persona, channel, leadData, mode, agentName, wantSubject, history } = opts;
   const leadJson = JSON.stringify(leadData ?? [], null, 2);
+  const historyBlock = buildHistoryBlock(history);
   const fullContext = mode === "rewrite_selection" ? `Full message context (do NOT rewrite this, only the selection below):\n${message}\n\n` : "";
+  const draftLabel = source.trim()
+    ? `Draft to rewrite (preserve any {firstname}-style tokens exactly):\n${source}`
+    : `There is no existing draft - write a fresh ${channel} message from scratch using the persona, tone, and lead data above.`;
+  const closing = wantSubject
+    ? `Return ONLY the JSON object {"subject": ..., "body": ...}. No preamble, no labels, no alternates.`
+    : `Return ONLY the rewritten message body. No preamble, no labels, no alternates.`;
   return `Persona: ${persona}
 Tone: ${tone}
 Channel: ${channel}
@@ -81,10 +126,9 @@ Agent name: ${agentName || "(unknown - use {agent_name})"}
 Lead Data (weave concrete values in; placeholder only when the field is missing):
 ${leadJson}
 
-${fullContext}Draft to rewrite (preserve any {firstname}-style tokens exactly):
-${source}
+${historyBlock}${fullContext}${draftLabel}
 
-Return ONLY the rewritten message body. No preamble, no labels, no alternates.`;
+${closing}`;
 }
 
 function cleanRewrite(text: string): string {
@@ -125,7 +169,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const body = await readJson<ImproveBody>(request);
   const message = (body?.message || body?.text || "").trim();
-  if (!message) return error("message is required", 400);
 
   const selection = (body?.selection || "").trim();
   const mode: Mode = body?.mode === "rewrite_selection" || (!body?.mode && selection)
@@ -134,12 +177,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (mode === "rewrite_selection" && !selection) {
     return error("selection is required for mode=rewrite_selection", 400);
   }
+  // A draft is only required when rewriting/refining one. With no draft we draft
+  // from scratch (used by the "Follow-up suggestion" / "Appointment push" presets).
+  if (mode === "rewrite_selection" && !message) {
+    return error("message is required", 400);
+  }
 
   const tone = body?.tone || "Friendly";
   const persona = body?.persona || "Real Estate Agent";
   const channel = (body?.channel || "email").toLowerCase();
+  const wantSubject = body?.want_subject === true && channel === "email";
   const leadData = Array.isArray(body?.lead_data) ? body!.lead_data! : [];
+  const history = Array.isArray(body?.history) ? body!.history! : [];
   const source = mode === "rewrite_selection" ? selection : message;
+  const cost = creditCost(channel);
 
   const agentRow = await queryFirst<{ name: string | null }>(
     env.D1DB, `SELECT name FROM "user" WHERE id = ?`, user.id,
@@ -149,36 +200,62 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const membership = await queryFirst<{ org_id: number }>(
     env.D1DB, `SELECT org_id FROM membership WHERE user_id = ? LIMIT 1`, user.id,
   );
+  // Pre-flight credit check: need `cost` credits (1 SMS / 2 email) available.
   if (membership) {
     const plan = await getOrgPlan(env, membership.org_id);
-    if (!(await checkUsageLimit(env, membership.org_id, plan, "ai", 1))) {
+    if (!(await checkUsageLimit(env, membership.org_id, plan, "ai", cost))) {
       await notifyQuotaExceeded(env, membership.org_id, "ai");
-      return error("Monthly AI limit reached for your plan", 403);
+      return error("Not enough AI credits left for your plan this month", 403);
     }
   }
 
+  // Materialize agent + lead name tokens so the agent sees clean copy.
+  const lead0 = (leadData[0] ?? null) as Record<string, unknown> | null;
+  const leadFirst = String(lead0?.first_name || String(lead0?.name || "").split(/\s+/)[0] || "").trim();
+  const materialize = (text: string): string => {
+    let t = sanitizePlaceholders(cleanRewrite(text || ""));
+    if (agentName) t = t.replace(/\{\{?\s*(agent_?name|agent_?first_?name|agent_?full_?name|sender_?name|sender_?full_?name)\s*\}?\}/gi, agentName);
+    if (leadFirst) t = t.replace(/\{\{?\s*(first_?name)\s*\}?\}/gi, leadFirst);
+    return t;
+  };
+
   try {
-    const out = await generateWithOpenAI(env, SYSTEM_PROMPT, buildUserPrompt({
-      message, source, tone, persona, channel, leadData, mode, agentName,
-    }), { orgId: membership?.org_id ?? null });
-    let rewritten = sanitizePlaceholders(cleanRewrite(out.text || ""));
-    // Materialize name tokens so the agent sees clean copy, never {AgentName}.
-    if (agentName) {
-      rewritten = rewritten.replace(/\{\{?\s*(agent_?name|agent_?first_?name|agent_?full_?name|sender_?name|sender_?full_?name)\s*\}?\}/gi, agentName);
-    }
-    const lead0 = (leadData[0] ?? null) as Record<string, unknown> | null;
-    const leadFirst = String(lead0?.first_name || String(lead0?.name || "").split(/\s+/)[0] || "").trim();
-    if (leadFirst) {
-      rewritten = rewritten.replace(/\{\{?\s*(first_?name)\s*\}?\}/gi, leadFirst);
+    const systemPrompt = wantSubject ? SYSTEM_PROMPT + EMAIL_SUBJECT_OVERRIDE : SYSTEM_PROMPT;
+    const userPrompt = buildUserPrompt({ message, source, tone, persona, channel, leadData, mode, agentName, wantSubject, history });
+    const out = await generateWithOpenAI(env, systemPrompt, userPrompt, {
+      orgId: membership?.org_id ?? null,
+      expectJson: wantSubject,
+    });
+
+    let subject = "";
+    let rewritten: string;
+    if (wantSubject) {
+      // Expecting {"subject","body"} - fall back to treating the whole text as
+      // the body if the model didn't return valid JSON.
+      let parsed: { subject?: unknown; body?: unknown } = {};
+      try { parsed = JSON.parse(out.text || "{}"); } catch { parsed = {}; }
+      subject = materialize(String(parsed.subject || "")).replace(/\s+/g, " ").trim().slice(0, 150);
+      rewritten = materialize(String(parsed.body || (parsed.subject ? "" : out.text) || ""));
+    } else {
+      rewritten = materialize(out.text || "");
     }
     if (channel === "sms") rewritten = trimToLimit(rewritten, SMS_MAX_CHARS);
+
+    // generateWithOpenAI already metered 1 credit; charge the remainder so the
+    // total matches `cost`. Only after a successful generation. Non-fatal.
+    if (membership && cost > 1) {
+      try { await incrementUsage(env, membership.org_id, "ai", cost - 1); } catch { /* non-fatal */ }
+    }
+
     return json({
       improved_message: rewritten,
       message: rewritten,
       text: rewritten,
+      subject,
       suggestions: [],
       intent: "Unknown",
       mode,
+      cost,
       chars: rewritten.length,
     });
   } catch (e) { return error((e as Error).message, 502); }

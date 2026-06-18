@@ -23,10 +23,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     email_connected: number; sms_connected: number;
     selected_preset: number | null; flow_activated: number;
     payment_cleared: number; created_at: string | null; updated_at: string | null;
+    brokerage: string | null; market: string | null; biz_role: string | null;
+    goal_appts: number | null; goal_deals: number | null;
   }>(
     env.D1DB,
     `SELECT step, goal, email_connected, sms_connected, selected_preset,
-            flow_activated, payment_cleared, created_at, updated_at
+            flow_activated, payment_cleared, created_at, updated_at,
+            brokerage, market, biz_role, goal_appts, goal_deals
        FROM onboarding_progress WHERE user_id = ?`,
     userId,
   );
@@ -53,6 +56,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     flow_activated: Boolean(row.flow_activated),
     payment_cleared: Boolean(row.payment_cleared),
     is_invited: Boolean(inv?.is_invited),
+    brokerage: row.brokerage,
+    market: row.market,
+    role: row.biz_role,
+    goal_appts: row.goal_appts,
+    goal_deals: row.goal_deals,
     created_at: row.created_at,
     updated_at: row.updated_at,
   });

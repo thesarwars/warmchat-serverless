@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "./MainLayout";
 import MissingBusinessAddressBanner from "./MissingBusinessAddressBanner";
+import SmsSetupBanner from "./SmsSetupBanner";
 import MonthlyKPIStrip from "./V2/Dashboard/MonthlyKPIStrip";
 import WaitingBanner from "./V2/Dashboard/WaitingBanner";
 import NeedsReply from "./V2/Dashboard/NeedsReply";
@@ -357,6 +358,7 @@ const DashboardV2: React.FC = () => {
     <MainLayout onUpgradeClick={() => setBillingOpen(true)} title="Dashboard">
       <div className="w-full space-y-4 overflow-x-hidden bg-white px-3 pt-0 pb-10 font-['Plus_Jakarta_Sans',system-ui,sans-serif] sm:pt-2 md:pt-4">
         <MissingBusinessAddressBanner />
+        <SmsSetupBanner />
 
         {/* Greeting header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

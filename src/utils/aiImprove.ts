@@ -11,13 +11,19 @@ export interface AiImprovePayload {
   tone?: string;
   persona?: string;
   lead_data?: unknown[];
+  // Email AI Assist: ask the backend to also generate a subject line.
+  want_subject?: boolean;
+  // Recent thread messages (oldest -> newest) for conversation-aware drafting.
+  history?: { direction: "inbound" | "outbound"; text: string }[];
 }
 
 export interface AiImproveResult {
   improved_message: string;
+  subject: string;
   suggestions: string[];
   intent?: string;
   mode: AiImproveMode;
+  cost: number;
   chars: number;
 }
 
@@ -43,9 +49,11 @@ export const callAiImprove = async (
     error?: string;
     message?: string;
     improved_message?: string;
+    subject?: string;
     suggestions?: unknown;
     intent?: string;
     mode?: AiImproveMode;
+    cost?: number;
     chars?: number;
   };
 
@@ -68,9 +76,27 @@ export const callAiImprove = async (
 
   return {
     improved_message: improved,
+    subject: String(data?.subject || "").trim(),
     suggestions,
     intent: data?.intent,
     mode: (data?.mode as AiImproveMode) || payload.mode,
+    cost: Number(data?.cost ?? 1),
     chars: Number(data?.chars ?? improved.length),
   };
+};
+
+export interface AiCredits {
+  used: number;
+  limit: number | "unlimited";
+  remaining: number | null; // null = unlimited
+  cost: { sms: number; email: number };
+}
+
+export const fetchAiCredits = async (token: string): Promise<AiCredits> => {
+  const res = await fetch(`${API_BASE}/ai/credits`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string })?.error || "Failed to load AI credits");
+  return data as AiCredits;
 };
