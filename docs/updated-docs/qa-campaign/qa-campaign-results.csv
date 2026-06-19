@@ -1,0 +1,8 @@
+test_id,scenario,enrolled,unique_reached,duplicates,dupe_pct,result,notes
+C1,Create campaign flow (wizard),n/a,n/a,n/a,n/a,PASS,Add workflow -> Start from scratch -> Step 1 of 3 Name & Channel + Who to enroll (screenshot 02/03)
+C2,100-lead SMS campaign (mock),100,100,0,0.0%,PASS,Fully drained in one pass; rate peak ~7/s vs 49/s cap
+C3,1000-lead SMS campaign - during 90s clip (mock),1000,749,0,0.0%,PASS,Normal-cadence batched drain; no duplicates
+C4,1000-lead SMS campaign - after sustained free-plan recovery pump,1000,940,44,4.5%,CONDITIONAL,Crash-recovery dupes from free-plan CPU kills mid-dispatch + 180s reclaim; eliminated on Workers Paid
+C5,Concurrency duplicate protection (atomic claim),1100,1040,0,0.0%,PASS,No two-drainer dupes at any scale; atomic claim holds
+C6,Test/mock mode (no real sends),1100,n/a,n/a,n/a,PASS,All sends logged to mock_send_log; 0 Telnyx/Elastic charges
+C7,Per-second rate limiting,n/a,n/a,n/a,n/a,PASS,Peak 7/s vs 49/s Telnyx cap (~14%); limiter never exceeded provider ceiling

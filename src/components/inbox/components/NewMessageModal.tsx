@@ -275,6 +275,9 @@ export default function NewMessageModal({
             : "Create a personalized outreach email message for this lead.",
       });
       setBody(result.text);
+      // Email AI Assist generates the subject too (charged as 2 AI credits) -
+      // auto-fill it alongside the body.
+      if (channel === "email" && result.subject) setSubject(result.subject);
     } catch (error) {
       toast.error((error as Error)?.message || "Failed to generate AI message.");
     } finally {

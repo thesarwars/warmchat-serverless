@@ -118,7 +118,7 @@ const Banner = () => {
               Start Free
             </a>
             <a
-              href="https://calendly.com/jvrealestate2/15min"
+              href="https://calendly.com/velasquezjojo7/30min"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center h-12 lg:h-13 w-full lg:w-auto px-10.5 rounded-full bg-white text-sm lg:text-xl font-semibold leading-5 lg:leading-7.5 text-[#171717] whitespace-nowrap transition-all duration-300 hover:shadow-md hover:-translate-y-0.5"

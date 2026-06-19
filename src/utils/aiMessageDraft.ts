@@ -1,6 +1,8 @@
 type AiDraftResult = {
   text: string;
   suggestions: string[];
+  // Email AI Assist: the generated subject line (when want_subject was requested).
+  subject: string;
 };
 
 type LeadDataEntry = Record<string, unknown>;
@@ -20,6 +22,7 @@ type AiResponseShape = {
   improved_message?: unknown;
   message?: unknown;
   text?: unknown;
+  subject?: unknown;
   suggestions?: unknown;
   error?: string;
   response?: {
@@ -107,6 +110,7 @@ const requestAi = async (url: string, token: string, payload: Record<string, unk
   return {
     text,
     suggestions: extractSuggestions(data),
+    subject: asText(data?.subject),
   } satisfies AiDraftResult;
 };
 
@@ -120,14 +124,19 @@ export const generateAiLeadMessageDraft = async ({
   tone = DEFAULT_TONE,
   persona = DEFAULT_PERSONA,
 }: GenerateDraftOptions): Promise<AiDraftResult> => {
-  if (currentMessage?.trim()) {
+  // Email always routes through /ai/generate/improve so the AI also generates a
+  // subject line (want_subject) and the org is charged the email rate (2 AI
+  // credits). The improve endpoint drafts from scratch when the message is empty
+  // ("Generate with AI") or rewrites an existing draft ("Improve with AI").
+  if (channel === "email" || currentMessage?.trim()) {
     return requestAi(`${apiBase}/ai/generate/improve`, token, {
-      text: currentMessage,
-      message: currentMessage,
+      text: currentMessage || "",
+      message: currentMessage || "",
       tone,
       persona,
       channel,
       lead_data: leadData,
+      want_subject: channel === "email",
     });
   }
 

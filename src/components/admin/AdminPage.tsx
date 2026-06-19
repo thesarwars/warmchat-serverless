@@ -181,43 +181,72 @@ function UsersTab() {
 }
 
 function IntegrationsTab() {
-  const [conn, setConn] = useState<Record<string, boolean>>(() => {
-    const m: Record<string, boolean> = {};
-    INTEGRATIONS.forEach((g) => g.items.forEach((it) => { m[it.name] = it.on; }));
-    return m;
-  });
-  const toggle = (name: string) => setConn((c) => ({ ...c, [name]: !c[name] }));
+  // Integrations are deferred ("Coming Soon"): the cards below are a non-
+  // interactive PREVIEW of what will be connectable. No live connect/disconnect.
   return (
     <div>
-      <div className="wc-rep-stats" style={{ marginBottom: 18 }}>
-        <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#16A34A", background: "#E8F8ED" }}><Icon name="checkCircle" size={17} /></span><div className="wc-stat-label">Connected</div><div className="wc-stat-val wc-mono">7</div></div>
-        <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#EA580C", background: "var(--accent-soft)" }}><Icon name="zap" size={17} /></span><div className="wc-stat-label">Needs Setup</div><div className="wc-stat-val wc-mono">2</div></div>
-        <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#DC2626", background: "#FEE2E2" }}><Icon name="x" size={17} /></span><div className="wc-stat-label">Sync Errors</div><div className="wc-stat-val wc-mono">0</div></div>
-      </div>
-      {INTEGRATIONS.map((g) => (
-        <div className="wc-intgroup" key={g.cat}>
-          <div className="wc-intgroup-h">{g.cat}</div>
-          <div className="wc-intgrid">
-            {g.items.map((it) => {
-              const on = conn[it.name];
-              return (
-                <div className={"wc-intcard" + (on ? " is-on" : "")} key={it.name}>
-                  <div className="wc-intcard-top">
-                    <span className="wc-intcard-logo" style={it.logo ? { background: "#fff", boxShadow: "inset 0 0 0 1px var(--line)" } : { background: it.color }}>
-                      {it.logo ? <span className="wc-intlogo-svg" dangerouslySetInnerHTML={{ __html: it.logo }} /> : it.letter}
-                    </span>
-                    <div className="wc-intcard-id"><div className="wc-intcard-name">{it.name}</div><div className="wc-band-d">{it.desc}</div></div>
-                  </div>
-                  <div className="wc-intcard-foot">
-                    {on ? <span className="wc-intcard-status"><Icon name="checkCircle" size={13} />Connected</span> : <span className="wc-band-d">Not connected</span>}
-                    <button className={on ? "wc-ghostbtn wc-sm" : "wc-primary wc-sm"} onClick={() => toggle(it.name)}>{on ? "Disconnect" : "Connect"}</button>
-                  </div>
-                </div>
-              );
-            })}
+      {/* Coming soon banner */}
+      <div
+        style={{
+          display: "flex", alignItems: "flex-start", gap: 18,
+          padding: "22px 24px", border: "1px solid var(--line)", borderRadius: 16,
+          background: "var(--panel)", boxShadow: "var(--shadow-sm)", marginBottom: 22,
+        }}
+      >
+        <span
+          style={{
+            width: 48, height: 48, borderRadius: 13, flex: "none",
+            display: "grid", placeItems: "center",
+            background: "var(--accent-soft)", color: "var(--accent-strong)",
+          }}
+        >
+          <Icon name="zap" size={22} />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--accent-strong)", marginBottom: 4 }}>
+            Coming Soon
+          </div>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "var(--ink)", marginBottom: 4 }}>
+            Integrations are on the way
+          </div>
+          <div className="wc-band-d" style={{ lineHeight: 1.5 }}>
+            Here&apos;s a preview of what you&apos;ll be able to connect — CRM, calendar, dialer, and the tools your team already uses.
           </div>
         </div>
-      ))}
+      </div>
+
+      {/* Preview - muted + non-interactive until integrations ship */}
+      <div style={{ opacity: 0.6, pointerEvents: "none", userSelect: "none" }} aria-hidden="true">
+        <div className="wc-rep-stats" style={{ marginBottom: 18 }}>
+          <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#16A34A", background: "#E8F8ED" }}><Icon name="checkCircle" size={17} /></span><div className="wc-stat-label">Connected</div><div className="wc-stat-val wc-mono">7</div></div>
+          <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#EA580C", background: "var(--accent-soft)" }}><Icon name="zap" size={17} /></span><div className="wc-stat-label">Needs Setup</div><div className="wc-stat-val wc-mono">2</div></div>
+          <div className="wc-stat wc-repstat"><span className="wc-repstat-ic" style={{ color: "#DC2626", background: "#FEE2E2" }}><Icon name="x" size={17} /></span><div className="wc-stat-label">Sync Errors</div><div className="wc-stat-val wc-mono">0</div></div>
+        </div>
+        {INTEGRATIONS.map((g) => (
+          <div className="wc-intgroup" key={g.cat}>
+            <div className="wc-intgroup-h">{g.cat}</div>
+            <div className="wc-intgrid">
+              {g.items.map((it) => {
+                const on = it.on;
+                return (
+                  <div className={"wc-intcard" + (on ? " is-on" : "")} key={it.name}>
+                    <div className="wc-intcard-top">
+                      <span className="wc-intcard-logo" style={it.logo ? { background: "#fff", boxShadow: "inset 0 0 0 1px var(--line)" } : { background: it.color }}>
+                        {it.logo ? <span className="wc-intlogo-svg" dangerouslySetInnerHTML={{ __html: it.logo }} /> : it.letter}
+                      </span>
+                      <div className="wc-intcard-id"><div className="wc-intcard-name">{it.name}</div><div className="wc-band-d">{it.desc}</div></div>
+                    </div>
+                    <div className="wc-intcard-foot">
+                      {on ? <span className="wc-intcard-status"><Icon name="checkCircle" size={13} />Connected</span> : <span className="wc-band-d">Not connected</span>}
+                      <button className={on ? "wc-ghostbtn wc-sm" : "wc-primary wc-sm"} tabIndex={-1}>{on ? "Disconnect" : "Connect"}</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

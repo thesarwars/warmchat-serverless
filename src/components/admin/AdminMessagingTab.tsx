@@ -43,7 +43,7 @@ function fmtDur(s: number | null | undefined): string {
 }
 
 function StatCard({ m }: { m: Metric }) {
-  const t = TONES[m.tone];
+  const t = TONES[m.tone] || TONES.orange;
   return (
     <div className="wc-stat wc-repstat">
       <span className="wc-repstat-ic" style={{ color: t.fg, background: t.bg }}><Icon name={m.icon} size={17} /></span>
@@ -112,17 +112,17 @@ export default function AdminMessagingTab() {
   const s = data.sms;
   const e = data.email;
   const smsMetrics: Metric[] = [
-    { icon: "message", label: "Sent", value: s.sent.toLocaleString(), sub: "this month", tone: "violet" },
-    { icon: "check", label: "Delivered", value: s.delivered_pct + "%", sub: `${s.delivered.toLocaleString()} delivered`, tone: "green" },
-    { icon: "refresh", label: "Replies", value: (s.replies ?? 0).toLocaleString(), sub: `${s.reply_rate ?? 0}% reply rate`, tone: "teal" },
-    { icon: "zap", label: "Avg Reply Time", value: fmtDur(s.avg_reply_seconds), sub: "first response", tone: "amber" },
+    { icon: "message", label: "Sent", value: s.sent.toLocaleString(), sub: "this month", tone: "orange" },
+    { icon: "check", label: "Delivered", value: s.delivered_pct + "%", sub: `${s.delivered.toLocaleString()} delivered`, tone: "orange" },
+    { icon: "refresh", label: "Replies", value: (s.replies ?? 0).toLocaleString(), sub: `${s.reply_rate ?? 0}% reply rate`, tone: "orange" },
+    { icon: "zap", label: "Avg Reply Time", value: fmtDur(s.avg_reply_seconds), sub: "first response", tone: "orange" },
     { icon: "x", label: "Opt-outs", value: (s.opt_outs ?? 0).toLocaleString(), sub: `${s.opt_out_pct ?? 0}% of sent`, tone: "orange" },
   ];
   const emailMetrics: Metric[] = [
-    { icon: "mail", label: "Sent", value: e.sent.toLocaleString(), sub: "this month", tone: "amber" },
-    { icon: "check", label: "Delivered", value: e.delivered_pct + "%", sub: `${e.delivered.toLocaleString()} delivered`, tone: "green" },
-    { icon: "trending", label: "Open Rate", value: (e.open_rate ?? 0) + "%", sub: `${(e.opened ?? 0).toLocaleString()} opened`, tone: "teal" },
-    { icon: "target", label: "Click Rate", value: (e.click_rate ?? 0) + "%", sub: "of sent", tone: "indigo" },
+    { icon: "mail", label: "Sent", value: e.sent.toLocaleString(), sub: "this month", tone: "orange" },
+    { icon: "check", label: "Delivered", value: e.delivered_pct + "%", sub: `${e.delivered.toLocaleString()} delivered`, tone: "orange" },
+    { icon: "trending", label: "Open Rate", value: (e.open_rate ?? 0) + "%", sub: `${(e.opened ?? 0).toLocaleString()} opened`, tone: "orange" },
+    { icon: "target", label: "Click Rate", value: (e.click_rate ?? 0) + "%", sub: "of sent", tone: "orange" },
     { icon: "x", label: "Bounces", value: (e.bounces ?? 0).toLocaleString(), sub: `${e.bounce_pct ?? 0}% of sent`, tone: "orange" },
   ];
   const withColors = (types: { label: string; value: number }[]): TypeRow[] =>

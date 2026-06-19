@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "./Icon";
 import { V3Portal } from "./Portal";
-import { fetchOrgLeads } from "../../helpers/backend";
+import { fetchOrgLeads, fetchOrgTimezone } from "../../helpers/backend";
+import { DEFAULT_STEP_SEND_TIME, isTimeInFutureToday, defaultFutureSendTime, formatZoneNow } from "../../utils/workflowSchedule";
 
 /* Create-Workflow wizard, ported from docs/updated-docs/ai-agent.jsx (§5).
    Self-contained (inline styles + Icon). Calls onLaunch with the assembled
@@ -33,7 +34,7 @@ const WF_AUD_FILTERS = ["Hot Leads", "Needs Reply", "Appointment Ready", "Human 
 
 const toggleIn = (s: Set<string>, v: string) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; };
 
-interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; subject?: string }
+export interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; subject?: string; delayDays?: number }
 
 function AIWriteMenu({ onPick }: { onPick: (tone: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -118,7 +119,8 @@ const groupLbl: React.CSSProperties = { fontSize: 12, fontWeight: 700, textTrans
 
 export interface WizardLaunch {
   name: string; channels: string[]; message: string; emailSubject: string;
-  timing: string; followups: FollowUp[];
+  // timing: "instant" (send now) | "scheduled" (send today at openingTime).
+  timing: string; openingTime: string; followups: FollowUp[];
   audType: string[]; audStage: string[]; audFilter: string[];
   // Hand-picked leads (Select-leads mode) to enroll + send to right away.
   leads: { id: number; name: string; phone: string; email: string }[];
@@ -128,9 +130,13 @@ interface OrgLead { id: number; name?: string | null; first_name?: string | null
 const leadName = (l: OrgLead) => (l.name || [l.first_name, l.last_name].filter(Boolean).join(" ") || "Unnamed lead").trim();
 const wfInitials = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
 
-export interface WizardSeed { name?: string; channel?: string; message?: string; subject?: string }
+export interface WizardSeed { name?: string; channel?: string; message?: string; subject?: string; followups?: FollowUp[] }
+/** A template built by the wizard in template mode (saved to the Templates tab). */
+export interface WizardTemplate { id: string; channel: string; name: string; stage: string; sent: number; flow: Record<string, unknown>[] }
 
-export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed | null; onClose: () => void; onLaunch: (d: WizardLaunch) => void }) {
+export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onSaveTemplate }: { seed?: WizardSeed | null; onClose: () => void; onLaunch: (d: WizardLaunch) => void; mode?: "workflow" | "template"; onSaveTemplate?: (t: WizardTemplate) => void }) {
+  const isTpl = mode === "template";
+  const lastStep = isTpl ? 2 : 3;
   const seedCh = seed?.channel === "email" ? "email" : "sms";
   const [step, setStep] = useState(1);
   const [name, setName] = useState(seed?.name || "");
@@ -139,7 +145,11 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
   const [message, setMessage] = useState(seed?.message || "");
   const [emailSubject, setEmailSubject] = useState(seed?.subject || "");
   const [timing, setTiming] = useState("instant");
-  const [followups, setFollowups] = useState<FollowUp[]>([]);
+  const [openingTime, setOpeningTime] = useState(DEFAULT_STEP_SEND_TIME);
+  // Template-mode opening schedule (cosmetic - only the instant flag is saved).
+  const [openingDate, setOpeningDate] = useState("");
+  const [openingTz, setOpeningTz] = useState("PST");
+  const [followups, setFollowups] = useState<FollowUp[]>(seed?.followups || []);
   const [audType, setAudType] = useState<Set<string>>(new Set());
   const [audStage, setAudStage] = useState<Set<string>>(new Set());
   const [audFilter, setAudFilter] = useState<Set<string>>(new Set());
@@ -148,6 +158,8 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [leadSearch, setLeadSearch] = useState("");
   const orgId = localStorage.getItem("org_id") || "";
+  const { data: tzData } = useQuery({ queryKey: ["org-timezone", orgId], queryFn: () => fetchOrgTimezone(orgId) as Promise<{ timezone?: string }>, enabled: Boolean(orgId) });
+  const acctTz = (tzData as { timezone?: string } | undefined)?.timezone || "";
   const { data: leadsRaw } = useQuery({ queryKey: ["org-leads-min", orgId], queryFn: () => fetchOrgLeads(orgId) as Promise<OrgLead[]>, enabled: Boolean(orgId) });
   const leads: OrgLead[] = Array.isArray(leadsRaw) ? leadsRaw : [];
   const shownLeads = leadSearch.trim()
@@ -167,7 +179,28 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
   const canContinue = step > 1 || name.trim() !== "";
 
   const selectedLeads = leads.filter((l) => sel.has(l.id)).map((l) => ({ id: l.id, name: leadName(l), phone: l.phone || "", email: l.email || "" }));
-  const launch = () => onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] });
+  // Same-day scheduled opening must still be in the future (account tz) - block
+  // launch otherwise so a lead enrolled today never gets a past-dated send.
+  const openingPast = timing === "scheduled" && !isTimeInFutureToday(openingTime, acctTz);
+  const launch = () => { if (openingPast) return; onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, openingTime, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] }); };
+
+  // Template mode: build a reusable template (opening + follow-ups) and hand it
+  // back to the Templates tab. stage is CUSTOM, sent 0, day 0/1/2/... by index.
+  const saveTemplate = () => {
+    const ch = msgChannel;
+    const flow: Record<string, unknown>[] = [
+      ch === "email"
+        ? { day: "Day 0", instant: timing === "instant", channel: "email", subject: emailSubject, body: message }
+        : { day: "Day 0", instant: timing === "instant", channel: "sms", text: message },
+    ];
+    followups.forEach((f, idx) => {
+      const fch = f.channel || "sms";
+      flow.push(fch === "email"
+        ? { day: "Day " + (idx + 1), channel: "email", subject: f.subject || "", body: f.message || "" }
+        : { day: "Day " + (idx + 1), channel: "sms", text: f.message || "" });
+    });
+    onSaveTemplate?.({ id: "tpl" + Date.now(), channel: ch, name: name.trim() || "Untitled Template", stage: "CUSTOM", sent: 0, flow });
+  };
 
   const channelLabel = channels.map((c) => (c === "sms" ? "SMS" : "Email")).join(" + ");
   const filterCount = audType.size + audStage.size + audFilter.size;
@@ -180,13 +213,13 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
           <div style={{ padding: "20px 28px", borderBottom: "1px solid var(--line)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ width: 34, height: 34, borderRadius: 9, background: "var(--accent-soft)", color: "var(--accent-strong)", display: "grid", placeItems: "center" }}><Icon name="outbound" size={18} /></span>
-                <span style={{ fontSize: 16, fontWeight: 800, color: "var(--ink)" }}>Create New Workflow</span>
+                <span style={{ width: 34, height: 34, borderRadius: 9, background: "var(--accent-soft)", color: "var(--accent-strong)", display: "grid", placeItems: "center" }}><Icon name={isTpl ? "layers" : "outbound"} size={18} /></span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "var(--ink)" }}>{isTpl ? "Create New Template" : "Create New Workflow"}</span>
               </div>
               <button onClick={onClose} className="wc-iconbtn-sm" aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              {[1, 2, 3].map((s) => (
+              {(isTpl ? [1, 2] : [1, 2, 3]).map((s) => (
                 <div key={s} style={{ flex: 1, height: 4, borderRadius: 99, background: s <= step ? "var(--accent-strong)" : "var(--line)" }} />
               ))}
             </div>
@@ -197,11 +230,11 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
             {step === 1 && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Name & Channel</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>Name your workflow, pick a channel, and choose who to enroll</p></div>
-                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 1 of 3</div>
+                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>{isTpl ? "Create New Template" : "Name & Channel"}</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>{isTpl ? "Build a reusable sequence to save and use later" : "Name your workflow, pick a channel, and choose who to enroll"}</p></div>
+                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 1 of {lastStep}</div>
                 </div>
-                <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>Workflow name</label>
-                <input value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} autoFocus placeholder="e.g. Buyer speed-to-lead" style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>{isTpl ? "Template Name" : "Workflow name"}</label>
+                <input value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} autoFocus placeholder={isTpl ? "New Lead Follow-Up" : "e.g. Buyer speed-to-lead"} style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
                 <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{name ? `${name.length}/80` : "Give it a clear name you'll recognize later."}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", margin: "24px 0 12px" }}>Choose Channel</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -220,7 +253,9 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
 
                 {/* Who to enroll - moved into Step 1 (under the channel choice) so
                     it's visible without scrolling into Step 2. The marginTop adds a
-                    gap so it isn't visually attached to the SMS/Email cards. */}
+                    gap so it isn't visually attached to the SMS/Email cards.
+                    Hidden in template mode - a template has no audience. */}
+                {!isTpl && (
                 <div style={{ padding: 20, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, marginTop: 24 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 14 }}>
                     <Icon name="users" size={16} style={{ color: "var(--accent-strong)", marginTop: 2 }} />
@@ -304,15 +339,29 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
                     </div>
                   )}
                 </div>
+                )}
               </div>
             )}
 
             {step === 2 && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Craft Your Message</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>Write the message sequence</p></div>
-                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 2 of 3</div>
+                  <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Craft Your Message</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>{isTpl ? "Write the message and follow-up sequence" : "Write the message sequence"}</p></div>
+                  <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 2 of {lastStep}</div>
                 </div>
+
+                {isTpl && (
+                  <div style={{ padding: 20, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12, marginBottom: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--ink-3)", marginBottom: 8 }}>Channel</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>{channelLabel}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--ink-3)", marginBottom: 8 }}>Enrollment</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>As leads opt in</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Message card */}
                 <div style={{ padding: 20, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12 }}>
@@ -341,10 +390,48 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
                   <div style={{ marginTop: 16 }}>
                     <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 10 }}>When to send the opening</label>
                     <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
-                      {[["instant", "Instant"], ["scheduled", "At a time"]].map(([k, l]) => (
-                        <button key={k} onClick={() => setTiming(k)} style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: timing === k ? "var(--panel)" : "transparent", color: timing === k ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+                      {(isTpl ? [["instant", "Instant"], ["scheduled", "At a time"]] : [["instant", "Send now"], ["scheduled", "Send at a specific time"]]).map(([k, l]) => (
+                        <button key={k} onClick={() => {
+                          setTiming(k);
+                          if (!isTpl && k === "scheduled" && !isTimeInFutureToday(openingTime, acctTz)) setOpeningTime(defaultFutureSendTime(acctTz) || openingTime);
+                        }} style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: timing === k ? "var(--panel)" : "transparent", color: timing === k ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
                       ))}
                     </div>
+                    {timing === "scheduled" && (isTpl ? (
+                      // Template mode: date + time + timezone (cosmetic; only instant is saved).
+                      <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <div style={fuField}>
+                          <Icon name="calendar" size={14} style={{ color: "var(--ink-3)" }} />
+                          <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} style={fuInput} />
+                        </div>
+                        <div style={fuField}>
+                          <Icon name="clock" size={14} style={{ color: "var(--ink-3)" }} />
+                          <input type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} style={fuInput} />
+                        </div>
+                        <select value={openingTz} onChange={(e) => setOpeningTz(e.target.value)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", background: "var(--panel)", fontWeight: 600, color: "var(--ink)", cursor: "pointer" }}>
+                          <option>PST</option><option>EST</option><option>CST</option><option>MST</option>
+                        </select>
+                      </div>
+                    ) : (
+                      // Workflow mode: same-day "Today at" with future-time validation.
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>Today at</span>
+                          <div style={fuField}>
+                            <Icon name="clock" size={14} style={{ color: "var(--ink-3)" }} />
+                            <input type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} style={fuInput} />
+                          </div>
+                          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                            {acctTz ? `account time · now ${formatZoneNow(acctTz)}` : "account time"}
+                          </span>
+                        </div>
+                        {openingPast && (
+                          <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: "#E11D48" }}>
+                            That time has already passed today. Pick a later time, or choose "Send now".
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                   <FollowUpSequence value={followups} onChange={setFollowups} />
                 </div>
@@ -406,9 +493,11 @@ export function WorkflowWizard({ seed, onClose, onLaunch }: { seed?: WizardSeed 
           {/* Footer */}
           <div style={{ padding: "16px 28px", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             {step > 1 ? <button className="wc-ghostbtn" onClick={() => setStep((s) => s - 1)}>Back</button> : <span />}
-            {step < 3
+            {step < lastStep
               ? <button className="wc-primary" disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>Continue<Icon name="arrowRight" size={15} /></button>
-              : <button className="wc-primary" onClick={launch}><Icon name="outbound" size={15} />Start Workflow</button>}
+              : isTpl
+                ? <button className="wc-primary" onClick={saveTemplate}><Icon name="check" size={15} />Save Template</button>
+                : <button className="wc-primary" disabled={openingPast} onClick={launch}><Icon name="outbound" size={15} />Start Workflow</button>}
           </div>
         </div>
       </div>

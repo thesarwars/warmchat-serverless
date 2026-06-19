@@ -169,6 +169,10 @@ const GettingStartedChecklist: React.FC = () => {
   const allDone = doneCount === total;
   const pct = Math.round((doneCount / total) * 100);
 
+  // Once every step is done the Setup widget has served its purpose - hide it
+  // entirely so the sidebar isn't cluttered with a permanent "9/9" card.
+  if (allDone) return null;
+
   // Collapsed state - a full-width orange Setup progress card. Designed to sit
   // in the sidebar's bottom area (the parent controls placement); clicking it
   // opens the floating panel below.

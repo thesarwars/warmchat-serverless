@@ -12,7 +12,7 @@ import { useQuietHoursConfirm } from "./useQuietHoursConfirm";
 // Spec fallback when the org has not configured a booking handoff user.
 // Source: docs/Ai Flo.md - "If user clicks book setup call send them to my
 // Calendly link to book a call".
-const CALENDLY_BOOK_URL = "https://calendly.com/jvrealestate2/15min";
+const CALENDLY_BOOK_URL = "https://calendly.com/velasquezjojo7/30min";
 
 type Props = {
   open: boolean;

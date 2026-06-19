@@ -123,9 +123,31 @@ class ErrorBoundary extends React.Component<
     console.error("[ErrorBoundary]", error, info.componentStack);
   }
 
-  handleReload = () => {
-    this.setState({ hasError: false, error: null });
-    window.location.reload();
+  handleReload = async () => {
+    // A plain reload re-reads the browser/disk cache and can be intercepted by a
+    // stale service worker, so a "stale chunk" tab can stay stuck even after a
+    // hard refresh. Forcibly tear down the SW + Cache Storage and reload with a
+    // cache-busting param so the browser is forced to fetch a fresh index.html
+    // (and therefore the current, content-hashed chunks).
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+      }
+    } catch { /* ignore */ }
+    try {
+      if (typeof caches !== "undefined") {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+      }
+    } catch { /* ignore */ }
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("_v", Date.now().toString(36));
+      window.location.replace(url.toString());
+    } catch {
+      window.location.reload();
+    }
   };
 
   render() {

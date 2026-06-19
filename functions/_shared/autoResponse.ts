@@ -200,6 +200,28 @@ export async function cancelPendingFollowups(env: Env, leadId: number): Promise<
   );
 }
 
+/**
+ * Campaign -> reply -> AI handoff. A lead enrolled in an outbound campaign has
+ * ai_status='outbound', which the inbound AI gate intentionally blocks. The
+ * moment that lead REPLIES they're no longer a pure-outbound target - the whole
+ * point of a campaign is to start a conversation - so flip them to 'active' and
+ * let the inbound AI take over. Leaves 'paused'/'off' (an explicit user pause)
+ * and 'active' (already on) untouched. Returns the effective ai_status to use
+ * for the immediately-following gate check.
+ */
+export async function activateAiOnReply(
+  env: Env, leadId: number, currentAiStatus: string | null,
+): Promise<string | null> {
+  if (String(currentAiStatus || "").trim().toLowerCase() !== "outbound") return currentAiStatus;
+  await execute(
+    env.D1DB,
+    `UPDATE lead SET ai_status = 'active', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND LOWER(IFNULL(ai_status, '')) = 'outbound'`,
+    leadId,
+  );
+  return "active";
+}
+
 export interface QueueOptions {
   leadId: number;
   orgId: number;

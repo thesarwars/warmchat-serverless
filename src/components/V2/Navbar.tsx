@@ -87,7 +87,7 @@ const DesktopButtons = ({
       {ctaLabel}
     </Link>
     <a
-      href="https://calendly.com/jvrealestate2/15min"
+      href="https://calendly.com/velasquezjojo7/30min"
       target="_blank"
       rel="noopener noreferrer"
       className={`btn-outline-hover relative flex items-center justify-center 2xl:h-13 h-10 2xl:px-10.5 px-8 rounded-full border border-[#F97316] 2xl:text-xl text-base font-semibold leading-7.5 whitespace-nowrap ${
@@ -119,7 +119,7 @@ const Navbar = ({ isVisible }: { isVisible: boolean }) => {
     { label: "Features", href: "/features" },
     { label: "Pricing", href: "/pricing" },
     { label: "Get Started", href: ctaHref },
-    { label: "See It In Action", href: "https://calendly.com/jvrealestate2/15min", external: true },
+    { label: "See It In Action", href: "https://calendly.com/velasquezjojo7/30min", external: true },
   ];
 
   useEffect(() => {
@@ -288,7 +288,7 @@ const Navbar = ({ isVisible }: { isVisible: boolean }) => {
               {isLoggedIn ? "Dashboard" : "Start Free"}
             </a>
             <a
-              href="https://calendly.com/jvrealestate2/15min"
+              href="https://calendly.com/velasquezjojo7/30min"
               target="_blank"
               rel="noopener noreferrer"
               className={`flex items-center justify-center h-12 w-full rounded-full border border-[#F97316] text-sm font-semibold leading-5 text-[#F97316] transition-all duration-400 ease-out ${

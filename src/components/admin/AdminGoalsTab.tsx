@@ -240,11 +240,11 @@ function GoalsBody({ data, navigate, onSetGoal }: { data: GoalsData; navigate: (
   const KPIS = [
     { icon: "dollar", fg: "#EA580C", bg: "#FEEBDD", value: fmtUSD0(k.commission_earned), label: "Commission Earned",
       foot: <span className="wg-foot-green">{data.year} total</span> },
-    { icon: "briefcase", fg: "#0E9F6E", bg: "#E4F7EF", value: String(k.deals_closed), label: "Deals Closed",
+    { icon: "briefcase", fg: "#EA580C", bg: "#FEEBDD", value: String(k.deals_closed), label: "Deals Closed",
       foot: <span className="wg-foot-green">won this year</span> },
-    { icon: "calendar", fg: "#7C5CFC", bg: "#EEEAFE", value: String(k.upcoming_deals), label: "Upcoming Deals",
+    { icon: "calendar", fg: "#EA580C", bg: "#FEEBDD", value: String(k.upcoming_deals), label: "Upcoming Deals",
       foot: <span className="wg-foot-violet">{fmtUSD0(k.upcoming_value)} potential</span> },
-    { icon: "target", fg: "#0EA5E9", bg: "#E7F6FD", value: k.goal_set ? k.goal_progress + "%" : "—", label: "Goal Progress",
+    { icon: "target", fg: "#EA580C", bg: "#FEEBDD", value: k.goal_set ? k.goal_progress + "%" : "—", label: "Goal Progress",
       foot: k.goal_set ? <span className="wg-foot-green">{k.goal_progress >= 70 ? "On track" : "Keep pushing"}</span> : <span className="wg-setgoal">No goal set</span> },
   ];
 

@@ -61,6 +61,11 @@ const PhoneIcon = () => (
     <path d="M5 4h3l1.5 4-2 1.5a12 12 0 0 0 7 7l1.5-2 4 1.5V20a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z" />
   </svg>
 );
+const CheckIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
 
 const relativeTime = (iso?: string | null): string => {
   if (!iso) return "";
@@ -207,8 +212,11 @@ const NeedsReply: React.FC<NeedsReplyProps> = ({ priority, contacts, isLoading }
 
       {top.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[#EAEAEA] px-4 py-10 text-center">
+          <div className="mx-auto mb-2.5 grid h-10 w-10 place-items-center rounded-full bg-[#E8F8ED] text-[#16A34A]">
+            <CheckIcon />
+          </div>
           <p className="text-sm font-semibold text-[#211a14]">You&apos;re all caught up</p>
-          <p className="mt-1 text-xs text-[#8c7d6f]">No one is waiting on a reply right now.</p>
+          <p className="mt-1 text-xs text-[#8c7d6f]">No urgent actions right now. AI is handling the rest.</p>
         </div>
       ) : (
         <>
