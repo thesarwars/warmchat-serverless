@@ -3,6 +3,7 @@ import type { Env } from "./env.ts";
 import { execute, queryFirst, nowIso } from "./db.ts";
 import {
   cancelPendingFollowups,
+  activateAiOnReply,
   attachTag,
   aiSendAllowedForLead,
   type AutoResponseRow,
@@ -335,6 +336,10 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
     if (settings.behavior_stop_lead_reply) {
       await cancelPendingFollowups(env, existingLead.id);
     }
+    // Campaign -> reply -> AI handoff (core product behavior): a lead who was in
+    // pure-outbound campaign mode ('outbound') and replies is now an active
+    // conversation, so flip them to 'active' before the gate lets the AI take over.
+    existingLead.ai_status = await activateAiOnReply(env, existingLead.id, existingLead.ai_status);
     // Level 1 (workspace master) + Level 3 (per-lead pause) gate the AI-driven
     // response. The transactional STOP/HELP/START confirmations above are
     // mandatory compliance replies and are intentionally NOT gated here.
@@ -674,6 +679,9 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
           });
           // Stop-on-reply parity: a known lead replying halts pending drips.
           await cancelPendingFollowups(env, lead.id);
+          // Campaign -> reply -> AI handoff: flip an outbound-campaign lead to
+          // 'active' so the email reply hands off to the AI (same as SMS).
+          lead.ai_status = await activateAiOnReply(env, lead.id, lead.ai_status);
           if (await aiSendAllowedForLead(env, { org_id: orgId, ai_status: lead.ai_status })) {
             await runInboundAgent(env, lead.id, cleanBody, { channel: "email", subject });
           }

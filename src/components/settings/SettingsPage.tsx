@@ -681,7 +681,7 @@ function formatZoneClock(timezone: string, at: Date): { time: string; hour: numb
 
 // Custom Brokerage is sales-led - "Book demo" opens this Calendly (same link
 // the onboarding + pricing pages use).
-const BROKERAGE_DEMO_URL = "https://calendly.com/jvrealestate2/15min";
+const BROKERAGE_DEMO_URL = "https://calendly.com/velasquezjojo7/30min";
 
 // Plan comparison cards. Price + the "current" badge derive from real billing;
 // the feature bullets are static marketing copy (they describe the plans).

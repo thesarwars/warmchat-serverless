@@ -527,7 +527,6 @@ const AppointmentsCalendar = () => {
   const [selected, setSelected] = useState<Date>(now);
   const [month, setMonth] = useState<Date>(startOfMonth(now));
   const [open, setOpen] = useState<OpenState>(null);
-  const [railTab, setRailTab] = useState<"schedule" | "ai">("schedule");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Open the day/week grid scrolled to the morning rather than midnight (the grid
@@ -588,32 +587,21 @@ const AppointmentsCalendar = () => {
           {/* left rail */}
           <div className="wc-calrail">
             <MiniCal selected={selected} onPick={pick} month={month} setMonth={setMonth} appts={renderAppts} today={now} />
-            <div className="wc-railtabs">
-              <button className={railTab === "schedule" ? "is-on" : ""} onClick={() => setRailTab("schedule")}>Schedule</button>
-              <button className={railTab === "ai" ? "is-on" : ""} onClick={() => setRailTab("ai")}>AI Suggestions</button>
+            <div className="wc-calrail-agenda">
+              <div className="wc-brief-date">{isSameDay(selected, now) ? "Today · " : ""}{DOW_FULL[selected.getDay()]}, {MONTHS[selected.getMonth()]} {selected.getDate()}</div>
+              <div className="wc-calrail-h">Today's schedule</div>
+              {agenda.length === 0 ? (
+                <div className="wc-calrail-empty"><span className="wc-calrail-emptyic"><Icon name="calendar" size={22} /></span>No events scheduled</div>
+              ) : agenda.map((a, i) => {
+                const k = APPT_KINDS[a.kind];
+                return (
+                  <button className="wc-agenda" key={i} onClick={() => setOpen(a)}>
+                    <span className="wc-agenda-bar" style={{ background: k.bar }} />
+                    <div><div className="wc-agenda-t">{timeLabel(a.start)} · {a.title}</div><div className="wc-agenda-m">{[a.who, a.loc].filter(Boolean).join(" · ")}</div></div>
+                  </button>
+                );
+              })}
             </div>
-            {railTab === "schedule" ? (
-              <div className="wc-calrail-agenda">
-                <div className="wc-brief-date">{isSameDay(selected, now) ? "Today · " : ""}{DOW_FULL[selected.getDay()]}, {MONTHS[selected.getMonth()]} {selected.getDate()}</div>
-                <div className="wc-calrail-h">Today's schedule</div>
-                {agenda.length === 0 ? (
-                  <div className="wc-calrail-empty"><span className="wc-calrail-emptyic"><Icon name="calendar" size={22} /></span>No events scheduled</div>
-                ) : agenda.map((a, i) => {
-                  const k = APPT_KINDS[a.kind];
-                  return (
-                    <button className="wc-agenda" key={i} onClick={() => setOpen(a)}>
-                      <span className="wc-agenda-bar" style={{ background: k.bar }} />
-                      <div><div className="wc-agenda-t">{timeLabel(a.start)} · {a.title}</div><div className="wc-agenda-m">{[a.who, a.loc].filter(Boolean).join(" · ")}</div></div>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="wc-aisug">
-                <div className="wc-aisug-h"><Icon name="sparkles" size={13} />AI recommendations</div>
-                <div className="wc-calrail-empty"><span className="wc-calrail-emptyic"><Icon name="sparkles" size={22} /></span>No suggestions yet</div>
-              </div>
-            )}
           </div>
 
           {/* main */}

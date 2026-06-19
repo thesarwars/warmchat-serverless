@@ -67,7 +67,13 @@ interface AutomationRow {
   channels: string | null;       // JSON string array, e.g. ["sms"]
   followup_steps: string | null; // JSON array of { delay_days, message, send_time }
 }
-interface FollowupStep { delay_days?: number; message?: string; send_time?: string; timezone?: string }
+interface FollowupStep { delay_days?: number; message?: string; send_time?: string; timezone?: string; channel?: string }
+
+/** Normalize a per-step channel value, falling back to the campaign default. */
+function normChannel(raw: unknown, fallback: "sms" | "email"): "sms" | "email" {
+  const s = String(raw || "").trim().toLowerCase();
+  return s === "email" ? "email" : s === "sms" ? "sms" : fallback;
+}
 
 /** Read the org's account timezone (the single source for step send times). */
 async function loadOrgTimezone(env: Env, orgId: number): Promise<string | null> {
@@ -109,9 +115,11 @@ export async function queueAutomationForLead(
   // org's account timezone (the single source of truth).
   const sendTz = (lead.timezone || "").trim() || (await loadOrgTimezone(env, lead.org_id));
 
-  const channel = firstChannel(camp.channels);
-  const toAddress = channel === "sms" ? lead.phone : lead.email;
-  if (!toAddress) return 0;
+  // Mixed-channel campaigns: the opening uses the campaign's primary channel;
+  // each follow-up may override with its own channel (sms or email). A lead with
+  // no address for a given step's channel simply skips that step.
+  const campaignChannel = firstChannel(camp.channels);
+  if (!lead.phone && !lead.email) return 0;
 
   // One automation per lead - cancel any pending messages before starting this one.
   await cancelPendingFollowups(env, leadId);
@@ -120,13 +128,13 @@ export async function queueAutomationForLead(
   // Step 0 (the opening) is INSTANT (sent ~30s after enroll); each follow-up
   // fires `delay_days` later at its `send_time` wall-clock hour.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null }> = [];
+  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email" }> = [];
   if ((camp.message || "").trim()) {
     const opening = await personalizeOpening(
       env, lead.org_id, lead.owner_id ?? fallbackUserId, camp.message!.trim(), lead);
     // Instant unless the opening has been given an explicit send time, in which
     // case it is scheduled for that wall-clock time on the enrollment day.
-    drip.push({ body: opening, instant: !openingTime, delayDays: 0, sendTime: openingTime });
+    drip.push({ body: opening, instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel });
   }
   let followups: FollowupStep[] = [];
   try {
@@ -136,7 +144,7 @@ export async function queueAutomationForLead(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null });
+    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel) });
   }
   if (drip.length === 0) return 0;
 
@@ -151,6 +159,11 @@ export async function queueAutomationForLead(
   let queued = 0;
   for (let i = 0; i < drip.length; i++) {
     const step = drip[i]!;
+    const channel = step.channel;
+    const toAddress = channel === "sms" ? lead.phone : lead.email;
+    // No address for this step's channel (e.g. an email step for a lead with no
+    // email) - skip just this step, keep the rest of the drip.
+    if (!toAddress) continue;
     const rendered = await renderTemplate(env, step.body, lead);
     // Step 0 of the drip is the opening (first message in the sequence). It
     // gets the AI disclosure + STOP footer. Steps 1+ are follow-ups in the
@@ -162,12 +175,18 @@ export async function queueAutomationForLead(
           recipientOptedIn,
         })
       : rendered;
+    // A scheduled step whose computed wall-time already passed (e.g. a same-day
+    // opening time enrolled after that hour) should send PROMPTLY, not sit at a
+    // past timestamp - so clamp anything in the past up to now+30s. (The wizard
+    // already blocks picking a past same-day time for immediate enrollments.)
+    const computedAt = step.instant
+      ? new Date(now + 30 * 1000).toISOString()
+      : stepScheduledAt(now, step.delayDays, step.sendTime, step.tz || sendTz);
+    const scheduledAt = Date.parse(computedAt) < now ? new Date(now + 30 * 1000).toISOString() : computedAt;
     const id = await queueScheduledMessage(env, {
       leadId, orgId: lead.org_id, userId,
       channel, toAddress, body,
-      scheduledAt: step.instant
-        ? new Date(now + 30 * 1000).toISOString()
-        : stepScheduledAt(now, step.delayDays, step.sendTime, step.tz || sendTz),
+      scheduledAt,
       // Outbound automation drip: NOT tagged as "AI Agent" - the inbox marks
       // these with the campaign/workflow name instead (derived from
       // automation_id on the materialized message row).
@@ -238,14 +257,16 @@ export async function bulkEnrollAutomation(
   );
   if (!camp) return { enrolled: 0, queued: 0 };
   const orgId = Number(camp.org_id);
-  const channel = firstChannel(camp.channels);
+  // Campaign primary channel = opening channel; each follow-up may override it
+  // (mixed-channel campaigns), resolved per step below.
+  const campaignChannel = firstChannel(camp.channels);
 
   // Build the drip template (opening + follow-ups) ONCE - it is identical for
   // every lead apart from per-lead token expansion + scheduling done in the row
   // loop. Step 0 (opening) is INSTANT; follow-ups carry a day + send_time.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null }> = [];
-  if ((camp.message || "").trim()) template.push({ body: camp.message!.trim(), instant: !openingTime, delayDays: 0, sendTime: openingTime });
+  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email" }> = [];
+  if ((camp.message || "").trim()) template.push({ body: camp.message!.trim(), instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel });
   let followups: FollowupStep[] = [];
   try {
     const parsed = JSON.parse(camp.followup_steps || "[]");
@@ -254,9 +275,10 @@ export async function bulkEnrollAutomation(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null });
+    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel) });
   }
   if (!template.length) return { enrolled: 0, queued: 0 };
+  const templateHasSms = template.some((s) => s.channel === "sms");
 
   // Account timezone for interpreting each step's send_time wall clock.
   const orgTz = await loadOrgTimezone(env, orgId);
@@ -290,7 +312,7 @@ export async function bulkEnrollAutomation(
   // 3) Suppression set (SMS): every opted-out number in the org, loaded once.
   //    Lead-level flags (sms_opt_out / no_sms / email_opt_out) ride on each row.
   const optedOutPhones = new Set<string>();
-  if (channel === "sms") {
+  if (templateHasSms) {
     const rows = await queryAll<{ phone: string | null }>(
       env.D1DB,
       `SELECT phone_number_e164 AS phone FROM sms_contact WHERE org_id = ? AND opted_out = 1`,
@@ -317,19 +339,26 @@ export async function bulkEnrollAutomation(
   const startMs = Date.now();
   let enrolled = 0;
   for (const lead of leads) {
-    const toAddress = channel === "sms" ? lead.phone : lead.email;
-    if (!toAddress) continue;
-    // Honor suppression in memory (no per-message query).
-    if (channel === "sms" && (optedOutPhones.has(toAddress) || lead.sms_opt_out === 1 || lead.sms_consent_status === "no_sms")) continue;
-    if (channel === "email" && lead.email_opt_out === 1) continue;
+    // Mixed-channel: a lead with neither contact can't receive anything.
+    if (!lead.phone && !lead.email) continue;
+    const smsSuppressed = !lead.phone || optedOutPhones.has(lead.phone) || lead.sms_opt_out === 1 || lead.sms_consent_status === "no_sms";
+    const emailSuppressed = !lead.email || lead.email_opt_out === 1;
 
     const userId = lead.owner_id ?? fallbackUserId;
     const agentName = ownerName.get(userId) || null;
     const recipientOptedIn = lead.sms_consent_status === "opted_in";
     const vars = buildPersonalizationVars(lead, agentName || "");
     const sendTz = (lead.timezone || "").trim() || orgTz;
+    let leadQueued = 0;
     for (let i = 0; i < template.length; i++) {
       const step = template[i]!;
+      const channel = step.channel;
+      // Per-step channel resolution + suppression. Skip a step whose channel the
+      // lead can't receive (no address / opted out) but keep the other steps.
+      if (channel === "sms" && smsSuppressed) continue;
+      if (channel === "email" && emailSuppressed) continue;
+      const toAddress = channel === "sms" ? lead.phone : lead.email;
+      if (!toAddress) continue;
       const rendered = applyPersonalization(step.body, vars);
       const body = channel === "sms"
         ? appendComplianceFooter(rendered, {
@@ -338,15 +367,19 @@ export async function bulkEnrollAutomation(
             recipientOptedIn,
           })
         : rendered;
-      const scheduledAt = step.instant
+      const computedAt = step.instant
         ? new Date(startMs + 30 * 1000).toISOString()
         : stepScheduledAt(startMs, step.delayDays, step.sendTime, step.tz || sendTz);
+      // Past same-day time (e.g. opening "today at 9am" enrolled at 5pm) sends
+      // promptly rather than at a past timestamp; never silently rolls a day.
+      const scheduledAt = Date.parse(computedAt) < startMs ? new Date(startMs + 30 * 1000).toISOString() : computedAt;
       binds.push(stmt.bind(
         userId, lead.org_id, lead.id, automationId, channel, toAddress, null, body,
         scheduledAt, 0, now, now,
       ));
+      leadQueued++;
     }
-    enrolled++;
+    if (leadQueued > 0) enrolled++;
   }
 
   for (const part of chunk(binds, ENROLL_BATCH)) {

@@ -2256,7 +2256,7 @@ const Onboarding: React.FC = () => {
 
                   {/* Brokerage / teams - contact-sales, opens Calendly */}
                   <a
-                    href="https://calendly.com/jvrealestate2/15min"
+                    href="https://calendly.com/velasquezjojo7/30min"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="border border-gray-200 rounded-xl p-4 flex items-center justify-between bg-white hover:border-orange-300 hover:bg-[#fef3ea]/30 transition group"

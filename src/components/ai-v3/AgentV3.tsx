@@ -4,6 +4,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "./Icon";
 import { V3Portal } from "./Portal";
 import { WorkflowWizard, type WizardLaunch, type WizardSeed } from "./WorkflowWizard";
+import { BrowseTemplatesModal } from "./BrowseTemplatesModal";
+import { TemplatesTab, type TplItem } from "./TemplatesTab";
+import { OUTBOUND_TEMPLATES } from "./templatesData";
 import { AISettings } from "./AISettings";
 import {
   fetchAiAgents,
@@ -17,8 +20,6 @@ import {
   pauseAutomation,
   resumeAutomation,
   archiveAutomation,
-  fetchAiTemplates,
-  seedAgentTemplates,
   createAiTemplate,
   updateAiTemplate,
   deleteAiTemplate,
@@ -344,7 +345,7 @@ function automationToCampaign(a: OrgAutomation): Campaign {
       step: i + 2,
       day: "Day " + (FLOW_DAY_NUMS[i + 1] ?? (s.delay_days ?? (i + 1) * 2)),
       date: (s.send_time || "10:00 AM"),
-      channel: "SMS",
+      channel: ((s.channel || channels[0] || "sms").toLowerCase() === "email" ? "Email" : "SMS"),
       text: s.message || FLOW_FALLBACK_SMS[(i + 1) % FLOW_FALLBACK_SMS.length],
     })),
   ];
@@ -461,155 +462,6 @@ function CampaignCard({ w, onToggle, onDelete, onEdit }: { w: Campaign; onToggle
   );
 }
 
-// ---- outbound: Templates tab (real /ai/templates) --------------------------
-
-interface ApiTemplate { id: number; title: string; content: string; subject: string | null; channel: string | null; category_name?: string | null }
-
-function TemplateModal({ initial, onClose, onSave }: { initial?: ApiTemplate | null; onClose: () => void; onSave: (d: { title: string; content: string; channel: string; subject: string }) => void }) {
-  const [title, setTitle] = useState(initial?.title || "");
-  const [channel, setChannel] = useState((initial?.channel as string) || "sms");
-  const [subject, setSubject] = useState(initial?.subject || "");
-  const [content, setContent] = useState(initial?.content || "");
-  const can = title.trim() !== "" && content.trim() !== "";
-  return (
-    <V3Portal>
-      <div className="wcv3-scrim" onClick={onClose}>
-        <div style={{ background: "var(--panel)", borderRadius: 14, padding: 24, width: "90%", maxWidth: 560, maxHeight: "85vh", overflowY: "auto", boxShadow: "var(--shadow-lg)" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: "var(--ink)" }}>{initial ? "Edit template" : "New template"}</h2>
-            <button onClick={onClose} className="wc-iconbtn-sm" aria-label="Close"><Icon name="x" size={16} /></button>
-          </div>
-          <label className="wc-modal-lbl">Name</label>
-          <input className="wc-modal-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Buyer follow-up" autoFocus />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0" }}>
-            <span className="wc-modal-lbl" style={{ margin: 0 }}>Channel</span>
-            <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
-              {["sms", "email"].map((ch) => (
-                <button key={ch} onClick={() => setChannel(ch)} style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: channel === ch ? "var(--panel)" : "transparent", color: channel === ch ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name={ch === "sms" ? "message" : "mail"} size={14} />{ch === "sms" ? "SMS" : "Email"}</button>
-              ))}
-            </div>
-          </div>
-          {channel === "email" && (<><label className="wc-modal-lbl">Subject</label><input className="wc-modal-input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Email subject…" style={{ marginBottom: 14 }} /></>)}
-          <label className="wc-modal-lbl">Message</label>
-          <textarea className="wc-set-ta" style={{ minHeight: 120 }} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Use {{first_name}}, {{area}}, {{agent_name}}…" />
-          <div className="wc-modal-foot">
-            <button className="wc-ghostbtn" onClick={onClose}>Cancel</button>
-            <button className="wc-primary" disabled={!can} onClick={() => onSave({ title: title.trim(), content: content.trim(), channel, subject: subject.trim() })}>{initial ? "Save" : "Create template"}</button>
-          </div>
-        </div>
-      </div>
-    </V3Portal>
-  );
-}
-
-function TemplatesTab() {
-  const qc = useQueryClient();
-  useEffect(() => { seedAgentTemplates().then(() => qc.invalidateQueries({ queryKey: ["ai-templates-v3"] })).catch(() => {}); }, [qc]);
-  const { data } = useQuery({ queryKey: ["ai-templates-v3"], queryFn: () => fetchAiTemplates("outbound") as Promise<{ templates: ApiTemplate[] }>, ...AI_QUERY_OPTS });
-  const templates = data?.templates ?? [];
-  const refresh = () => qc.invalidateQueries({ queryKey: ["ai-templates-v3"] });
-  const [creating, setCreating] = useState(false);
-  const [edit, setEdit] = useState<ApiTemplate | null>(null);
-  const [confirmDel, setConfirmDel] = useState<ApiTemplate | null>(null);
-  const createMut = useMutation({ mutationFn: (d: { title: string; content: string; channel: string; subject: string }) => createAiTemplate({ ...d, agent: "outbound" }), onSuccess: () => { refresh(); setCreating(false); } });
-  const updateMut = useMutation({ mutationFn: (v: { id: number; d: { title: string; content: string; channel: string; subject: string } }) => updateAiTemplate(v.id, v.d), onSuccess: () => { refresh(); setEdit(null); } });
-  const delMut = useMutation({ mutationFn: (id: number) => deleteAiTemplate(id), onSuccess: () => { refresh(); setConfirmDel(null); } });
-
-  return (
-    <div>
-      <div className="wc-tpl-head">
-        <span className="wc-band-d">{templates.length} template{templates.length === 1 ? "" : "s"} · variables like <span className="wc-tpl-var">{"{{first_name}}"}</span> fill in automatically</span>
-        <button className="wc-primary wc-sm" onClick={() => setCreating(true)}><Icon name="plus" size={14} />New template</button>
-      </div>
-      <div className="wc-tpl-grid">
-        {!data && <div className="wc-task-empty" style={{ padding: 16 }}>Loading templates…</div>}
-        {data && templates.length === 0 && <div className="wc-task-empty" style={{ padding: 16 }}>No templates yet.</div>}
-        {templates.map((t) => {
-          const ch = (t.channel || "sms").toLowerCase();
-          return (
-            <div className="wc-tpl-card" key={t.id}>
-              <div className="wc-tpl-card-top">
-                <ChannelPill channel={ch} size="sm" />
-                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button className="wc-iconbtn-sm" title="Edit" onClick={() => setEdit(t)}><Icon name="pencil" size={14} /></button>
-                  <button className="wc-iconbtn-sm wc-danger" title="Delete" onClick={() => setConfirmDel(t)}><Icon name="trash" size={14} /></button>
-                </div>
-              </div>
-              <div className="wc-tpl-card-title">{t.title}</div>
-              {t.category_name && <div className="wc-tpl-card-meta">{t.category_name}</div>}
-              <div className="wc-tpl-card-preview">
-                {ch === "email" && t.subject && <div style={{ fontWeight: 700, color: "var(--ink-2)", marginBottom: 4 }}>Subject: {t.subject}</div>}
-                <VarText text={t.content} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {creating && <TemplateModal onClose={() => setCreating(false)} onSave={(d) => createMut.mutate(d)} />}
-      {edit && <TemplateModal initial={edit} onClose={() => setEdit(null)} onSave={(d) => updateMut.mutate({ id: edit.id, d })} />}
-      {confirmDel && (
-        <V3Portal>
-          <div className="wcv3-scrim" onClick={() => setConfirmDel(null)}>
-            <div style={{ background: "var(--panel)", borderRadius: 12, padding: 24, width: "90%", maxWidth: 420, boxShadow: "var(--shadow-lg)" }} onClick={(e) => e.stopPropagation()}>
-              <div className="wc-confirm">
-                <span className="wc-confirm-ic"><Icon name="trash" size={20} /></span>
-                <div className="wc-confirm-t">Delete template?</div>
-                <div className="wc-confirm-d">"{confirmDel.title}" will be removed.</div>
-                <div className="wc-confirm-acts">
-                  <button className="wc-ghostbtn" onClick={() => setConfirmDel(null)}>Cancel</button>
-                  <button className="wc-confirm-del" disabled={delMut.isPending} onClick={() => delMut.mutate(confirmDel.id)}><Icon name="trash" size={15} />Delete</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </V3Portal>
-      )}
-    </div>
-  );
-}
-
-// ---- outbound: Browse Templates modal (real templates → seed wizard) -------
-
-function BrowseTemplatesModal({ onClose, onUse }: { onClose: () => void; onUse: (seed: WizardSeed) => void }) {
-  const { data } = useQuery({ queryKey: ["ai-templates-v3"], queryFn: () => fetchAiTemplates("outbound") as Promise<{ templates: ApiTemplate[] }>, ...AI_QUERY_OPTS });
-  const templates = data?.templates ?? [];
-  return (
-    <V3Portal>
-      <div className="wcv3-scrim" onClick={onClose}>
-        <div style={{ background: "var(--panel)", borderRadius: 16, width: "100%", maxWidth: 760, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "var(--shadow-lg)" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--accent-strong)" }}>Create Workflow From Template</div>
-              <h2 style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", margin: "4px 0 0" }}>Choose a Template</h2>
-            </div>
-            <button onClick={onClose} className="wc-iconbtn-sm" aria-label="Close"><Icon name="x" size={16} /></button>
-          </div>
-          <div style={{ padding: 20, overflowY: "auto" }}>
-            <div className="wc-tpl-grid">
-              {!data && <div className="wc-task-empty" style={{ padding: 16 }}>Loading templates…</div>}
-              {data && templates.length === 0 && <div className="wc-task-empty" style={{ padding: 16 }}>No templates yet. Create one in the Templates tab.</div>}
-              {templates.map((t) => {
-                const ch = (t.channel || "sms").toLowerCase();
-                return (
-                  <div className="wc-tpl-card" key={t.id}>
-                    <div className="wc-tpl-card-top"><ChannelPill channel={ch} size="sm" /></div>
-                    <div className="wc-tpl-card-title">{t.title}</div>
-                    {t.category_name && <div className="wc-tpl-card-meta">{t.category_name}</div>}
-                    <div className="wc-tpl-card-preview"><VarText text={t.content} /></div>
-                    <button className="wc-primary wc-sm" style={{ marginTop: 12, width: "100%", justifyContent: "center" }}
-                      onClick={() => onUse({ name: t.title, channel: ch, message: t.content, subject: t.subject || "" })}>
-                      Use template
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-    </V3Portal>
-  );
-}
 
 // ---- outbound body ---------------------------------------------------------
 
@@ -623,6 +475,9 @@ function OutboundBody() {
   const [wizardSeed, setWizardSeed] = useState<WizardSeed | null>(null);
   const [addMenu, setAddMenu] = useState(false);
   const [browse, setBrowse] = useState(false);
+  // Templates tab list (client-side) + the "+ New template" wizard (template mode).
+  const [tplList, setTplList] = useState<TplItem[]>(() => OUTBOUND_TEMPLATES as unknown as TplItem[]);
+  const [tplWizard, setTplWizard] = useState(false);
 
   const { data } = useQuery({ queryKey: ["org-automations", orgId], queryFn: () => fetchOrgAutomations(orgId) as Promise<OrgAutomation[]>, enabled: Boolean(orgId), ...AI_QUERY_OPTS });
   const refresh = () => qc.invalidateQueries({ queryKey: ["org-automations", orgId] });
@@ -636,14 +491,18 @@ function OutboundBody() {
   const createAuto = useMutation({
     mutationFn: (d: WizardLaunch) => createAutomation({
       name: d.name,
-      channels: d.channels,
+      // Mixed-channel: the campaign's channel list is the union of the opening
+      // channel and every follow-up's channel, so display + plan limits are accurate.
+      channels: Array.from(new Set([...d.channels, ...d.followups.map((f) => f.channel)].filter(Boolean))),
       message: d.message,
       email_subject: d.emailSubject || undefined,
-      opening_send_time: d.timing === "instant" ? null : undefined,
+      // "Send now" -> null (instant); "Send at a specific time" -> today at HH:MM
+      // (account tz), applied per lead on its enrollment day by the scheduler.
+      opening_send_time: d.timing === "scheduled" ? d.openingTime : null,
       sources: [...d.audType, ...d.audStage, ...d.audFilter],
       leads: d.leads,
       timing: d.leads.length > 0 ? "now" : undefined,
-      followups: d.followups.map((f, i) => ({ delay_days: i + 1, message: f.message, send_time: f.time })),
+      followups: d.followups.map((f, i) => ({ delay_days: f.delayDays ?? (i + 1), message: f.message, send_time: f.time, channel: f.channel, ...(f.subject ? { subject: f.subject } : {}) })),
     }),
     onSuccess: () => { refresh(); setWizard(false); },
   });
@@ -689,10 +548,11 @@ function OutboundBody() {
           ))}
         </div>
       ) : (
-        <TemplatesTab />
+        <TemplatesTab list={tplList} setList={setTplList} onNew={() => setTplWizard(true)} />
       )}
 
       {wizard && <WorkflowWizard seed={wizardSeed} onClose={() => { setWizard(false); setWizardSeed(null); }} onLaunch={(d) => createAuto.mutate(d)} />}
+      {tplWizard && <WorkflowWizard mode="template" onClose={() => setTplWizard(false)} onLaunch={() => {}} onSaveTemplate={(t) => { setTplList((prev) => [t as unknown as TplItem, ...prev]); setTplWizard(false); setTab("templates"); }} />}
       {browse && <BrowseTemplatesModal onClose={() => setBrowse(false)} onUse={(seed) => { setBrowse(false); setWizardSeed(seed); setWizard(true); }} />}
 
       {confirmDel && (

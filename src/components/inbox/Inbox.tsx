@@ -11,6 +11,7 @@ import MainLayout from "../MainLayout";
 import "../ai-v2/prototype.css";
 import { Icon } from "../ai-v2/Icon";
 import CallsPage from "@/components/calling/CallsPage";
+import UpgradeNudge from "@/components/UpgradeNudge";
 // "Add lead" reuses the same modal as the Leads page (merged from the old
 // inbox-only "Add contact"). Rendered via a portal to document.body so its
 // Tailwind styling is not nuked by the inbox's .wcv2 wrapper.
@@ -3328,6 +3329,19 @@ export default function Inbox() {
                       })}
                     </div>
                   </div>
+
+                  {/* Free-plan, email-only lead: contextual SMS upsell (#3). */}
+                  {isFreePlan && contactForView?.email && !contactForView?.has_sms_history && (
+                    <div className="px-5 pt-3">
+                      <UpgradeNudge
+                        id="email-only-lead"
+                        icon={<Icon name="message" size={15} />}
+                        title="This lead hasn't replied to email"
+                        message="Try an SMS follow-up — texts get 3-5x higher response rates. Upgrade to Growth to reach them by text."
+                        cta="Upgrade to Growth"
+                      />
+                    </div>
+                  )}
 
                   <div
                     ref={messagesScrollRef}

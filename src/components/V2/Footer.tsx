@@ -8,7 +8,7 @@ const navLinks: { label: string; href: string; external?: boolean }[] = [
   { label: "Pricing", href: "/pricing" },
   { label: "Support", href: "/support" },
   { label: "Get Started", href: "/login" },
-  { label: "See It In Action", href: "https://calendly.com/jvrealestate2/15min", external: true },
+  { label: "See It In Action", href: "https://calendly.com/velasquezjojo7/30min", external: true },
 ];
 
 const Footer = () => {

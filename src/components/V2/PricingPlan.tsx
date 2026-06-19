@@ -224,7 +224,7 @@ const plans: PricingPlanData[] = [
   {
     icon: <LayerGroupIcon />,
     name: "Custom Brokerage",
-    href: "https://calendly.com/jvrealestate2/15min",
+    href: "https://calendly.com/velasquezjojo7/30min",
     external: true,
     description:
       "For teams and brokerages looking to scale lead conversion with AI.",
@@ -519,7 +519,7 @@ const PricingPlan = () => {
       </div>
       <div className="flex items-center justify-center">
         <a
-          href="https://calendly.com/jvrealestate2/15min"
+          href="https://calendly.com/velasquezjojo7/30min"
           target="_blank"
           rel="noopener noreferrer"
           className="btn-gradient-hover px-7 mt-4 flex items-center justify-center h-11 rounded-full text-base font-semibold leading-6 text-white"

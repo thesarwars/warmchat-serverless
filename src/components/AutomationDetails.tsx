@@ -17,6 +17,7 @@ interface FollowupStep {
   send_time?: string;
   send_at?: string;
   timezone?: string;
+  channel?: string;
 }
 
 interface LogEvent {
@@ -196,6 +197,7 @@ const AutomationDetails: React.FC = () => {
               message: s.message || "",
               subject: s.subject || "",
               send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
+              channel: String(s.channel || "").toLowerCase() === "email" ? "email" : "sms",
             }))
           : [],
       );
@@ -222,6 +224,7 @@ const AutomationDetails: React.FC = () => {
             ...(s.subject ? { subject: s.subject } : {}),
             send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
             ...(s.timezone ? { timezone: s.timezone } : {}),
+            channel: String(s.channel || "").toLowerCase() === "email" ? "email" : "sms",
           })),
         }),
       });
@@ -239,7 +242,7 @@ const AutomationDetails: React.FC = () => {
   const updateFollowup = (index: number, patch: Partial<FollowupStep>) =>
     setEditFollowups((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   const addFollowup = () =>
-    setEditFollowups((prev) => [...prev, { delay_days: (prev[prev.length - 1]?.delay_days ?? 0) + 2, message: "", send_time: DEFAULT_STEP_SEND_TIME }]);
+    setEditFollowups((prev) => [...prev, { delay_days: (prev[prev.length - 1]?.delay_days ?? 0) + 2, message: "", send_time: DEFAULT_STEP_SEND_TIME, channel: "sms" }]);
   const removeFollowup = (index: number) =>
     setEditFollowups((prev) => prev.filter((_, i) => i !== index));
   const moveFollowup = (index: number, dir: -1 | 1) =>
@@ -422,8 +425,8 @@ const AutomationDetails: React.FC = () => {
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <span className="text-sm font-semibold text-gray-700">When to send:</span>
                     <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm">
-                      <button type="button" onClick={() => setEditOpeningTiming("instant")} className={`px-3 py-1.5 font-semibold ${editOpeningTiming === "instant" ? "bg-orange-500 text-white" : "bg-white text-gray-600"}`}>Instant</button>
-                      <button type="button" onClick={() => setEditOpeningTiming("timed")} className={`px-3 py-1.5 font-semibold ${editOpeningTiming === "timed" ? "bg-orange-500 text-white" : "bg-white text-gray-600"}`}>At a time</button>
+                      <button type="button" onClick={() => setEditOpeningTiming("instant")} className={`px-3 py-1.5 font-semibold ${editOpeningTiming === "instant" ? "bg-orange-500 text-white" : "bg-white text-gray-600"}`}>Send now</button>
+                      <button type="button" onClick={() => setEditOpeningTiming("timed")} className={`px-3 py-1.5 font-semibold ${editOpeningTiming === "timed" ? "bg-orange-500 text-white" : "bg-white text-gray-600"}`}>At a specific time</button>
                     </div>
                     {editOpeningTiming === "timed" && (
                       <label className="inline-flex items-center gap-1.5 text-sm text-gray-600">
@@ -483,6 +486,16 @@ const AutomationDetails: React.FC = () => {
                             <option value="America/Chicago">Central (CT)</option>
                             <option value="America/New_York">Eastern (ET)</option>
                           </select>
+                          <span className="text-gray-300">·</span>
+                          <select
+                            value={step.channel || "sms"}
+                            onChange={(e) => updateFollowup(index, { channel: e.target.value })}
+                            className="rounded border border-gray-200 px-2 py-1 text-sm font-semibold"
+                            title="Channel for this step"
+                          >
+                            <option value="sms">SMS</option>
+                            <option value="email">Email</option>
+                          </select>
                         </div>
                         <div className="flex items-center gap-1">
                           <button type="button" onClick={() => moveFollowup(index, -1)} disabled={index === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" aria-label="Move step up"><ChevronUp size={16} /></button>
@@ -494,7 +507,7 @@ const AutomationDetails: React.FC = () => {
                         <Zap size={11} className="text-orange-400" />
                         If started today, lands {describeStep(Number(step.delay_days) || 1, step.send_time).dateLabel} at {describeStep(Number(step.delay_days) || 1, step.send_time).timeLabel}
                       </div>
-                      {isEmail && (
+                      {(step.channel || "sms") === "email" && (
                         <input
                           value={step.subject || ""}
                           onChange={(e) => updateFollowup(index, { subject: e.target.value })}

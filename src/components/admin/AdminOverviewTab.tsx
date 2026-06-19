@@ -11,6 +11,7 @@ import { fetchAdminOverview } from "@/helpers/backend";
  */
 
 const TONES: Record<string, { fg: string; bg: string }> = {
+  orange: { fg: "#EA580C", bg: "#FFF1E7" },
   green: { fg: "#16A34A", bg: "#E8F8ED" },
   indigo: { fg: "#4F46E5", bg: "#ECEDFD" },
   teal: { fg: "#0D9488", bg: "#E3F6F2" },
@@ -52,7 +53,7 @@ function fmtWhen(iso: string): string {
 }
 
 function RepKpi({ k }: { k: Kpi }) {
-  const t = TONES[k.tone];
+  const t = TONES[k.tone] || TONES.orange;
   return (
     <div className="wc-kpi">
       <span className="wc-kpi-icon" style={{ color: t.fg, background: t.bg }}><Icon name={k.icon} size={17} /></span>
@@ -65,7 +66,7 @@ function RepKpi({ k }: { k: Kpi }) {
 }
 
 function StatCard({ m }: { m: Metric }) {
-  const t = TONES[m.tone];
+  const t = TONES[m.tone] || TONES.orange;
   return (
     <div className="wc-stat wc-repstat">
       <span className="wc-repstat-ic" style={{ color: t.fg, background: t.bg }}><Icon name={m.icon} size={17} /></span>
@@ -89,16 +90,16 @@ export default function AdminOverviewTab() {
   }
 
   const REP_KPIS: Kpi[] = [
-    { icon: "dollar", label: "Pipeline Value", value: fmtMoney(data.kpis.pipeline_value), delta: "open deals", tone: "green" },
-    { icon: "calendarCheck", label: "Appointments", value: String(data.kpis.appointments), delta: "this month", tone: "indigo" },
-    { icon: "trending", label: "Lead → Appt", value: data.kpis.lead_to_appt + "%", delta: "conversion", tone: "teal" },
-    { icon: "trophy", label: "Closed Deals", value: String(data.kpis.closed_deals), delta: "this month", tone: "emerald" },
+    { icon: "dollar", label: "Pipeline Value", value: fmtMoney(data.kpis.pipeline_value), delta: "open deals", tone: "orange" },
+    { icon: "calendarCheck", label: "Appointments", value: String(data.kpis.appointments), delta: "this month", tone: "orange" },
+    { icon: "trending", label: "Lead → Appt", value: data.kpis.lead_to_appt + "%", delta: "conversion", tone: "orange" },
+    { icon: "trophy", label: "Closed Deals", value: String(data.kpis.closed_deals), delta: "this month", tone: "orange" },
   ];
   const CLOSED_METRICS: Metric[] = [
-    { icon: "trophy", label: "Closed Deals", value: String(data.closed.deals), sub: "this month", tone: "emerald" },
-    { icon: "dollar", label: "Volume Closed", value: fmtMoney(data.closed.volume), sub: "gross sales", tone: "green" },
-    { icon: "dollar", label: "Est. Commission", value: fmtMoney(data.closed.commission), sub: "this month", tone: "teal" },
-    { icon: "trending", label: "Avg Deal Size", value: fmtMoney(data.closed.avg_deal), sub: "per transaction", tone: "indigo" },
+    { icon: "trophy", label: "Closed Deals", value: String(data.closed.deals), sub: "this month", tone: "orange" },
+    { icon: "dollar", label: "Volume Closed", value: fmtMoney(data.closed.volume), sub: "gross sales", tone: "orange" },
+    { icon: "dollar", label: "Est. Commission", value: fmtMoney(data.closed.commission), sub: "this month", tone: "orange" },
+    { icon: "trending", label: "Avg Deal Size", value: fmtMoney(data.closed.avg_deal), sub: "per transaction", tone: "orange" },
   ];
   const apptMax = Math.max(1, ...data.appt_chart);
   const apptTotalType = data.appt_types.reduce((s, t) => s + t.value, 0) || 1;

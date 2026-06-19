@@ -21,7 +21,7 @@ interface Stage { key: string; name: string; color: string }
 const STAGE_SETS: Record<string, Stage[]> = {
   Buyer: [
     { key: "consult", name: "Buyer Consultation", color: "#F59E0B" },
-    { key: "search", name: "Home Search", color: "#3B82F6" },
+    { key: "search", name: "Home Search", color: "#78bee6" },
     { key: "tours", name: "Property Tours", color: "#8B5CF6" },
     { key: "writing", name: "Offer Writing", color: "#6366F1" },
     { key: "submitted", name: "Offer Submitted", color: "#0EA5E9" },
@@ -31,7 +31,7 @@ const STAGE_SETS: Record<string, Stage[]> = {
   ],
   Seller: [
     { key: "consult", name: "Listing Consultation", color: "#F59E0B" },
-    { key: "signed", name: "Agreement Signed", color: "#3B82F6" },
+    { key: "signed", name: "Agreement Signed", color: "#78bee6" },
     { key: "prepping", name: "Prepping Property", color: "#8B5CF6" },
     { key: "active", name: "Active Listing", color: "#6366F1" },
     { key: "received", name: "Offer Received", color: "#0EA5E9" },
@@ -41,7 +41,7 @@ const STAGE_SETS: Record<string, Stage[]> = {
   ],
   Renter: [
     { key: "consult", name: "Renter Consultation", color: "#F59E0B" },
-    { key: "search", name: "Property Search", color: "#3B82F6" },
+    { key: "search", name: "Property Search", color: "#78bee6" },
     { key: "showings", name: "Showings", color: "#8B5CF6" },
     { key: "application", name: "Application Submitted", color: "#6366F1" },
     { key: "screening", name: "Screening", color: "#0EA5E9" },
@@ -553,10 +553,10 @@ function DealsInner() {
   // KPI strip from real data.
   const underContract = deals.filter((d) => d.stage === "contract" || d.stage === "escrow").length;
   const kpis = [
-    { icon: "dollar", label: "Pipeline Value", value: fmtK(summary?.pipeline_value ?? 0), delta: "open commission opportunity", tone: "green", up: false },
-    { icon: "layers", label: "Active Deals", value: String(summary?.open ?? 0), delta: "open transactions", tone: "indigo", up: false },
-    { icon: "file", label: "Under Contract", value: String(underContract), delta: "in contract / escrow", tone: "blue", up: false },
-    { icon: "trophy", label: "Closed Won", value: String(summary?.won ?? 0), delta: fmtK(summary?.won_value ?? 0) + " won", tone: "emerald", up: (summary?.won ?? 0) > 0 },
+    { icon: "dollar", label: "Pipeline Value", value: fmtK(summary?.pipeline_value ?? 0), delta: "open commission opportunity", tone: "orange", up: false },
+    { icon: "layers", label: "Active Deals", value: String(summary?.open ?? 0), delta: "open transactions", tone: "orange", up: false },
+    { icon: "file", label: "Under Contract", value: String(underContract), delta: "in contract / escrow", tone: "orange", up: false },
+    { icon: "trophy", label: "Closed Won", value: String(summary?.won ?? 0), delta: fmtK(summary?.won_value ?? 0) + " won", tone: "orange", up: (summary?.won ?? 0) > 0 },
   ];
 
   // Buyers first (deals.prompt.md tab order).
