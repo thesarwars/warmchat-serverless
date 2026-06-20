@@ -3,6 +3,7 @@ import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { generateWithOpenAI } from "../../../_shared/openai.ts";
+import { humanizeDashes } from "../../../_shared/humanizeText.ts";
 import { queryFirst } from "../../../_shared/db.ts";
 
 /** POST /api/ai/generate/template - generate a templated message with placeholders. */
@@ -14,13 +15,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const body = await readJson<{ purpose?: string; tone?: string; channel?: string }>(request);
   const purpose = (body?.purpose || "").trim();
   if (!purpose) return error("purpose is required", 400);
-  const system = `Generate a ${body?.channel || "email"} message template using {first_name}, {agent_name}, {area} placeholders. Tone: ${body?.tone || "friendly"}.`;
+  const system = `Generate a ${body?.channel || "email"} message template using {first_name}, {agent_name}, {area} placeholders. Tone: ${body?.tone || "friendly"}. Do NOT use em-dashes or en-dashes (— or –) or " - " as a dash; use commas or periods instead.`;
   const m = await queryFirst<{ org_id: number }>(
     env.D1DB, `SELECT org_id FROM membership WHERE user_id = ? LIMIT 1`, user.id,
   );
   const orgId = m?.org_id ?? null;
   try {
     const out = await generateWithOpenAI(env, system, purpose, { orgId });
-    return json({ text: out.text });
+    return json({ text: humanizeDashes(out.text) });
   } catch (e) { return error((e as Error).message, 502); }
 };

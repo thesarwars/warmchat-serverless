@@ -16,6 +16,7 @@ import type { CronEnv } from "../env.ts";
 import { checkQuietHours } from "../_shared/quietHours.ts";
 import {
   tryAcquireSlot,
+  tryAcquireHourlySlot,
   DEFAULT_RATE_LIMITS,
   currentSecondBucket,
   type SendChannel,
@@ -290,6 +291,19 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
       // agent's 10DLC number; email keys on the sending domain.
       const senderKey = senderCache.get(`${row.channel}:${row.user_id}`) ?? "shared";
       const channel: SendChannel = row.channel === "email" ? "email" : "sms";
+
+      // Per-hour, per-org cap on OUTBOUND campaign drips (automation rows only).
+      // Inbound AI replies (no automation_id) are time-sensitive and exempt, and
+      // the due query already drains them first. When the hour's budget is spent,
+      // HOLD the row in 'scheduled' so it resumes next hour - never dropped.
+      if (row.automation_id && row.org_id) {
+        const withinHourly = await tryAcquireHourlySlot(env, channel, row.org_id);
+        if (!withinHourly) {
+          rateLimited++;
+          return;
+        }
+      }
+
       const acquired = await tryAcquireSlot(env, channel, senderKey, DEFAULT_RATE_LIMITS);
       if (!acquired) {
         // Cap hit for this second - leave 'scheduled' and try again next tick.

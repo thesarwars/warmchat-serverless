@@ -99,8 +99,19 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     org.org_id,
   );
 
+  // Campaign progress: how many already SENT today (org-local), so the inbox
+  // banner can show "X queued · Y sent".
+  const todayStart = localMidnightUtcIso(tz, year, month, day);
+  const sentRow = await queryFirst<{ sent_today: number }>(
+    env.D1DB,
+    `SELECT COUNT(*) AS sent_today FROM scheduled_message
+      WHERE org_id = ? AND status = 'sent' AND sent_at >= ?`,
+    org.org_id, todayStart,
+  );
+
   return json({
     pending: Number(row?.pending ?? 0),
+    sent_today: Number(sentRow?.sent_today ?? 0),
     next_at: row?.next_at ?? null,
     due_within_hour: Number(row?.due_soon ?? 0),
     sms: Number(row?.sms ?? 0),

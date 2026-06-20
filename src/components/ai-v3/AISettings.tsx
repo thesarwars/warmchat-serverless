@@ -1,13 +1,50 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import toast, { Toaster } from "react-hot-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "./Icon";
-import { fetchAiSettings, updateAiSettings, fetchAutoResponse, updateAutoResponse, fetchAgentProfile, updateAgentProfile, fetchAiQualifications, createAiQualification, deleteAiQualification, fetchMeBootstrap, patchNotificationSettings } from "../../helpers/backend";
+import { AvailabilityEditor } from "../availability/AvailabilityEditor";
+import { fetchAiSettings, updateAiSettings, fetchAutoResponse, updateAutoResponse, fetchAgentProfile, updateAgentProfile, fetchAiQualifications, createAiQualification, deleteAiQualification, fetchMeBootstrap, patchNotificationSettings, fetchAvailability } from "../../helpers/backend";
 
 /* AI Settings sub-tab — ported from docs/updated-docs/ai-agent.jsx (§6).
    Self-contained. The master AI on/off is wired to the real /ai/settings
    master switch; the granular per-feature toggles are UI-level for now. */
 
 const AI_QUERY_OPTS = { staleTime: 30_000, refetchOnWindowFocus: false } as const;
+
+// ---- Business Hours summary (real agent_availability, NOT hardcoded) --------
+// The "Business Hours" card reflects the same agent_availability the AI honors
+// when proposing/booking times - one source of truth, edited via the embedded
+// AvailabilityEditor. These helpers turn the weekly windows into a compact label
+// (e.g. "Mon – Sun · 8:00 AM – 8:00 PM" or per-day groups when they differ).
+const BH_DOW: [string, string][] = [
+  ["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"],
+];
+function fmt12(hhmm: string): string {
+  const [h, m] = String(hhmm || "").split(":").map((n) => Number(n));
+  if (!Number.isFinite(h)) return hhmm;
+  const ap = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m || 0).padStart(2, "0")} ${ap}`;
+}
+function dayTime(windows: [string, string][] | undefined): string {
+  if (!windows || windows.length === 0) return "Closed";
+  return windows.map((w) => `${fmt12(w[0])} – ${fmt12(w[1])}`).join(", ");
+}
+function summarizeHours(weekly: Record<string, [string, string][]> | undefined): { days: string; time: string }[] {
+  if (!weekly) return [];
+  const groups: { days: string[]; time: string }[] = [];
+  for (const [key, label] of BH_DOW) {
+    const t = dayTime(weekly[key]);
+    const last = groups[groups.length - 1];
+    if (last && last.time === t) last.days.push(label);
+    else groups.push({ days: [label], time: t });
+  }
+  return groups.map((g) => ({
+    days: g.days.length > 1 ? `${g.days[0]} – ${g.days[g.days.length - 1]}` : g.days[0]!,
+    time: g.time,
+  }));
+}
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (n: boolean) => void }) {
   return (
@@ -41,19 +78,19 @@ function SetToggleRow({ title, desc, on, onChange }: { title: string; desc?: str
   );
 }
 
-function SetCheck({ label, tone, defaultChecked }: { label: string; tone?: string; defaultChecked?: boolean }) {
+function SetCheck({ label, tone, checked, onChange }: { label: string; tone?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="wc-set-check">
-      <input type="checkbox" defaultChecked={defaultChecked !== false} style={{ accentColor: tone === "blue" ? "#5BB4E3" : "var(--accent)" }} />
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ accentColor: tone === "blue" ? "#5BB4E3" : "var(--accent)" }} />
       <span>{label}</span>
     </label>
   );
 }
 
-function SetRadioRow({ name, label, desc, defaultChecked }: { name: string; label: string; desc?: string; defaultChecked?: boolean }) {
+function SetRadioRow({ name, label, desc, checked, onChange }: { name: string; label: string; desc?: string; checked: boolean; onChange: () => void }) {
   return (
     <label className="wc-set-radio">
-      <input type="radio" name={name} defaultChecked={defaultChecked} style={{ accentColor: "var(--accent)" }} />
+      <input type="radio" name={name} checked={checked} onChange={onChange} style={{ accentColor: "var(--accent)" }} />
       <div className="wc-set-radio-txt">
         <div className="wc-set-radio-t">{label}</div>
         {desc && <div className="wc-set-radio-d">{desc}</div>}
@@ -62,13 +99,12 @@ function SetRadioRow({ name, label, desc, defaultChecked }: { name: string; labe
   );
 }
 
-function KbRow({ icon, label }: { icon: string; label: string }) {
+function KbRow({ icon, label, onEdit }: { icon: string; label: string; onEdit?: () => void }) {
   return (
     <div className="wc-set-kb">
       <span className="wc-set-kb-ic"><Icon name={icon} size={17} /></span>
       <span className="wc-set-kb-label">{label}</span>
-      <span className="wc-set-kb-time">Updated 2 days ago</span>
-      <button className="wc-set-kb-edit"><Icon name="pencil" size={15} /></button>
+      <button className="wc-set-kb-edit" onClick={onEdit}><Icon name="pencil" size={15} /></button>
     </div>
   );
 }
@@ -156,23 +192,71 @@ export function AISettings() {
   const notifyAppt = me?.notification_settings?.notify_appointments ?? true;
   const setNotif = useMutation({ mutationFn: (d: Record<string, boolean>) => patchNotificationSettings(d), onSuccess: () => qc.invalidateQueries({ queryKey: ["me-bootstrap"] }) });
 
-  const [tg, setTg] = useState({
-    autoReply: true, leadQual: true, apptBook: true, humanDetect: true,
-    followUp: true, nurture: true, reengage: true, stopReply: true,
-    nHot: true, nAppt: true, nHuman: true, nMissed: true,
+  const navigate = useNavigate();
+
+  // Real agent availability for the Business Hours card (shares the cache key
+  // with the embedded AvailabilityEditor, so saving in the modal updates the card
+  // instantly). Edited inline via a modal - no more bogus redirect to Settings.
+  const [showHours, setShowHours] = useState(false);
+  const { data: availability } = useQuery({
+    queryKey: ["availability"],
+    queryFn: () => fetchAvailability() as Promise<{ weeklyHours?: Record<string, [string, string][]>; enabled?: boolean }>,
+    ...AI_QUERY_OPTS,
   });
-  const set = (k: keyof typeof tg, v: boolean) => setTg((o) => ({ ...o, [k]: v }));
+  const hoursSummary = summarizeHours(availability?.weeklyHours);
+
+  // Controls that don't have a dedicated DB column persist inside the agent
+  // profile's persona_json under `ui`, so they actually SAVE and survive reload
+  // instead of being throwaway local state.
+  const ui: Record<string, unknown> = (persona.ui && typeof persona.ui === "object" ? persona.ui as Record<string, unknown> : {});
+  const setUi = (patch: Record<string, unknown>) => saveProfile.mutate({ persona_json: { ...persona, ui: { ...ui, ...patch } } });
+  const uiBool = (k: string, dflt = true) => (typeof ui[k] === "boolean" ? ui[k] as boolean : dflt);
+  const uiStr = (k: string, dflt: string) => (typeof ui[k] === "string" ? ui[k] as string : dflt);
+  const uiGroup = (g: string) => (ui[g] && typeof ui[g] === "object" ? ui[g] as Record<string, boolean> : {});
+  const uiGroupOn = (g: string, key: string, dflt = true) => { const m = uiGroup(g); return typeof m[key] === "boolean" ? m[key] : dflt; };
+  const setUiGroup = (g: string, key: string, v: boolean) => setUi({ [g]: { ...uiGroup(g), [key]: v } });
+  // Everything auto-saves on change; "Save Changes" flushes the custom-instructions
+  // draft and confirms.
+  const onSaveChanges = () => { saveCi(); toast.success("AI settings saved."); };
 
   return (
     <div className="wc-v3-body wc-set">
+      <Toaster position="top-right" />
+
+      {showHours && (
+        <div
+          className="fixed inset-0 z-100 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
+          onClick={() => setShowHours(false)}
+        >
+          <div
+            className="my-8 w-full max-w-2xl rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
+              <h3 className="text-sm font-bold text-gray-900">Business Hours</h3>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setShowHours(false)}
+                className="rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+              >
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+            <div className="max-h-[80vh] overflow-y-auto p-5">
+              <AvailabilityEditor heading="Business hours" />
+            </div>
+          </div>
+        </div>
+      )}
       <div className="wc-set-head">
         <div>
           <h2 className="wc-set-h">AI Settings</h2>
           <p className="wc-set-sub">Configure how your AI assistant handles conversations and leads.</p>
         </div>
         <div className="wc-set-head-r">
-          <button className="wc-set-help"><Icon name="checkCircle" size={16} />Help</button>
-          <button className="wc-set-save">Save Changes</button>
+          <button className="wc-set-help" onClick={() => toast("All changes here save automatically as you toggle them. Use Save Changes to confirm.", { icon: "💡" })}><Icon name="checkCircle" size={16} />Help</button>
+          <button className="wc-set-save" disabled={saveProfile.isPending} onClick={onSaveChanges}>Save Changes</button>
         </div>
       </div>
 
@@ -191,24 +275,36 @@ export function AISettings() {
               <SetToggleRow title="Auto Reply" desc="Automatically reply to new conversations" on={arOn("inbound_sms_enabled")} onChange={(v) => arSet.mutate({ inbound_sms_enabled: v })} />
               <SetToggleRow title="Lead Qualification" desc="Ask qualifying questions and score leads" on={arOn("qualification_enabled")} onChange={(v) => arSet.mutate({ qualification_enabled: v })} />
               <SetToggleRow title="Appointment Booking" desc="Allow AI to book appointments" on={arOn("booking_handoff_enabled")} onChange={(v) => arSet.mutate({ booking_handoff_enabled: v })} />
-              <SetToggleRow title="Human Takeover Detection" desc="Detect when to escalate to human" on={tg.humanDetect} onChange={(v) => set("humanDetect", v)} />
+              <SetToggleRow title="Human Takeover Detection" desc="Detect when to escalate to human" on={uiBool("humanDetect")} onChange={(v) => setUi({ humanDetect: v })} />
             </div>
             <div className="wc-set-side">
               <div className="wc-set-box">
                 <div className="wc-set-box-t">Response Time</div>
-                <SetRadioRow name="resp" label="Instant" defaultChecked />
-                <SetRadioRow name="resp" label="30 Seconds" />
-                <SetRadioRow name="resp" label="1 Minute" />
-                <SetRadioRow name="resp" label="2 Minutes" />
+                {[["instant", "Instant"], ["30s", "30 Seconds"], ["1m", "1 Minute"], ["2m", "2 Minutes"]].map(([val, label]) => (
+                  <SetRadioRow key={val} name="resp" label={label} checked={uiStr("responseTime", "instant") === val} onChange={() => setUi({ responseTime: val })} />
+                ))}
               </div>
               <div className="wc-set-box">
-                <div className="wc-set-box-t">Business Hours</div>
+                <div className="wc-set-box-t">Business Hours{availability && availability.enabled === false ? <span style={{ marginLeft: 6, fontWeight: 500, color: "#9CA3AF" }}>(booking off)</span> : null}</div>
                 <div className="wc-set-bh">
-                  <div>
-                    <div className="wc-set-bh-time">9:00 AM – 7:00 PM</div>
-                    <div className="wc-set-bh-days">Mon – Sun</div>
+                  <div style={{ minWidth: 0 }}>
+                    {hoursSummary.length === 0 ? (
+                      <div className="wc-set-bh-days">Loading…</div>
+                    ) : hoursSummary.length === 1 ? (
+                      <>
+                        <div className="wc-set-bh-time">{hoursSummary[0]!.time}</div>
+                        <div className="wc-set-bh-days">{hoursSummary[0]!.days}</div>
+                      </>
+                    ) : (
+                      hoursSummary.map((g, i) => (
+                        <div key={i} className="wc-set-bh-days" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                          <span style={{ fontWeight: 600 }}>{g.days}</span>
+                          <span>{g.time}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
-                  <button className="wc-set-bh-edit"><Icon name="pencil" size={14} /></button>
+                  <button className="wc-set-bh-edit" title="Edit business hours" aria-label="Edit business hours" onClick={() => setShowHours(true)}><Icon name="pencil" size={14} /></button>
                 </div>
               </div>
             </div>
@@ -218,17 +314,17 @@ export function AISettings() {
         <SetCard title="Outbound AI" desc="How AI follows up with leads">
           <div className="wc-set-split">
             <div className="wc-set-panel">
-              <SetToggleRow title="Follow-Up AI" desc="Automatically follow up with new leads" on={tg.followUp} onChange={(v) => set("followUp", v)} />
-              <SetToggleRow title="Lead Nurture" desc="Nurture leads over time" on={tg.nurture} onChange={(v) => set("nurture", v)} />
-              <SetToggleRow title="Re-engagement" desc="Re-engage inactive leads" on={tg.reengage} onChange={(v) => set("reengage", v)} />
+              <SetToggleRow title="Follow-Up AI" desc="Automatically follow up with new leads" on={uiBool("followUp")} onChange={(v) => setUi({ followUp: v })} />
+              <SetToggleRow title="Lead Nurture" desc="Nurture leads over time" on={uiBool("nurture")} onChange={(v) => setUi({ nurture: v })} />
+              <SetToggleRow title="Re-engagement" desc="Re-engage inactive leads" on={uiBool("reengage")} onChange={(v) => setUi({ reengage: v })} />
               <SetToggleRow title="Stop On Reply" desc="Stop sequence when lead replies" on={arOn("stop_on_reply")} onChange={(v) => arSet.mutate({ stop_on_reply: v })} />
             </div>
             <div className="wc-set-side">
               <div className="wc-set-box">
                 <div className="wc-set-box-t">Follow-Up Frequency</div>
-                <SetRadioRow name="freq" label="Aggressive" desc="More frequent follow ups" />
-                <SetRadioRow name="freq" label="Standard" desc="Recommended" defaultChecked />
-                <SetRadioRow name="freq" label="Light" desc="Less frequent follow ups" />
+                {[["aggressive", "Aggressive", "More frequent follow ups"], ["standard", "Standard", "Recommended"], ["light", "Light", "Less frequent follow ups"]].map(([val, label, desc]) => (
+                  <SetRadioRow key={val} name="freq" label={label} desc={desc} checked={uiStr("followUpFrequency", "standard") === val} onChange={() => setUi({ followUpFrequency: val })} />
+                ))}
               </div>
             </div>
           </div>
@@ -266,7 +362,7 @@ export function AISettings() {
             <div className="wc-set-box">
               <div className="wc-set-box-t">Book Appointment When:</div>
               <div className="wc-set-checks">
-                {["Lead is qualified", "Lead asks to tour", "Lead requests pricing", "Lead requests consultation"].map((q) => <SetCheck key={q} label={q} />)}
+                {["Lead is qualified", "Lead asks to tour", "Lead requests pricing", "Lead requests consultation"].map((q) => <SetCheck key={q} label={q} checked={uiGroupOn("apptRules", q)} onChange={(v) => setUiGroup("apptRules", q, v)} />)}
               </div>
             </div>
             <div className="wc-set-box">
@@ -277,29 +373,33 @@ export function AISettings() {
                   <div className="wc-set-cal-name">Google Calendar</div>
                   <div className="wc-set-cal-status"><Icon name="check" size={12} />Connected</div>
                 </div>
-                <button className="wc-set-cal-more"><Icon name="more" size={16} /></button>
+                <button className="wc-set-cal-more" onClick={() => navigate("/settings?tab=integrations")}><Icon name="more" size={16} /></button>
               </div>
-              <button className="wc-set-editq">Manage Calendars</button>
+              <button className="wc-set-editq" onClick={() => navigate("/settings?tab=integrations")}>Manage Calendars</button>
             </div>
           </div>
         </SetCard>
 
         <SetCard title="Human Takeover" desc="When AI should notify you or transfer">
           <div className="wc-set-checks wc-set-checks-2">
-            {["Lead requests human", "AI confidence is low", "Lead asks a legal question", "Contract or agreement questions", "Lead becomes frustrated", "Urgent or sensitive issues"].map((q) => <SetCheck key={q} label={q} />)}
+            {["Lead requests human", "AI confidence is low", "Lead asks a legal question", "Contract or agreement questions", "Lead becomes frustrated", "Urgent or sensitive issues"].map((q) => <SetCheck key={q} label={q} checked={uiGroupOn("takeoverRules", q)} onChange={(v) => setUiGroup("takeoverRules", q, v)} />)}
           </div>
           <div className="wc-set-box" style={{ marginTop: 16 }}>
             <div className="wc-set-box-t">Notification Method</div>
-            <div className="wc-set-select">In-App + Email <Icon name="chevronDown" size={14} /></div>
+            <select className="wc-set-select" value={uiStr("notifyMethod", "In-App + Email")} onChange={(e) => setUi({ notifyMethod: e.target.value })}>
+              <option>In-App + Email</option>
+              <option>In-App only</option>
+              <option>Email only</option>
+            </select>
           </div>
         </SetCard>
 
         <SetCard title="Notifications" desc="Alerts and updates about important events">
           <div className="wc-set-notifs">
-            <NotifRow icon="flame" tone="violet" title="Hot Lead Alert" desc="Notify when a lead shows high intent" on={tg.nHot} onChange={(v) => set("nHot", v)} />
+            <NotifRow icon="flame" tone="violet" title="Hot Lead Alert" desc="Notify when a lead shows high intent" on={uiBool("nHot")} onChange={(v) => setUi({ nHot: v })} />
             <NotifRow icon="calendarCheck" tone="green" title="Appointment Ready" desc="Notify when an appointment is booked" on={notifyAppt} onChange={(v) => setNotif.mutate({ notify_appointments: v })} />
-            <NotifRow icon="user" tone="orange" title="Human Takeover Required" desc="Notify when AI needs your attention" on={tg.nHuman} onChange={(v) => set("nHuman", v)} />
-            <NotifRow icon="alert" tone="blue" title="Missed Appointment" desc="Notify when appointment is missed or cancelled" on={tg.nMissed} onChange={(v) => set("nMissed", v)} />
+            <NotifRow icon="user" tone="orange" title="Human Takeover Required" desc="Notify when AI needs your attention" on={uiBool("nHuman")} onChange={(v) => setUi({ nHuman: v })} />
+            <NotifRow icon="alert" tone="blue" title="Missed Appointment" desc="Notify when appointment is missed or cancelled" on={uiBool("nMissed")} onChange={(v) => setUi({ nMissed: v })} />
           </div>
         </SetCard>
 
@@ -335,11 +435,11 @@ export function AISettings() {
 
         <SetCard title="Knowledge Base" desc="Information AI uses to answer questions">
           <div className="wc-set-kbs">
-            <KbRow icon="user" label="Agent Bio" />
-            <KbRow icon="pin" label="Service Areas" />
-            <KbRow icon="building" label="Office Information" />
-            <KbRow icon="file" label="FAQ" />
-            <KbRow icon="clipboard" label="Custom Documents" />
+            <KbRow icon="user" label="Agent Bio" onEdit={() => navigate("/settings?tab=workspace")} />
+            <KbRow icon="pin" label="Service Areas" onEdit={() => navigate("/settings?tab=workspace")} />
+            <KbRow icon="building" label="Office Information" onEdit={() => navigate("/settings?tab=organization")} />
+            <KbRow icon="file" label="FAQ" onEdit={() => navigate("/ai/agent?tab=inbound")} />
+            <KbRow icon="clipboard" label="Custom Documents" onEdit={() => navigate("/ai/agent?tab=inbound")} />
           </div>
         </SetCard>
       </div>

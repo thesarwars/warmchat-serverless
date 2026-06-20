@@ -155,40 +155,21 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const pageRaw = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSizeRaw = Math.min(300, Math.max(1, Number(url.searchParams.get("page_size")) || 10));
 
-  // All leads in the org keyed by id.
-  const leads = await queryAll<{
+  // ---- All org-scoped reads in ONE concurrent batch -----------------------
+  // leads + the three conversation-enrichment reads are independent (each only
+  // needs org_id), so we issue them in a SINGLE Promise.all instead of four
+  // back-to-back awaits. Sequentially these round-trips were the bulk of this
+  // endpoint's latency - the multi-second "Loading conversations..." that showed
+  // on every keystroke search. The in-memory contact maps + enrichment are built
+  // from the results afterward (pure JS, no further round-trips).
+  type LeadRow = {
     id: number; name: string | null; first_name: string | null; last_name: string | null;
     email: string | null; phone: string | null; status: string | null; company: string | null;
     property_address: string | null; price_range: string | null; notes: string | null;
     email_notifications_enabled: number; sms_notifications_enabled: number;
     lead_type: string | null; intent: string | null; ai_status: string | null; timezone: string | null;
     sms_opt_out: number | null; email_opt_out: number | null;
-  }>(
-    env.D1DB,
-    `SELECT id, name, first_name, last_name, email, phone, status, company,
-            property_address, price_range, notes,
-            email_notifications_enabled, sms_notifications_enabled,
-            lead_type, intent, ai_status, timezone,
-            sms_opt_out, email_opt_out
-       FROM lead WHERE org_id = ?`,
-    orgId,
-  );
-  if (!leads.length) return json({ contacts: [] });
-
-  const byId = new Map<number, ContactEntry>();
-  const byEmail = new Map<string, ContactEntry>();
-  const byPhoneSuffix = new Map<string, ContactEntry>();
-  for (const l of leads) {
-    const e = makeEntry(l);
-    byId.set(l.id, e);
-    if (l.email) byEmail.set(l.email.toLowerCase(), e);
-    if (l.phone) {
-      const digits = l.phone.replace(/\D/g, "");
-      if (digits.length >= 10) byPhoneSuffix.set(digits.slice(-10), e);
-    }
-  }
-
-  // ---- Email threads/messages ----
+  };
   type ThreadAgg = {
     thread_id: number; subject: string | null; updated_at: string | null;
     last_inbound_email: string | null;
@@ -198,9 +179,29 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     last_direction: string | null;
     unread_count: number;
   };
-  const threadAggs = await queryAll<ThreadAgg>(
-    env.D1DB,
-    `SELECT t.id AS thread_id, t.subject, t.updated_at,
+  type PerRecip = { email: string; thread_id: number; body: string | null; ts: string | null };
+  type SmsAgg = {
+    conversation_id: number; phone_e164: string; last_message_at: string | null;
+    last_body: string | null; last_direction: string | null; unread_count: number;
+  };
+
+  const [leads, threadAggs, perRecipient, smsAggs] = await Promise.all([
+    // All leads in the org - the search corpus AND the source of the
+    // byId/byEmail/byPhone maps the enrichment results are applied to.
+    queryAll<LeadRow>(
+      env.D1DB,
+      `SELECT id, name, first_name, last_name, email, phone, status, company,
+            property_address, price_range, notes,
+            email_notifications_enabled, sms_notifications_enabled,
+            lead_type, intent, ai_status, timezone,
+            sms_opt_out, email_opt_out
+       FROM lead WHERE org_id = ?`,
+      orgId,
+    ),
+    // Email threads: latest in/out address, last body/ts/direction, unread.
+    queryAll<ThreadAgg>(
+      env.D1DB,
+      `SELECT t.id AS thread_id, t.subject, t.updated_at,
             (SELECT LOWER(im.sender_email) FROM inbox_messages im
                WHERE im.thread_id=t.id AND im.direction='inbound'
                ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_inbound_email,
@@ -220,8 +221,68 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
                WHERE im.thread_id=t.id AND im.is_read=0) AS unread_count
        FROM thread t JOIN inbox i ON t.inbox_id=i.id
       WHERE i.org_id = ?`,
-    orgId,
-  );
+      orgId,
+    ),
+    // Per-recipient email recency (shared-thread fix). Campaign emails are filed
+    // into ONE shared thread, so the thread-level match above only credits that
+    // thread to its single most-recent recipient - every other lead would show a
+    // STALE time. This derives each lead's OWN latest outbound email by recipient
+    // address. ONE cheap GROUP BY scan; SQLite returns thread_id/body from the row
+    // holding MAX(ts) (bare-column-with-aggregate).
+    queryAll<PerRecip>(
+      env.D1DB,
+      `SELECT LOWER(im.to_email) AS email, im.thread_id, im.body,
+              MAX(COALESCE(im.message_date, im.created_at)) AS ts
+         FROM inbox_messages im
+         JOIN thread t ON im.thread_id = t.id
+         JOIN inbox i ON t.inbox_id = i.id
+        WHERE i.org_id = ? AND im.direction = 'outbound'
+          AND im.to_email IS NOT NULL AND im.to_email != ''
+        GROUP BY LOWER(im.to_email)`,
+      orgId,
+    ),
+    // SMS conversations: last body/direction + unread per conversation. Computed
+    // as TWO org-scoped grouped scans of sms_message (latest message + unread
+    // count) joined to the conversations - NOT a correlated subquery per row. This
+    // org has thousands of SMS conversations, so the OLD per-conversation
+    // subqueries (3x + EXISTS, ~11k executions) were the dominant cost of this
+    // endpoint - the multi-second "stuck loading". The INNER JOIN to the latest
+    // message group implicitly drops empty conversations (replaces the old EXISTS
+    // guard); SQLite's MAX()-with-bare-columns returns body/direction of the
+    // latest row.
+    queryAll<SmsAgg>(
+      env.D1DB,
+      `SELECT c.id AS conversation_id, sc.phone_number_e164 AS phone_e164,
+              c.last_message_at, lm.body AS last_body, lm.direction AS last_direction,
+              COALESCE(ur.unread, 0) AS unread_count
+         FROM sms_conversation c
+         JOIN sms_contact sc ON c.contact_id = sc.id
+         JOIN (SELECT conversation_id, body, direction, MAX(created_at) AS mx
+                 FROM sms_message WHERE org_id = ? GROUP BY conversation_id) lm
+           ON lm.conversation_id = c.id
+         LEFT JOIN (SELECT conversation_id, COUNT(*) AS unread
+                      FROM sms_message
+                     WHERE org_id = ? AND direction='inbound' AND is_read=0
+                     GROUP BY conversation_id) ur
+           ON ur.conversation_id = c.id
+        WHERE c.org_id = ?`,
+      orgId, orgId, orgId,
+    ),
+  ]);
+  if (!leads.length) return json({ contacts: [] });
+
+  const byId = new Map<number, ContactEntry>();
+  const byEmail = new Map<string, ContactEntry>();
+  const byPhoneSuffix = new Map<string, ContactEntry>();
+  for (const l of leads) {
+    const e = makeEntry(l);
+    byId.set(l.id, e);
+    if (l.email) byEmail.set(l.email.toLowerCase(), e);
+    if (l.phone) {
+      const digits = l.phone.replace(/\D/g, "");
+      if (digits.length >= 10) byPhoneSuffix.set(digits.slice(-10), e);
+    }
+  }
 
   for (const t of threadAggs) {
     const candidate = (t.last_inbound_email && byEmail.get(t.last_inbound_email))
@@ -243,30 +304,25 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // ---- SMS conversations ----
-  type SmsAgg = {
-    conversation_id: number; phone_e164: string; last_message_at: string | null;
-    last_body: string | null; last_direction: string | null; unread_count: number;
-  };
-  const smsAggs = await queryAll<SmsAgg>(
-    env.D1DB,
-    `SELECT c.id AS conversation_id, sc.phone_number_e164 AS phone_e164,
-            c.last_message_at,
-            (SELECT m.body FROM sms_message m WHERE m.conversation_id=c.id
-              ORDER BY m.created_at DESC LIMIT 1) AS last_body,
-            (SELECT m.direction FROM sms_message m WHERE m.conversation_id=c.id
-              ORDER BY m.created_at DESC LIMIT 1) AS last_direction,
-            (SELECT COUNT(*) FROM sms_message m
-              WHERE m.conversation_id=c.id AND m.direction='inbound' AND m.is_read=0) AS unread_count
-       FROM sms_conversation c JOIN sms_contact sc ON c.contact_id=sc.id
-      -- Only surface conversations that actually have a message. A row stranded
-      -- with zero messages (e.g. a dispatcher that created the conversation then
-      -- crashed before persisting the message) must not show as an empty thread.
-      WHERE c.org_id = ?
-        AND EXISTS (SELECT 1 FROM sms_message m WHERE m.conversation_id = c.id)`,
-    orgId,
-  );
+  // ---- Per-recipient email recency (shared-thread fix) - applied below ----
+  for (const r of perRecipient) {
+    const candidate = r.email ? byEmail.get(r.email) : undefined;
+    if (!candidate) continue;
+    candidate.has_email_history = true;
+    if (r.thread_id && !candidate.email_thread_ids.includes(r.thread_id)) {
+      candidate.email_thread_ids = [...candidate.email_thread_ids, r.thread_id].sort((a, b) => a - b);
+    }
+    if (r.ts && (!candidate.last_activity_at || r.ts > candidate.last_activity_at)) {
+      candidate.last_activity_at = r.ts;
+      candidate.last_activity_channel = "email";
+      candidate.last_activity_label = fmtLabel("email", r.ts);
+      candidate.last_activity_direction = "outbound";
+      candidate.preview = r.body || candidate.preview;
+      if (r.thread_id) candidate.latest_email_thread_id = r.thread_id;
+    }
+  }
 
+  // ---- SMS conversations - applied below ----
   for (const s of smsAggs) {
     const digits = (s.phone_e164 || "").replace(/\D/g, "");
     if (digits.length < 10) continue;
@@ -285,19 +341,30 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
   }
 
-  const all: ContactEntry[] = [];
+  const all: ContactEntry[] = [];        // contacts with an actual conversation
+  const everyone: ContactEntry[] = [];   // every lead in the org (for search)
   for (const e of byId.values()) {
     e.total_unread_count = e.email_unread_count + e.sms_unread_count;
     // "Needs reply" = the lead spoke last. Read state is deliberately NOT part
     // of this - opening a thread to read it doesn't discharge the obligation to
     // reply, so reading must not clear the flag (only an outbound message does).
     e.needs_reply = e.last_activity_direction === "inbound";
+    everyone.push(e);
     if (e.has_email_history || e.has_sms_history) all.push(e);
   }
   all.sort((a, b) => (b.last_activity_at || "").localeCompare(a.last_activity_at || ""));
+  everyone.sort((a, b) => (b.last_activity_at || "").localeCompare(a.last_activity_at || ""));
 
-  // Search filter (applied in memory after building the full index).
-  const filtered = searchQuery ? all.filter((c) => contactMatchesSearch(c, searchQuery)) : all;
+  // Default list = contacts that actually have a conversation. But a SEARCH must
+  // be able to find ANY lead, even one never messaged yet (e.g. a lead sitting in
+  // a queued campaign whose sends haven't fired), so the user can open it and
+  // start a conversation - exactly like FUB/Lofty/GHL. So when a search term is
+  // present we match against every lead; otherwise we only surface real
+  // conversations. (Both sets share the same ContactEntry objects, so a searched
+  // lead that DOES have history still carries its preview / unread / channel
+  // state.)
+  const base = searchQuery ? everyone : all;
+  const filtered = searchQuery ? base.filter((c) => contactMatchesSearch(c, searchQuery)) : base;
 
   // Active filter chip applied SERVER-SIDE. The list is paginated/capped, so a
   // contact that matches a chip (e.g. a brand-new inbound that "needs reply")

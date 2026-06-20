@@ -27,26 +27,37 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     for (let i = 13; i >= 0; i--) out.push(m.get(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10)) ?? 0);
     return out;
   };
-  // Avg first-ish response time: per conversation, last-inbound -> last-outbound
-  // (the same heuristic the dashboard uses for email threads), in seconds.
-  const avgReply = (ins: { k: number; t: string }[], outs: { k: number; t: string }[]) => {
-    const outMap = new Map(outs.map((o) => [o.k, o.t]));
-    const deltas: number[] = [];
-    for (const i of ins) {
-      const o = outMap.get(i.k);
-      if (!o) continue;
-      const d = (new Date(o).getTime() - new Date(i.t).getTime()) / 1000;
-      if (d > 0) deltas.push(d);
-    }
-    return deltas.length ? Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length) : null;
+  // Median first-response time (seconds): per conversation, the gap from the
+  // lead's FIRST inbound this month to the FIRST outbound that follows it.
+  // MEDIAN (with a 24h cap) — NOT mean — because the distribution is bimodal:
+  // most replies are the sub-minute AI agent, but a few days-later manual /
+  // catch-up replies would wreck a plain average. (The old code averaged
+  // last-outbound MINUS last-inbound per conversation with no month scope, which
+  // measured the gap to a later unrelated campaign blast -> the absurd ~2877 min.
+  // Verified on live data: that bug = 2877 min; this median = ~65s.)
+  const medianReply = (rows: { sec: number }[]): number | null => {
+    const v = rows
+      .map((r) => Number(r.sec))
+      .filter((s) => s > 0 && s <= 86400) // positive + within 24h (drop catch-up outliers)
+      .sort((a, b) => a - b);
+    if (!v.length) return null;
+    const m = Math.floor(v.length / 2);
+    return Math.round(v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2);
   };
 
   // ---------------------------- SMS ----------------------------------------
+  // DELIVERED = carrier-accepted (any outbound NOT 'failed'/'queued'). Telnyx
+  // accepts ~96% of sends, but its delivery-receipt (DLR) webhook only flips a
+  // small fraction to status='delivered' on the bulk path, so counting strictly
+  // status='delivered' reported a bogus ~3% delivery rate for a working campaign.
+  // Treating accepted-not-failed as delivered reflects reality until DLR webhook
+  // coverage is complete. (Wiring the Telnyx DLR webhook for campaign sends is
+  // the upstream fix so 'delivered' can become confirmed-delivered.)
   const sms = await queryFirst<{ sent: number; delivered: number; replies: number }>(
     env.D1DB,
     `SELECT
        SUM(CASE WHEN direction='outbound' THEN 1 ELSE 0 END) AS sent,
-       SUM(CASE WHEN direction='outbound' AND status='delivered' THEN 1 ELSE 0 END) AS delivered,
+       SUM(CASE WHEN direction='outbound' AND status NOT IN ('failed','queued') THEN 1 ELSE 0 END) AS delivered,
        SUM(CASE WHEN direction='inbound' THEN 1 ELSE 0 END) AS replies
      FROM sms_message
      WHERE org_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')`, orgId);
@@ -67,14 +78,24 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     `SELECT date(created_at) AS d, COUNT(*) AS n FROM sms_message
       WHERE org_id = ? AND direction='outbound' AND date(created_at) >= date('now','-13 days')
       GROUP BY date(created_at)`, orgId);
-  const smsIns = await queryAll<{ k: number; t: string }>(
+  // First-response times: per conversation, the lead's FIRST inbound this month
+  // -> the FIRST outbound that follows it, in seconds. (Replaces the old
+  // last-inbound/last-outbound pairing that produced the bogus ~2877 min.)
+  const smsReplyRows = await queryAll<{ sec: number }>(
     env.D1DB,
-    `SELECT conversation_id AS k, MAX(created_at) AS t FROM sms_message
-      WHERE org_id = ? AND direction='inbound' GROUP BY conversation_id`, orgId);
-  const smsOuts = await queryAll<{ k: number; t: string }>(
-    env.D1DB,
-    `SELECT conversation_id AS k, MAX(created_at) AS t FROM sms_message
-      WHERE org_id = ? AND direction='outbound' GROUP BY conversation_id`, orgId);
+    `WITH first_in AS (
+       SELECT conversation_id AS k, MIN(created_at) AS t_in
+         FROM sms_message
+        WHERE org_id = ? AND direction='inbound'
+          AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')
+        GROUP BY conversation_id
+     )
+     SELECT (julianday(MIN(o.created_at)) - julianday(fi.t_in)) * 86400.0 AS sec
+       FROM first_in fi
+       JOIN sms_message o
+         ON o.conversation_id = fi.k AND o.org_id = ?
+        AND o.direction='outbound' AND o.created_at > fi.t_in
+      GROUP BY fi.k`, orgId, orgId);
 
   const smsSent = Number(sms?.sent ?? 0);
 
@@ -144,7 +165,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       delivered_pct: pct(Number(sms?.delivered ?? 0), smsSent),
       replies: Number(sms?.replies ?? 0),
       reply_rate: pct(Number(sms?.replies ?? 0), smsSent),
-      avg_reply_seconds: avgReply(smsIns, smsOuts),
+      avg_reply_seconds: medianReply(smsReplyRows),
       opt_outs: Number(smsOptOut?.n ?? 0),
       opt_out_pct: pct(Number(smsOptOut?.n ?? 0), smsSent),
       chart: last14(smsChartRows),

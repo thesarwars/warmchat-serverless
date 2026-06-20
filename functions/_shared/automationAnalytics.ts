@@ -16,6 +16,17 @@ import {
 
 const HIGH_INTENT_VALUES = new Set(["interested", "high intent", "high_intent", "high-intent"]);
 
+// D1 caps bound params per statement (~100). A per-automation IN-list of every
+// lead phone/id overflows that on a large campaign (e.g. 1,375 leads), throwing
+// "too many SQL variables" -> the whole /details endpoint 500s. Chunk every
+// IN-list well under the cap and aggregate in JS.
+const IN_CHUNK = 90;
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 function normEmail(value: string | null | undefined): string {
   return (value || "").trim().toLowerCase();
 }
@@ -58,20 +69,22 @@ export async function countOutboundMessagesSent(
   }
 
   if (phones.length > 0 && automation.created_at) {
-    const placeholders = phones.map(() => "?").join(",");
-    const row = await queryFirst<{ n: number }>(
-      env.D1DB,
-      `SELECT COUNT(m.id) AS n
-         FROM sms_message m
-         JOIN sms_conversation c ON c.id = m.conversation_id
-         JOIN sms_contact ct ON ct.id = c.contact_id
-        WHERE c.org_id = ?
-          AND m.direction = 'outbound'
-          AND ct.phone_number_e164 IN (${placeholders})
-          AND m.created_at >= ?`,
-      orgId, ...phones, automation.created_at,
-    );
-    total += row?.n ?? 0;
+    for (const part of chunk(phones, IN_CHUNK)) {
+      const placeholders = part.map(() => "?").join(",");
+      const row = await queryFirst<{ n: number }>(
+        env.D1DB,
+        `SELECT COUNT(m.id) AS n
+           FROM sms_message m
+           JOIN sms_conversation c ON c.id = m.conversation_id
+           JOIN sms_contact ct ON ct.id = c.contact_id
+          WHERE c.org_id = ?
+            AND m.direction = 'outbound'
+            AND ct.phone_number_e164 IN (${placeholders})
+            AND m.created_at >= ?`,
+        orgId, ...part, automation.created_at,
+      );
+      total += row?.n ?? 0;
+    }
   }
 
   const contacts = leads.length;
@@ -86,18 +99,22 @@ export async function countConvertedLeads(
   const ids = leadIdsFromAutomation(leads);
   if (ids.length === 0) return 0;
 
-  const placeholders = ids.map(() => "?").join(",");
-  const params: unknown[] = [orgId, ...ids];
-  let sql =
-    `SELECT COUNT(id) AS n FROM lead_appointment
-      WHERE org_id = ? AND lead_id IN (${placeholders})
-        AND COALESCE(status, '') <> 'cancelled'`;
-  if (automation.created_at) {
-    sql += ` AND created_at >= ?`;
-    params.push(automation.created_at);
+  let total = 0;
+  for (const part of chunk(ids, IN_CHUNK)) {
+    const placeholders = part.map(() => "?").join(",");
+    const params: unknown[] = [orgId, ...part];
+    let sql =
+      `SELECT COUNT(id) AS n FROM lead_appointment
+        WHERE org_id = ? AND lead_id IN (${placeholders})
+          AND COALESCE(status, '') <> 'cancelled'`;
+    if (automation.created_at) {
+      sql += ` AND created_at >= ?`;
+      params.push(automation.created_at);
+    }
+    const row = await queryFirst<{ n: number }>(env.D1DB, sql, ...params);
+    total += row?.n ?? 0;
   }
-  const row = await queryFirst<{ n: number }>(env.D1DB, sql, ...params);
-  return row?.n ?? 0;
+  return total;
 }
 
 export interface LeadReplyStats {
@@ -231,24 +248,27 @@ async function loadSmsRepliesByLead(
   }
   if (phones.length === 0) return new Map();
 
-  const placeholders = phones.map(() => "?").join(",");
-  const params: unknown[] = [orgId, ...phones];
-  let where =
-    `c.org_id = ? AND ct.phone_number_e164 IN (${placeholders}) AND m.direction = 'inbound'`;
-  if (automation.created_at) {
-    where += ` AND m.created_at >= ?`;
-    params.push(automation.created_at);
+  const rows: SmsInboundRow[] = [];
+  for (const part of chunk(phones, IN_CHUNK)) {
+    const placeholders = part.map(() => "?").join(",");
+    const params: unknown[] = [orgId, ...part];
+    let where =
+      `c.org_id = ? AND ct.phone_number_e164 IN (${placeholders}) AND m.direction = 'inbound'`;
+    if (automation.created_at) {
+      where += ` AND m.created_at >= ?`;
+      params.push(automation.created_at);
+    }
+    const part_rows = await queryAll<SmsInboundRow>(
+      env.D1DB,
+      `SELECT m.body, m.created_at, ct.phone_number_e164, c.id AS conversation_id
+         FROM sms_message m
+         JOIN sms_conversation c ON c.id = m.conversation_id
+         JOIN sms_contact ct ON ct.id = c.contact_id
+        WHERE ${where}`,
+      ...params,
+    );
+    rows.push(...part_rows);
   }
-
-  const rows = await queryAll<SmsInboundRow>(
-    env.D1DB,
-    `SELECT m.body, m.created_at, ct.phone_number_e164, c.id AS conversation_id
-       FROM sms_message m
-       JOIN sms_conversation c ON c.id = m.conversation_id
-       JOIN sms_contact ct ON ct.id = c.contact_id
-      WHERE ${where}`,
-    ...params,
-  );
 
   return aggregateSmsRows(rows);
 }
@@ -477,9 +497,12 @@ export async function computeAutomationStatsBatch(
     .filter((t): t is number => t != null && Number.isFinite(t));
   const threadPh = threadIds.map(() => "?").join(",");
 
-  // Five org-wide reads in parallel. Email is scoped by the automation threads;
+  // Org-wide reads in parallel. Email is scoped by the automation threads;
   // SMS + appointments are scoped by org and sliced per-automation in memory.
-  const [emailRows, emailOutRows, smsInRows, smsOutRows, apptRows] = await Promise.all([
+  // The scheduled_message sent-count gives the REAL number of messages actually
+  // sent per automation (status='sent'), so SENT/DELIVERED reflect reality
+  // instead of being floored to the lead count.
+  const [emailRows, emailOutRows, smsInRows, smsOutRows, apptRows, sentRows] = await Promise.all([
     threadIds.length
       ? queryAll<OrgEmailInboundRow>(
           env.D1DB,
@@ -525,7 +548,19 @@ export async function computeAutomationStatsBatch(
         WHERE org_id = ? AND COALESCE(status, '') <> 'cancelled'`,
       orgId,
     ),
+    queryAll<{ automation_id: number; sent: number }>(
+      env.D1DB,
+      `SELECT automation_id, COUNT(*) AS sent
+         FROM scheduled_message
+        WHERE org_id = ? AND status = 'sent' AND automation_id IS NOT NULL
+        GROUP BY automation_id`,
+      orgId,
+    ),
   ]);
+  // Real messages-sent per automation (status='sent'). Delivery isn't tracked
+  // separately on scheduled_message, so DELIVERED mirrors real SENT here.
+  const sentByAutomation = new Map<number, number>();
+  for (const r of sentRows) sentByAutomation.set(Number(r.automation_id), Number(r.sent));
 
   // Bucket org-wide rows by their natural key.
   const emailByThread = new Map<number, OrgEmailInboundRow[]>();
@@ -591,7 +626,11 @@ export async function computeAutomationStatsBatch(
         for (const ts of stamps) if (ts && ts >= cutoff) outbound += 1;
       }
     }
-    const messagesSent = Math.max(outbound, leads.length);
+    // REAL messages sent for this automation (from scheduled_message status='sent').
+    // Fall back to the materialized outbound count only if no scheduled rows exist
+    // (legacy automations). No longer floored to lead count, so SENT/DELIVERED are
+    // the true number of messages that went out, not the audience size.
+    const messagesSent = sentByAutomation.get(Number(automation.id)) ?? outbound;
 
     // Conversions: appointment rows for the automation's (deduped) lead ids since
     // the automation was created.

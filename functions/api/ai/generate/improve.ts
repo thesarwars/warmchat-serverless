@@ -3,6 +3,7 @@ import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { generateWithOpenAI } from "../../../_shared/openai.ts";
+import { humanizeDashes } from "../../../_shared/humanizeText.ts";
 import { sanitizePlaceholders } from "../../../_shared/placeholders.ts";
 import { queryFirst } from "../../../_shared/db.ts";
 import { checkUsageLimit, getOrgPlan, incrementUsage } from "../../../_shared/usageCounter.ts";
@@ -59,8 +60,8 @@ OUTPUT - CRITICAL:
 PERSONALIZATION:
 - Honor the Persona, Tone, Channel, and Lead Data in the user prompt.
 - When Lead Data has a concrete value (first name, area/city, property type, price range, timeline, source), weave it in naturally instead of using a placeholder. Example: lead_data area="Pasadena" -> write "homes in Pasadena", not "{area}".
-- When a field is missing, fall back to one of these placeholder tokens so the CRM can fill it: {firstname}, {lastname}, {fullname}, {email}, {phone}, {area}, {agent_name}, {agentfirstname}, {agentfullname}, {sendername}, {senderfullname}, {company_name}.
-- Preserve every placeholder already in the raw draft exactly as written (same brace style: {firstname} or {{first_name}}).
+- MISSING DATA (critical): if Lead Data has NO concrete value for a detail (area/city, price, timeline, property type, source, etc.), do NOT mention that detail and do NOT emit a placeholder for it. Write a complete, natural sentence that stands on its own without it. NEVER leave a dangling phrase like "still looking in" or "homes in" with nothing after it. Example with no area -> "Hi {firstname}, are you still looking for a home?" (GOOD), NOT "Hi {firstname}, still looking in {area}?" (BAD - broken when area is empty).
+- The ONLY placeholders you may emit are {firstname} and {agent_name} - both are always filled. Preserve a placeholder already in the raw draft, but NEVER add a placeholder for a detail you don't have a value for.
 
 CHANNEL RULES:
 - SMS: short, conversational, no signature. HARD LIMIT - ${SMS_MAX_CHARS} characters maximum (2 segments). Count before returning. If you're over, rewrite tighter until it fits. Aim for ≤160 chars (1 segment) when possible. Never pad with emoji or filler to hit a length.
@@ -84,7 +85,13 @@ VOICE & SUBSTANCE:
 - Never invent facts, prices, square footage, comps, guarantees, or fake urgency. If it isn't in lead_data or the raw draft, don't claim it.
 - Soft CTA only if the original implied one. A question beats a command.
 - No markdown asterisks, bold, headers, or bullet lists.
-- Stay on real estate outreach.`;
+- PUNCTUATION (important): NEVER use an em-dash (—) or en-dash (–), and don't use " - " as a dash. Use a comma, a period, or two short sentences instead. Em-dashes read as AI-written; agents want copy that looks human.
+- Stay on real estate outreach.
+
+GRAMMAR & SENSE - FINAL CHECK before you return:
+- Re-read the message. It MUST be a grammatically complete, natural sentence a real agent would actually send out loud. No dangling prepositions ("looking in?"), no blank spots, no awkward fragments.
+- If a sentence only makes sense with a detail you don't have, REWRITE it so it reads perfectly without that detail.
+- It should sound like a person wrote it, not a template.`;
 
 // Output override appended to the system prompt when the caller wants a subject
 // (email AI Assist). Turns the "body only" contract into a JSON {subject, body}.
@@ -149,6 +156,8 @@ function cleanRewrite(text: string): string {
   }
   cleaned = cleaned.replace(/[ \t]+\n/g, "\n");
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  // Guarantee no em-dash slips through even if the model ignores the prompt rule.
+  cleaned = humanizeDashes(cleaned);
   return cleaned.trim();
 }
 

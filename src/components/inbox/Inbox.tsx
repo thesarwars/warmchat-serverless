@@ -27,6 +27,7 @@ import {
   ArrowLeft,
   Bell,
   Calendar,
+  ChevronDown,
   Eye,
   ImageIcon,
   Loader2,
@@ -284,7 +285,7 @@ const INBOX_LIST_FILTERS: { key: InboxListFilter; label: string }[] = [
 ];
 
 type ScheduledSummary = {
-  pending: number; next_at: string | null; due_within_hour: number; sms: number; email: number;
+  pending: number; sent_today: number; next_at: string | null; due_within_hour: number; sms: number; email: number;
   // Day-by-day breakdown in the org's local calendar (server-computed).
   today: number; today_sms: number; today_email: number; tomorrow: number; later: number;
 };
@@ -312,63 +313,49 @@ function nextSendLabel(nextAt: string | null): string {
  * rather than as a floating bar, so it reads as part of that surface. Renders
  * nothing when the queue is empty. Styled to match the inbox panels.
  */
-function ScheduledStrip({ summary }: { summary: ScheduledSummary | null }) {
+function ScheduledStrip({ summary, onViewCampaign }: { summary: ScheduledSummary | null; onViewCampaign?: () => void }) {
+  // Compact, collapsible banner. The inbox is for conversations/replies/hot
+  // leads; the campaign queue is a small status line here, with full detail on
+  // the Campaigns page. Default collapsed so it stays out of the way.
+  const [open, setOpen] = useState(false);
   if (!summary || summary.pending <= 0) return null;
-  const { today, tomorrow, later } = summary;
-  // Headline the soonest non-empty bucket: today if anything goes out today,
-  // otherwise tomorrow, otherwise the rest. This keeps the strip from reading
-  // "0 messages queued to send today" when everything is a future follow-up.
-  const headline =
-    today > 0
-      ? { n: today, label: "queued to send today" }
-      : tomorrow > 0
-        ? { n: tomorrow, label: "queued to send tomorrow" }
-        : { n: later, label: "queued to send" };
-  // Channel split only makes sense for today's batch.
-  const channelBits = today > 0
-    ? [
-        summary.today_sms > 0 ? `${summary.today_sms} SMS` : null,
-        summary.today_email > 0 ? `${summary.today_email} email` : null,
-      ].filter(Boolean).join(" · ")
-    : "";
-  // The buckets that aren't the headline, shown below as future follow-ups.
-  // `later` is the running total of everything from the day after tomorrow on.
-  const futureBits = [
-    today > 0 && tomorrow > 0 ? `${tomorrow} tomorrow` : null,
-    later > 0 ? `${later} after tomorrow` : null,
-  ].filter(Boolean).join(" · ");
+  const pending = summary.pending;
+  const sent = summary.sent_today ?? 0;
+  const muted = "var(--ink-3, #9A948C)";
+  const dot = (
+    <span style={{ position: "relative", display: "inline-flex", width: 8, height: 8, flex: "none" }}>
+      <span className="animate-ping" style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "#34C759", opacity: 0.6 }} />
+      <span style={{ position: "relative", width: 8, height: 8, borderRadius: "50%", background: "#22B14C" }} />
+    </span>
+  );
   return (
-    <div
-      style={{
-        display: "flex", flexDirection: "column", gap: 3,
-        padding: "9px 14px", borderRadius: 16, fontSize: 12.5,
-        background: "var(--panel, #fff)", color: "var(--ink-2, #6B6660)",
-        border: "1px solid var(--line, #E7E3DB)",
-        boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontWeight: 700, color: "var(--ink, #2A2622)" }}>
-          <Loader2 size={13} className="animate-spin" style={{ color: "var(--accent, #E2622C)" }} />
-          {headline.n} message{headline.n === 1 ? "" : "s"} {headline.label}
-        </span>
-        <span style={{ color: "#000" }}>·</span>
-        <span>
-          next <strong style={{ color: "var(--accent, #E2622C)", fontWeight: 700 }}>{nextSendLabel(summary.next_at)}</strong>
-          {summary.due_within_hour > 0 ? ` · ${summary.due_within_hour} within the hour` : ""}
-        </span>
-        {channelBits ? (
-          <>
-            <span style={{ color: "#000" }}>·</span>
-            <span style={{ fontSize: 11, color: "var(--ink-3, #9A948C)" }}>{channelBits}</span>
-          </>
-        ) : null}
-      </div>
-      {futureBits ? (
-        <div style={{ fontSize: 11.5, color: "var(--ink-3, #9A948C)", paddingLeft: 20 }}>
-          Upcoming follow-ups: {futureBits}
+    <div style={{ borderRadius: 12, border: "1px solid var(--line, #E7E3DB)", background: "var(--panel, #fff)", boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden" }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+      >
+        {dot}
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink, #2A2622)" }}>Campaign sending</span>
+        {!open && <span style={{ fontSize: 12, color: muted }}>({pending.toLocaleString()} queued)</span>}
+        <ChevronDown size={15} style={{ marginLeft: "auto", color: muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+      {open && (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, padding: "0 12px 10px 28px", fontSize: 12, color: "var(--ink-2, #6B6660)" }}>
+          <span><strong style={{ color: "var(--ink, #2A2622)" }}>{pending.toLocaleString()}</strong> queued</span>
+          <span style={{ color: muted }}>•</span>
+          <span><strong style={{ color: "var(--ink, #2A2622)" }}>{sent.toLocaleString()}</strong> sent today</span>
+          <span style={{ color: muted }}>•</span>
+          <span>Next batch <strong style={{ color: "var(--accent, #E2622C)", fontWeight: 700 }}>{nextSendLabel(summary.next_at)}</strong></span>
+          {onViewCampaign && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onViewCampaign(); }}
+              style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--accent, #E2622C)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              View campaigns →
+            </button>
+          )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -534,6 +521,26 @@ export default function Inbox() {
   const [showPreview, setShowPreview] = useState(false);
   const [, setUploadingComposeAttachments] = useState(false);
   const [sending, setSending] = useState(false);
+  // Synchronous re-entrancy lock: `sending` state updates async, so rapid Enter
+  // presses could fire two sends before React re-renders. The ref flips
+  // synchronously at the start of the send so the 2nd press is a no-op.
+  const sendingRef = useRef(false);
+  // Composer keyboard prefs. The Shortcuts toggle UI was removed, so these stay
+  // at their defaults: Enter-to-send ON (Shift+Enter = newline), confirm-before-
+  // send OFF. (localStorage is still honored if a value was set previously.)
+  const [enterToSend] = useState<boolean>(
+    () => (typeof localStorage !== "undefined" ? localStorage.getItem("wc_enter_to_send") !== "0" : true),
+  );
+  const [confirmBeforeSend] = useState<boolean>(
+    () => (typeof localStorage !== "undefined" ? localStorage.getItem("wc_confirm_before_send") === "1" : false),
+  );
+  // Touch devices keep their native Enter = newline behavior (mobile unchanged).
+  const isTouchDevice = useMemo(
+    () => typeof window !== "undefined" &&
+      (("ontouchstart" in window) || (navigator.maxTouchPoints ?? 0) > 0 ||
+       (window.matchMedia?.("(pointer: coarse)").matches ?? false)),
+    [],
+  );
   const { modal: quietHoursModal, confirm: askQuietHours } =
     useQuietHoursConfirm();
   // const [composeLoadingAI, setComposeLoadingAI] = useState(false);
@@ -1178,6 +1185,7 @@ export default function Inbox() {
       if (typeof data?.pending === "number") {
         setScheduledSummary({
           pending: data.pending,
+          sent_today: data.sent_today ?? 0,
           next_at: data.next_at ?? null,
           due_within_hour: data.due_within_hour ?? 0,
           sms: data.sms ?? 0,
@@ -1558,14 +1566,22 @@ export default function Inbox() {
     contact: InboxContact,
     opts?: { preferredTab?: ViewTab },
   ) => {
-    // Default channel tab: paid plans open on SMS, the free plan opens on Email
-    // (SMS is locked on free). Fall back to Email if the contact has no phone.
-    // A notification deep-link can override this with the channel it fired for.
+    // Default channel tab: open on the channel the lead ACTUALLY has history on,
+    // so an email-only lead doesn't land on an empty "No SMS history yet" tab.
+    // Priority: explicit deep-link > SMS history > email history > sensible
+    // fallback (SMS if they have a phone, else Email). Free plan always opens on
+    // Email since SMS is locked there.
     const defaultTab: ViewTab =
       opts?.preferredTab ??
-      (isFreePlan || (!contact.phone && !contact.has_sms_history)
+      (isFreePlan
         ? "email"
-        : "sms");
+        : contact.has_sms_history
+          ? "sms"
+          : contact.has_email_history
+            ? "email"
+            : contact.phone
+              ? "sms"
+              : "email");
     setActiveTab(defaultTab);
     setComposeChannel(defaultTab === "sms" ? "sms" : "email");
     setIsHeaderMenuOpen(false);
@@ -2678,6 +2694,10 @@ export default function Inbox() {
   };
 
   const handleSendCurrentMessage = async () => {
+    // Re-entrancy guard: block a 2nd send while one is in flight (rapid Enter /
+    // double-click). The ref is synchronous, so it wins even before `sending`
+    // state has re-rendered.
+    if (sendingRef.current) return;
     if (!contactForView) {
       toast.error("Select a conversation first.");
       return;
@@ -2724,6 +2744,11 @@ export default function Inbox() {
       return;
     }
 
+    // Optional "confirm before sending" guard - applies to BOTH the Send button
+    // and the Enter shortcut so they behave identically.
+    if (confirmBeforeSend && !window.confirm("Send this message?")) return;
+
+    sendingRef.current = true;
     setSending(true);
     try {
       const attemptSend = async (confirmQuietHours: boolean): Promise<boolean> => {
@@ -2862,10 +2887,29 @@ export default function Inbox() {
       );
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
   };
 
-  const contactsEmpty = !contactsLoading && contacts.length === 0;
+  // Composer keydown: Enter sends, Shift+Enter makes a newline. Honors the
+  // Enter-to-send + confirm-before-send prefs, skips IME composition, and leaves
+  // touch devices on their native newline behavior (mobile unchanged).
+  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" || event.shiftKey) return;            // Shift+Enter -> newline
+    if (event.nativeEvent.isComposing) return;                       // mid IME composition
+    if (!enterToSend || isTouchDevice) return;                       // pref off / mobile -> newline
+    event.preventDefault();                                          // never insert a newline when sending
+    if (composeSendDisabled || sendingRef.current) return;           // empty / blocked / already sending
+    void handleSendCurrentMessage();                                 // confirm prompt lives in the send handler
+  };
+
+  // Only collapse to the full-page "No conversations yet" card when the inbox is
+  // GENUINELY empty - never when a search or filter merely returned nothing. In
+  // those cases we keep the list panel (and its search box + chips) mounted so
+  // the user sees a contextual "no results" message and can clear/refine, instead
+  // of the whole conversation pane vanishing and looking broken.
+  const hasActiveContactFilter = Boolean(search.trim() || contactsQuery.trim()) || listFilter !== "all";
+  const contactsEmpty = !contactsLoading && contacts.length === 0 && !hasActiveContactFilter;
   const hasScheduledQueue = !!scheduledSummary && scheduledSummary.pending > 0;
 
   // Calls tab: same MainLayout chrome + the Messages|Calls switcher, with the
@@ -2914,7 +2958,7 @@ export default function Inbox() {
                 secondaryLabel="Add Lead"
                 onPrimary={() => setShowNewMessageModal(true)}
                 onSecondary={openAddLead}
-                footer={hasScheduledQueue ? <ScheduledStrip summary={scheduledSummary} /> : undefined}
+                footer={hasScheduledQueue ? <ScheduledStrip summary={scheduledSummary} onViewCampaign={() => navigate("/ai/agent?tab=outbound")} /> : undefined}
               />
             </div>
           </section>
@@ -2965,7 +3009,7 @@ export default function Inbox() {
 
               {hasScheduledQueue ? (
                 <div className="border-b border-gray-100 px-3 py-2">
-                  <ScheduledStrip summary={scheduledSummary} />
+                  <ScheduledStrip summary={scheduledSummary} onViewCampaign={() => navigate("/ai/agent?tab=outbound")} />
                 </div>
               ) : null}
 
@@ -3014,7 +3058,12 @@ export default function Inbox() {
                     Loading conversations...
                   </div>
                 ) : displayedContacts.length === 0 ? (
-                  filteredContacts.length > 0 ? (
+                  search.trim() ? (
+                    <div className="px-4 py-10 text-center text-sm text-gray-500">
+                      No leads match{" "}
+                      <span className="font-medium text-gray-700">"{search.trim()}"</span>.
+                    </div>
+                  ) : listFilter !== "all" || filteredContacts.length > 0 ? (
                     <div className="px-4 py-10 text-center text-sm text-gray-500">
                       No conversations match this filter.
                     </div>
@@ -3176,7 +3225,7 @@ export default function Inbox() {
                     </button>
                   </div>
                   {hasScheduledQueue ? (
-                    <ScheduledStrip summary={scheduledSummary} />
+                    <ScheduledStrip summary={scheduledSummary} onViewCampaign={() => navigate("/ai/agent?tab=outbound")} />
                   ) : null}
                 </div>
               ) : (
@@ -3256,7 +3305,6 @@ export default function Inbox() {
                       </div>
 
                       <div className="wc-thread-actions">
-                        <ThreadClock timezone={contactForView.timezone} orgTimezone={orgTimezone} />
                         {/* Tablet/phone only: open the lead-intelligence drawer. */}
                         <button
                           type="button"
@@ -3622,6 +3670,7 @@ export default function Inbox() {
                                 aria-multiline="true"
                                 aria-label="Message body"
                                 spellCheck
+                                onKeyDown={handleComposerKeyDown}
                                 onInput={() =>
                                   setComposeBody(
                                     composerInnerPlain(bodyRef.current),

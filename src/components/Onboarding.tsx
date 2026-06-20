@@ -506,7 +506,7 @@ const Onboarding: React.FC = () => {
     }
   };
 
-  const createCheckoutAndRedirect = async (planId: string = selectedUpgradePlan) => {
+  const createCheckoutAndRedirect = async (planId: string = selectedUpgradePlan, successPath: string = "/onboarding") => {
     setUpgradingToCheckout(true);
     try {
       const res = await fetch(`${API_BASE}/billing/create-checkout-session`, {
@@ -517,7 +517,9 @@ const Onboarding: React.FC = () => {
           cancelPath: window.location.pathname,
           // Threads through Stripe -> BillingSuccess so the routing intent
           // survives even if the user finishes checkout on a different device.
-          successPath: "/onboarding",
+          successPath,
+          // Pre-apply a promo code the user validated at signup.
+          promoCode: localStorage.getItem("wc_promo_code") || "",
         }),
       });
       const data = await res.json();
@@ -671,6 +673,18 @@ const Onboarding: React.FC = () => {
     // Refresh the route-guard cache so /dashboard isn't bounced back to
     // /onboarding by a stale step (the cause of the post-finish redirect loop).
     localStorage.setItem("onboardingStep", "5");
+
+    // Flow: pick a paid plan on pricing -> create account -> ONBOARD -> pay.
+    // If a paid plan was carried from signup, finishing onboarding sends the
+    // user to Stripe checkout for it; after payment BillingSuccess lands them on
+    // the dashboard with the plan active.
+    const pendingPlan = (localStorage.getItem("wc_pending_plan") || "").toLowerCase();
+    if (["starter", "growth"].includes(pendingPlan)) {
+      localStorage.removeItem("wc_pending_plan");
+      await createCheckoutAndRedirect(pendingPlan, "/dashboard");
+      return;
+    }
+
     if (navigationState) {
       navigate(destination, { state: navigationState });
       return;

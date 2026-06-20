@@ -168,6 +168,7 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
         body: JSON.stringify({
           planId: plan.id,
           cancelPath: window.location.pathname,
+          promoCode: localStorage.getItem("wc_promo_code") || "",
         }),
       });
       const data = await res.json();

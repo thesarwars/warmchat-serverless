@@ -29,12 +29,16 @@ function encodeForm(obj: Record<string, unknown>): string {
 export async function stripeCall<T = Record<string, unknown>>(
   secretKey: string,
   path: string,
-  init: { method?: "GET" | "POST" | "DELETE"; body?: Record<string, unknown> } = {},
+  init: { method?: "GET" | "POST" | "DELETE"; body?: Record<string, unknown>; apiVersion?: string } = {},
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; error: { message: string; type?: string; code?: string } }> {
   const method = init.method ?? (init.body ? "POST" : "GET");
   const headers: Record<string, string> = {
     Authorization: `Bearer ${secretKey}`,
   };
+  // Optional per-call API version pin. The account default can drift to newer
+  // versions that reshape objects (e.g. the promotion_code/coupon model); pin
+  // reads that depend on a specific field layout.
+  if (init.apiVersion) headers["Stripe-Version"] = init.apiVersion;
   const reqInit: RequestInit = { method, headers };
   if (init.body && method !== "GET") {
     reqInit.body = encodeForm(init.body);

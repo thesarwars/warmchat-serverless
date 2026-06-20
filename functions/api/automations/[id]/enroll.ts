@@ -54,9 +54,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // address that has not opted out. (Mirrors firstChannel in automationEnroll.)
   const chans = safeJson<string[]>(camp.channels, []);
   const channel = (chans[0] || "").toLowerCase() === "email" ? "email" : "sms";
+  // NB: COALESCE the consent column - a freshly imported/created lead has
+  // sms_consent_status = NULL, and `NULL != 'no_sms'` is NULL (not true) in
+  // SQLite, which silently EXCLUDED every such lead from enrollment. Only an
+  // explicit "no_sms" should be suppressed (mirrors bulkEnrollAutomation, which
+  // suppresses on `=== 'no_sms'`, not on unknown/NULL).
   const contactClause = channel === "email"
-    ? "email IS NOT NULL AND email != '' AND email_opt_out = 0"
-    : "phone IS NOT NULL AND phone != '' AND sms_opt_out = 0 AND sms_consent_status != 'no_sms'";
+    ? "email IS NOT NULL AND email != '' AND COALESCE(email_opt_out, 0) = 0"
+    : "phone IS NOT NULL AND phone != '' AND COALESCE(sms_opt_out, 0) = 0 AND COALESCE(sms_consent_status, '') != 'no_sms'";
 
   // Explicit lead_ids win; otherwise fall back to the wizard audience, then the
   // automation's stored source. Audiences map onto the same columns the wizard's

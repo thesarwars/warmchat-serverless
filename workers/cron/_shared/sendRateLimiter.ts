@@ -40,6 +40,60 @@ function limitFor(channel: SendChannel, limits: RateLimits): number {
   }
 }
 
+/**
+ * Per-hour, per-org send caps for OUTBOUND campaign drips. This paces bulk
+ * campaigns so a large audience drips out over hours instead of a spike that
+ * harms sender reputation or trips Telnyx/ElasticEmail limits. Inbound AI
+ * replies are NOT capped by this (they're time-sensitive). Kept comfortably
+ * under provider ceilings; raise once reputation/usage data supports it.
+ */
+export interface HourlyLimits {
+  sms_per_hour: number;
+  email_per_hour: number;
+}
+
+export const DEFAULT_HOURLY_LIMITS: HourlyLimits = {
+  sms_per_hour: 150,
+  email_per_hour: 400,
+};
+
+/** Floor of the current epoch hour. Bucket key for the hourly limiter. */
+export function currentHourBucket(): number {
+  return Math.floor(Date.now() / 3_600_000);
+}
+
+/**
+ * Try to reserve one OUTBOUND send slot for an org+channel in the current hour.
+ * Returns true if within budget (dispatch), false if the hour's cap is reached
+ * (caller HOLDS the row in 'scheduled' so it resumes next hour - never dropped).
+ * Reuses the atomic send_rate_counter pattern with an "hour:org:<id>" sender key
+ * and an hour bucket, so it can't collide with the per-second rows.
+ */
+export async function tryAcquireHourlySlot(
+  env: EnvLike,
+  channel: SendChannel,
+  orgId: number,
+  limits: HourlyLimits = DEFAULT_HOURLY_LIMITS,
+  bucket: number = currentHourBucket(),
+): Promise<boolean> {
+  const limit = channel === "email" ? limits.email_per_hour : limits.sms_per_hour; // mms shares the sms budget
+  if (limit <= 0) return false;
+  const key = `hour:org:${orgId}`;
+
+  await env.D1DB.prepare(
+    `INSERT OR IGNORE INTO send_rate_counter (channel, sender_key, second_bucket, count)
+     VALUES (?, ?, ?, 0)`,
+  ).bind(channel, key, bucket).run();
+
+  const res = await env.D1DB.prepare(
+    `UPDATE send_rate_counter
+        SET count = count + 1
+      WHERE channel = ? AND sender_key = ? AND second_bucket = ? AND count < ?`,
+  ).bind(channel, key, bucket, limit).run();
+
+  return Number((res.meta as { changes?: number } | undefined)?.changes ?? 0) > 0;
+}
+
 /** Floor of the current epoch second. Used as the bucket key. */
 export function currentSecondBucket(): number {
   return Math.floor(Date.now() / 1000);

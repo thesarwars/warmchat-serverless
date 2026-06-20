@@ -75,8 +75,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   let latestEmailThreadId: number | null = null;
   let latestEmailSubject: string | null = null;
   let latestEmailAt: string | null = null;
-  if (threadIds.length) {
+  const leadEmail = (lead.email ?? "").trim().toLowerCase();
+  if (threadIds.length && leadEmail) {
     const placeholders = threadIds.map(() => "?").join(",");
+    // CRITICAL: filter to messages actually TO or FROM this lead's address, not
+    // the whole thread. Campaign emails share one thread across hundreds of
+    // recipients, so selecting the whole thread leaked every other lead's emails
+    // into this lead's conversation. Outbound to the lead -> to_email matches;
+    // the lead's inbound reply -> sender_email matches.
     emailMessages = await queryAll<EmailMsg>(
       env.D1DB,
       `SELECT im.id, im.thread_id, im.direction, im.body, im.subject, im.attachments,
@@ -86,27 +92,25 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
          FROM inbox_messages im
          LEFT JOIN automation a ON a.id = im.automation_id
         WHERE im.thread_id IN (${placeholders})
+          AND (LOWER(im.to_email) = ? OR LOWER(im.sender_email) = ?)
         ORDER BY COALESCE(im.message_date, im.created_at) ASC, im.id ASC`,
-      ...threadIds,
+      ...threadIds, leadEmail, leadEmail,
     );
-    // Mark inbound unread as read.
+    // Mark only THIS lead's inbound messages as read (not the shared thread's).
     await execute(
       env.D1DB,
-      `UPDATE inbox_messages SET is_read = 1 WHERE thread_id IN (${placeholders}) AND is_read = 0`,
-      ...threadIds,
+      `UPDATE inbox_messages SET is_read = 1
+        WHERE thread_id IN (${placeholders})
+          AND (LOWER(to_email) = ? OR LOWER(sender_email) = ?) AND is_read = 0`,
+      ...threadIds, leadEmail, leadEmail,
     );
 
-    const latestRow = await queryFirst<{ id: number; subject: string | null; ts: string | null }>(
-      env.D1DB,
-      `SELECT t.id, t.subject, MAX(COALESCE(im.message_date, im.created_at)) AS ts
-         FROM thread t JOIN inbox_messages im ON im.thread_id=t.id
-        WHERE t.id IN (${placeholders}) GROUP BY t.id, t.subject ORDER BY ts DESC LIMIT 1`,
-      ...threadIds,
-    );
-    if (latestRow) {
-      latestEmailThreadId = latestRow.id;
-      latestEmailSubject = latestRow.subject;
-      latestEmailAt = latestRow.ts;
+    // Latest = this lead's own most recent email (list is ordered ASC).
+    const lastMsg = emailMessages[emailMessages.length - 1];
+    if (lastMsg) {
+      latestEmailThreadId = lastMsg.thread_id;
+      latestEmailSubject = lastMsg.subject;
+      latestEmailAt = lastMsg.message_date || lastMsg.created_at;
     }
   }
 
