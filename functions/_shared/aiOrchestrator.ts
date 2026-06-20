@@ -2,6 +2,7 @@
 import type { Env } from "./env.ts";
 import { queryFirst, queryAll, execute, nowIso } from "./db.ts";
 import { chatWithTools, type ChatMessage, type ChatToolDef, type ChatToolCall } from "./openai.ts";
+import { humanizeDashes } from "./humanizeText.ts";
 import { buildAgentSystemPrompt, logAgentActivity, resolveReplyDelayMs } from "./aiAgents.ts";
 import {
   loadSettingsForLead, aiSendAllowedForLead, attachTag,
@@ -364,7 +365,8 @@ async function executeTool(
   switch (name) {
     case "send_message": {
       const cap = channel === "email" ? MAX_OUTBOUND_EMAIL_CHARS : MAX_OUTBOUND_SMS_CHARS;
-      const text = String(args.text || "").trim().slice(0, cap);
+      // Strip the em-dash "AI tell" out of every live reply (commas, not dashes).
+      const text = humanizeDashes(String(args.text || "").trim()).slice(0, cap);
       if (!text) return "Nothing to send.";
       const r = channel === "email"
         ? await sendLeadEmail(env, lead, settings, text, replySubject, { delayMs: replyDelayMs })

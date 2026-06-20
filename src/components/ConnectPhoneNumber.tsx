@@ -471,7 +471,10 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
     setActivation(buildEmptyActivationState());
     setActivationSaved(false);
     setBusinessTypeFinalized(false);
-    setBusinessTypeConfirmed(false);
+    // EIN / business-type confirmation UI was removed - stay implicitly
+    // confirmed so Save Activation never locks up. This wipe effect runs AFTER
+    // the force-true effect on mount, so setting false here would clobber it.
+    setBusinessTypeConfirmed(true);
     setShowActivationConfirmModal(false);
     setTelnyxIds(buildEmptyTelnyxState());
     setStatusSnapshot(null);
@@ -924,7 +927,8 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
       }));
       setActivationSaved(false);
       setBusinessTypeFinalized(false);
-      setBusinessTypeConfirmed(false);
+      // Deprecated EIN gate - keep implicitly confirmed so re-submit isn't locked.
+      setBusinessTypeConfirmed(true);
       setShowActivationConfirmModal(false);
       setManualStep(1);
       toast.success("Registration reset. You can re-submit with corrected details.");

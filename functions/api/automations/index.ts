@@ -5,9 +5,10 @@ import { execute, queryFirst, nowIso } from "../../_shared/db.ts";
 import { requireUser } from "../../_shared/auth.ts";
 import {
   getOrgWithPlan, checkAutomationLimits, checkChannelsLimit, MAX_AUTOMATION_LEADS,
-  MAX_AUTOMATION_NAME, MAX_AUTOMATION_MESSAGE, MAX_FOLLOWUPS,
+  MAX_AUTOMATION_NAME, MAX_AUTOMATION_MESSAGE, MAX_FOLLOWUPS, leadIdsFromAutomation,
   type AutomationLead,
 } from "../../_shared/automationHelpers.ts";
+import { bulkEnrollAutomation } from "../../_shared/automationEnroll.ts";
 
 interface CreateBody {
   name?: string;
@@ -119,96 +120,39 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   );
   const automationId = Number(ins.meta.last_row_id);
 
-  // Best-effort message recording (no actual SMTP/Telnyx call in Phase 4).
-  const channelsLower = channels.map((c) => c.toLowerCase());
+  // Actually START the drip. When the workflow is launched "now" (Running) with
+  // an explicit lead set, enroll those leads into the outbound queue
+  // (scheduled_message) - the SAME path POST /automations/:id/enroll uses. The
+  // cron drains that queue and performs the real Telnyx / Email send (or the
+  // mock send when MOCK_SEND_APIS is on), recording the materialized sms_message
+  // / inbox_messages + reply-tracking thread at send time. This replaces the old
+  // Phase-4 stub that inserted phantom "queued"/"sent" rows and bumped
+  // delivered_count WITHOUT ever queueing a real send - the root cause of
+  // "campaign says sent but nothing arrives and no follow-up fires".
+  //
+  // A Draft (timing != "now"), or a Send-now that a governing card forced to
+  // Paused, enrolls nothing here - it enrolls when launched / resumed.
   const leads = data.leads || [];
-
-  if (channelsLower.includes("email") && leads.length > 0) {
-    let inbox = await queryFirst<{ id: number }>(
-      env.D1DB, `SELECT id FROM inbox WHERE org_id = ? AND channel = 'email' LIMIT 1`, org.id,
-    );
-    if (!inbox) {
-      const i = await execute(
-        env.D1DB,
-        `INSERT INTO inbox (name, channel, org_id, created_at) VALUES ('Email', 'email', ?, ?)`,
-        org.id, nowIso(),
-      );
-      inbox = { id: Number(i.meta.last_row_id) };
-    }
-    const t = await execute(
-      env.D1DB,
-      `INSERT INTO thread (subject, inbox_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-      subject || "(no subject)", inbox.id, nowIso(), nowIso(),
-    );
-    const threadId = Number(t.meta.last_row_id);
-    await execute(env.D1DB, `UPDATE automation SET thread_id = ? WHERE id = ?`, threadId, automationId);
-
-    for (const lead of leads) {
+  const leadIds = leadIdsFromAutomation(leads);
+  let enrolled = 0;
+  if (initialStatus === "Running" && leadIds.length > 0) {
+    const res = await bulkEnrollAutomation(env, automationId, leadIds, user.id);
+    enrolled = res.enrolled;
+    // Mirror /enroll: reflect outbound enrollment on the lead's AI status so the
+    // lead reads as in an outbound program (and inbound auto-reply gating stays
+    // correct), without clobbering a lead with inbound AI active or paused.
+    const tsNow = nowIso();
+    for (let i = 0; i < leadIds.length; i += 90) {
+      const slice = leadIds.slice(i, i + 90);
       await execute(
         env.D1DB,
-        `INSERT INTO inbox_messages
-           (thread_id, sender_id, subject, body, direction, channel, to_email, created_at, is_read)
-         VALUES (?, ?, ?, ?, 'outbound', 'email', ?, ?, 1)`,
-        threadId, user.id, subject || "(no subject)", data.message || "", lead.email || "", nowIso(),
-      );
-      const leadId = Number(lead.id);
-      if (Number.isInteger(leadId)) {
-        await execute(
-          env.D1DB,
-          `INSERT INTO thread_lead_assignments (thread_id, lead_id, assigned_at) VALUES (?, ?, ?)`,
-          threadId, leadId, nowIso(),
-        );
-      }
-    }
-    await execute(
-      env.D1DB,
-      `UPDATE automation SET delivered_count = COALESCE(delivered_count, 0) + ? WHERE id = ?`,
-      leads.length, automationId,
-    );
-  }
-
-  if (channelsLower.includes("sms") && leads.length > 0) {
-    let smsSent = 0;
-    for (const lead of leads) {
-      if (!lead.phone) continue;
-      let contact = await queryFirst<{ id: number }>(
-        env.D1DB, `SELECT id FROM sms_contact WHERE org_id = ? AND phone_number_e164 = ? LIMIT 1`,
-        org.id, lead.phone,
-      );
-      if (!contact) {
-        const c = await execute(env.D1DB,
-          `INSERT INTO sms_contact (org_id, phone_number_e164) VALUES (?, ?)`, org.id, lead.phone);
-        contact = { id: Number(c.meta.last_row_id) };
-      }
-      let conv = await queryFirst<{ id: number }>(
-        env.D1DB, `SELECT id FROM sms_conversation WHERE org_id = ? AND contact_id = ? LIMIT 1`,
-        org.id, contact.id,
-      );
-      if (!conv) {
-        const c = await execute(env.D1DB,
-          `INSERT INTO sms_conversation (org_id, contact_id, last_message_at) VALUES (?, ?, ?)`,
-          org.id, contact.id, nowIso());
-        conv = { id: Number(c.meta.last_row_id) };
-      }
-      await execute(
-        env.D1DB,
-        `INSERT INTO sms_message
-           (org_id, conversation_id, direction, body, status, created_at, is_read)
-         VALUES (?, ?, 'outbound', ?, 'queued', ?, 1)`,
-        org.id, conv.id, data.message || "", nowIso(),
-      );
-      await execute(env.D1DB,
-        `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`, nowIso(), conv.id);
-      smsSent += 1;
-    }
-    if (smsSent > 0) {
-      await execute(
-        env.D1DB,
-        `UPDATE automation SET delivered_count = COALESCE(delivered_count, 0) + ? WHERE id = ?`,
-        smsSent, automationId,
+        `UPDATE lead SET ai_status = 'outbound', updated_at = ?
+          WHERE id IN (${slice.map(() => "?").join(",")})
+            AND (ai_status IS NULL OR ai_status IN ('off', 'outbound'))`,
+        tsNow, ...slice,
       );
     }
   }
 
-  return json({ success: true, id: automationId }, 201);
+  return json({ success: true, id: automationId, enrolled }, 201);
 };

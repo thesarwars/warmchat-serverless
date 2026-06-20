@@ -3,8 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import MainLayout from "../components/MainLayout";
 import { ArrowLeft, ChevronDown, ChevronUp, Clock, Mail, MessageSquare, Pencil, Plus, Trash2, X, Zap } from "lucide-react";
 import { describeStep, formatSendTime, DEFAULT_STEP_SEND_TIME } from "@/utils/workflowSchedule";
-
-const API_BASE = import.meta.env.VITE_API_BASE;
+// Use the shared API helpers (cookie auth + auto-refresh on a 401). The raw
+// fetch this page used before sent a bogus "Bearer cookie" header and never
+// refreshed, so once the 1h access-token cookie expired mid-session every call
+// 401'd and the page wrongly showed "Workflow not found" for valid workflows.
+import { get, put } from "@/helpers/api";
 
 interface FollowupStep {
   delay_days?: number;
@@ -32,6 +35,7 @@ interface AutomationDetailsPayload {
     status: string;
     type: string;
     created_at?: string;
+    timezone?: string | null;
   };
   stats: {
     sent: number;
@@ -77,6 +81,21 @@ const zoneLabel = (timezone?: string) => {
   if (timezone === "America/New_York") return "EST";
   if (timezone === "America/Los_Angeles") return "PST";
   return timezone || "";
+};
+
+/** Current short timezone abbreviation for an IANA zone (e.g. "PDT" in summer,
+ * "PST" in winter). Falls back to the raw zone string. Used to label every send
+ * time so there's no UTC/local ambiguity. */
+const tzAbbrev = (timezone?: string | null): string => {
+  const tz = (timezone || "").trim();
+  if (!tz) return "";
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value || tz;
+  } catch {
+    return tz;
+  }
 };
 
 const delayLabel = (step: FollowupStep, index: number) => {
@@ -138,25 +157,18 @@ const AutomationDetails: React.FC = () => {
   const [editOpeningTiming, setEditOpeningTiming] = useState<"instant" | "timed">("instant");
   const [editOpeningAt, setEditOpeningAt] = useState(DEFAULT_STEP_SEND_TIME);
   const [logs, setLogs] = useState<LogEvent[]>([]);
-  const [logSummary, setLogSummary] = useState<{ enrolled: number; sent: number; stopped: number; failed: number; total: number } | null>(null);
+  const [logSummary, setLogSummary] = useState<{ enrolled: number; sent: number; queued?: number; sending?: number; stopped: number; failed: number; total: number; due_now?: number } | null>(null);
 
   const fetchDetails = async () => {
-    const res = await fetch(`${API_BASE}/automations/${id}/details`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) setAutomation(await res.json());
+    const data = await get(`/automations/${id}/details`);
+    if (data) setAutomation(data as AutomationDetailsPayload);
   };
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`${API_BASE}/automations/${id}/logs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.events || []);
-        setLogSummary(data.summary || null);
-      }
+      const data = await get(`/automations/${id}/logs`);
+      setLogs(data?.events || []);
+      setLogSummary(data?.summary || null);
     } catch { /* non-fatal */ }
   };
 
@@ -176,14 +188,25 @@ const AutomationDetails: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
+  // Live updates: while the page is open (and not mid-edit), refresh stats +
+  // logs every 12s so the user watches SENT climb and the queue drain in real
+  // time, without reloading. This is what makes a running campaign visibly
+  // "alive" instead of looking frozen.
+  useEffect(() => {
+    if (!id || !token || editing) return;
+    const interval = setInterval(() => {
+      fetchDetails();
+      fetchLogs();
+    }, 12000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, token, editing]);
+
   // Load the RAW editable fields (name/message/subject/followup_steps) and enter edit mode.
   const startEdit = async () => {
     try {
-      const res = await fetch(`${API_BASE}/automations/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const raw = await res.json();
+      const raw = await get(`/automations/${id}`);
+      if (!raw) return;
       setEditName(raw.name || "");
       setEditSubject(raw.email_subject || "");
       setEditMessage(raw.message || "");
@@ -210,25 +233,21 @@ const AutomationDetails: React.FC = () => {
   const saveEdit = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/automations/${id}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName,
-          message: editMessage,
-          email_subject: editSubject,
-          opening_send_time: editOpeningTiming === "timed" ? editOpeningAt : null,
-          followup_steps: editFollowups.map((s) => ({
-            delay_days: Number(s.delay_days) || 0,
-            message: s.message || "",
-            ...(s.subject ? { subject: s.subject } : {}),
-            send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
-            ...(s.timezone ? { timezone: s.timezone } : {}),
-            channel: String(s.channel || "").toLowerCase() === "email" ? "email" : "sms",
-          })),
-        }),
+      const result = await put(`/automations/${id}`, {
+        name: editName,
+        message: editMessage,
+        email_subject: editSubject,
+        opening_send_time: editOpeningTiming === "timed" ? editOpeningAt : null,
+        followup_steps: editFollowups.map((s) => ({
+          delay_days: Number(s.delay_days) || 0,
+          message: s.message || "",
+          ...(s.subject ? { subject: s.subject } : {}),
+          send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
+          ...(s.timezone ? { timezone: s.timezone } : {}),
+          channel: String(s.channel || "").toLowerCase() === "email" ? "email" : "sms",
+        })),
       });
-      if (res.ok) {
+      if (result?.success) {
         setEditing(false);
         await fetchDetails();
       }
@@ -302,6 +321,9 @@ const AutomationDetails: React.FC = () => {
   // Follow-up dates are anchored to when the workflow was created (its schedule
   // from that point forward), not the moment the page is viewed.
   const createdBase = automation.header.created_at ? new Date(automation.header.created_at) : undefined;
+  // Send times are stored in the workspace timezone; label every time with its
+  // current abbreviation (e.g. "PDT") so it's never mistaken for UTC.
+  const tzShort = tzAbbrev(automation.header.timezone);
 
   return (
     <MainLayout>
@@ -391,7 +413,7 @@ const AutomationDetails: React.FC = () => {
                   const sc = describeStep(0, ot, { instant: !ot });
                   return (
                     <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-600">
-                      <Zap size={11} /> {ot ? `Day 0 · ${sc.timeLabel}` : `Instant · sends right away (~${sc.timeLabel})`}
+                      <Zap size={11} /> {ot ? `Day 0 · ${sc.timeLabel}${tzShort ? ` ${tzShort}` : ""}` : `Instant · sends right away (~${sc.timeLabel})`}
                     </span>
                   );
                 })()}
@@ -551,6 +573,8 @@ const AutomationDetails: React.FC = () => {
                         </div>
                         <div className="mt-2 text-sm font-medium text-gray-500">
                           {sendTimeLabel(step) || formatSendTime(DEFAULT_STEP_SEND_TIME)}
+                          {/* Step has no own zone -> label with the workspace tz. */}
+                          {!step.timezone && tzShort ? ` ${tzShort}` : ""}
                         </div>
                       </div>
                       <div className="rounded-r-lg border border-gray-200 bg-white p-4">
@@ -616,11 +640,30 @@ const AutomationDetails: React.FC = () => {
             </section>
 
             <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs">
-              <h2 className="mb-1 text-lg font-bold text-gray-950">Logs</h2>
+              <div className="mb-1 flex items-center gap-2">
+                <h2 className="text-lg font-bold text-gray-950">Logs</h2>
+                {/* Live status: a green pulsing dot whenever there's still a queue
+                    to drain, so the user can SEE the campaign is actively working. */}
+                {logSummary && ((logSummary.queued ?? 0) > 0 || (logSummary.sending ?? 0) > 0) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                    </span>
+                    Sending now
+                  </span>
+                ) : logSummary && logSummary.total > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600">Idle</span>
+                ) : null}
+              </div>
               {logSummary ? (
                 <div className="mb-3 text-xs text-gray-500">
-                  {logSummary.enrolled} enrolled · {logSummary.sent} sent · {logSummary.stopped} stopped
+                  {logSummary.sent} sent
+                  {(logSummary.queued ?? 0) > 0 ? ` · ${logSummary.queued} queued` : ""}
+                  {logSummary.stopped ? ` · ${logSummary.stopped} stopped` : ""}
                   {logSummary.failed ? ` · ${logSummary.failed} failed` : ""}
+                  {" · "}{logSummary.enrolled} leads
+                  <span className="ml-1 text-gray-400">(updates live)</span>
                 </div>
               ) : null}
               {logs.length ? (

@@ -3,6 +3,7 @@ import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { generateWithOpenAI } from "../../../_shared/openai.ts";
+import { humanizeDashes } from "../../../_shared/humanizeText.ts";
 import { callerOrgId, buildAgentSystemPrompt, logAgentActivity } from "../../../_shared/aiAgents.ts";
 
 /** POST /api/ai/generate/reply - draft a reply given a thread excerpt. */
@@ -32,6 +33,6 @@ Tone: ${body?.tone || "friendly, professional"}. Intent: ${body?.intent || "resp
         event: "reply.drafted", detail: "Drafted reply from conversation", status: "ok",
       });
     }
-    return json({ text: out.text });
+    return json({ text: humanizeDashes(out.text) });
   } catch (e) { return error((e as Error).message, 502); }
 };

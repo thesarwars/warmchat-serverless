@@ -20,13 +20,53 @@ export interface LeadRow {
   area: string | null;
 }
 
-/** Replace {token} and {{token}} occurrences with values from `vars`. */
+// Connector words that introduce a personalized detail ("looking IN {area}",
+// "homes FOR {area}"). When the detail is missing we drop the connector with it
+// so the sentence doesn't read "looking in ?" - it reads "looking?".
+const CONNECTORS = "in|at|for|near|around|on|of|to|about|with|from|into";
+
+/**
+ * Tidy the spacing/punctuation left behind after a missing token (and its
+ * connector) is removed: collapse double spaces, pull punctuation back against
+ * the previous word, drop a comma orphaned right before end punctuation, etc.
+ */
+function tidyAfterRemoval(s: string): string {
+  return s
+    .replace(/[ \t]{2,}/g, " ")            // double spaces -> one
+    .replace(/\s+([,.!?;:])/g, "$1")       // " ?" -> "?"   " ," -> ","
+    .replace(/([,;:])\s*([.!?])/g, "$2")   // ", ?" -> "?"
+    .replace(/([,;:])\1+/g, "$1")          // ",," -> ","
+    .replace(/\(\s*\)/g, "")               // empty "()" left by a dropped token
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s,;:]+/, "")               // stray leading punctuation
+    .trim();
+}
+
+/**
+ * Replace {token} and {{token}} with values from `vars`. CRITICAL for natural
+ * copy: when a token's value is MISSING (e.g. the lead has no `area`), the token
+ * AND a preceding connector word are removed entirely instead of leaving an
+ * empty hole - so "still looking in {area}?" becomes "still looking?" rather than
+ * the broken "still looking in ?". Unknown tokens are left untouched.
+ */
 export function applyPersonalization(text: string, vars: LeadVars): string {
   if (!text) return text;
-  return text.replace(/\{\{?\s*([a-zA-Z0-9_ ]+?)\s*\}?\}/g, (whole, raw: string) => {
+  const tokenRe = new RegExp(
+    String.raw`(\s+(?:${CONNECTORS}))?(\s*)\{\{?\s*([a-zA-Z0-9_ ]+?)\s*\}?\}`,
+    "gi",
+  );
+  const replaced = text.replace(tokenRe, (whole, connector: string | undefined, ws: string, raw: string) => {
     const key = raw.replace(/[^a-zA-Z0-9]+/g, "").toLowerCase();
-    return key in vars ? (vars[key] ?? whole) : whole;
+    if (!(key in vars)) return whole;            // not a known token - leave as written
+    const val = (vars[key] ?? "").trim();
+    if (val === "") {
+      // Missing value: drop the token. If it had a connector ("in {area}"), drop
+      // that too; otherwise keep the separating space so words don't fuse.
+      return connector ? "" : ws;
+    }
+    return (connector ?? "") + ws + val;
   });
+  return tidyAfterRemoval(replaced);
 }
 
 export function buildPersonalizationVars(lead: LeadRow | null, senderName: string): LeadVars {

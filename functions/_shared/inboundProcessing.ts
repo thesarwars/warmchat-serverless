@@ -475,7 +475,14 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   // notification snippet, AI context) uses the quote-stripped version.
   const body = input.body || "";
   const cleanBody = stripQuotedReply(body);
-  const receivedAt = input.receivedAt || nowIso();
+  // Normalize the provider's Date header to ISO 8601. It often arrives RFC-2822
+  // ("Sat, 20 Jun 2026 13:06:07 GMT"); message_date is compared as a STRING all
+  // over the app, and an RFC-2822 value sorts ABOVE every ISO date ("S" > "2"),
+  // so an inbound reply looked like the newest activity forever -> the thread was
+  // stuck in "Needs Reply" even after the agent/AI replied. Fall back to now on
+  // an unparseable header.
+  const parsedReceived = Date.parse(input.receivedAt || "");
+  const receivedAt = Number.isFinite(parsedReceived) ? new Date(parsedReceived).toISOString() : nowIso();
   if (!to) return { ok: false, ignored: "missing to" };
 
   // Resolve the recipient connection for the org (and the audit row's FK).

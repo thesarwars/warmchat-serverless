@@ -1,131 +1,281 @@
-Outbound Campaign QA Request — Bulk SMS \+ Email Testing
+# **Campaign Expected Behavior**
 
-Please validate bulk campaign sending before I test with real contacts.
+## **Campaign Creation**
 
-Important:  
-Do not send real SMS or emails for Phase 2 load testing.  
-Please create a testing mode / sandbox mode with fake leads where messages are queued, processed, logged, and marked as test-delivered without actually sending to carriers or email inboxes.
+User creates campaign:
 
-Goal:  
-Validate that campaigns work with 100, 500, and 1,000 leads safely.
+* Name  
+* SMS, Email, or SMS \+ Email  
+* Audience  
+* Schedule  
+* Rate Limit  
+* AI Enabled ON/OFF  
+* Test Mode ON/OFF
 
-Test Mode Requirements:
+Status:
 
-* Create fake leads with fake phone numbers and fake emails  
-* Add a campaign setting like “Test Mode”  
-* In Test Mode, do not call Telnyx or email provider  
-* Still create message records  
-* Still update statuses  
-* Still process scheduled steps  
-* Still simulate delivery success/failure  
-* Still test pause/resume/stop  
-* Still test AI stop rules  
-* Still test SMS \+ email mixed campaigns
+Draft → Scheduled → Sending → Completed
 
-SMS Bulk Tests:  
-Create test campaigns with:
+---
 
-* 100 fake leads  
-* 500 fake leads  
-* 1,000 fake leads
+# **Initial Send Logic**
+
+## **Instant Send**
+
+If user selects:
+
+“Send immediately”
+
+Flow:
+
+Campaign Saved  
+ ↓  
+ Campaign Activated  
+ ↓  
+ Queue Created  
+ ↓  
+ First Batch Starts Immediately  
+ ↓  
+ Campaign Status \= Sending
+
+Validation:
+
+* First message should begin processing immediately  
+* No waiting for cron cycle delays  
+* Queue creation timestamp logged  
+* First send timestamp logged
+
+---
+
+## **Scheduled Send**
+
+If user selects:
+
+Send at 9:00 AM
+
+Flow:
+
+Campaign Saved  
+ ↓  
+ Scheduled  
+ ↓  
+ Wait  
+ ↓  
+ 9:00:00 AM reached  
+ ↓  
+ Queue Starts
+
+Validation:
+
+* Campaign starts exactly at scheduled time  
+* Not 2-5 minutes later  
+* Not next cron cycle  
+* Timezone respected
+
+---
+
+# **Message Personalization**
+
+Every campaign message should support merge fields.
+
+Examples:
+
+Hi {{first\_name}}
+
+Hi {{first\_name}}, I saw you’re looking in {{area}}
+
+Expected behavior:
+
+Lead A
+
+Name \= John  
+ Area \= Burbank
+
+Result:
+
+Hi John, I saw you’re looking in Burbank
+
+---
+
+Lead B
+
+Name \= Sarah  
+ Area \= Empty
+
+Result:
+
+Hi Sarah
+
+NOT:
+
+Hi Sarah, I saw you’re looking in
+
+NOT:
+
+Hi Sarah, I saw you’re looking in {{area}}
+
+Missing variables should automatically be removed.
+
+Validation:
+
+* First Name always inserted  
+* Area inserted if exists  
+* Missing fields removed cleanly  
+* No broken text
+
+---
+
+# **AI Improve Tone**
+
+When user clicks:
+
+AI Improve Tone
 
 Validate:
 
-* Queue is created correctly  
+* Message rewrites successfully  
+* Preserves merge fields  
+* Preserves links  
+* Preserves campaign intent
+
+Bad:
+
+Hi John becomes Hi Joseph
+
+Bad:
+
+{{first\_name}} removed
+
+Good:
+
+Hi {{first\_name}}, just checking in regarding your home search.
+
+---
+
+# **Queue System Requirements**
+
+Never send 1,000 messages at once.
+
+Expected:
+
+Campaign  
+ ↓  
+ Queue Created  
+ ↓  
+ Batch Sent  
+ ↓  
+ Wait  
+ ↓  
+ Next Batch  
+ ↓  
+ Continue
+
+Validation:
+
 * No duplicate sends  
-* Messages send in batches, not all at once  
-* Delivery statuses update  
-* Failed messages are logged  
-* Campaign continues if one message fails  
-* Lead only receives one scheduled message at a time  
-* Replies remove lead from campaign  
-* AI pauses campaign automation when lead replies  
-* STOP unsubscribes immediately  
-* Campaign can be paused while sending  
-* Campaign can resume  
-* Campaign can be stopped
+* Queue survives server restart  
+* Failed sends don’t stop campaign  
+* Campaign resumes properly
 
-Email Bulk Tests:  
-Create test campaigns with:
+---
 
-* 100 fake email leads  
-* 500 fake email leads  
-* 1,000 fake email leads
-
-Validate:
-
-* Emails queue correctly  
-* No duplicate emails  
-* Email statuses update  
-* Failed emails are logged  
-* Campaign continues if some emails fail  
-* Replies stop campaign automation for that lead  
-* Email unsubscribe works if applicable
-
-Mixed SMS \+ Email Campaign Test:  
-User should be able to create one campaign with both SMS and email.
-
-Example:  
-Day 1: SMS message sends  
-Day 2: Email sends  
-Day 3: SMS follow-up sends
-
-For testing, reduce delay to every 2–5 minutes so we can validate quickly.
-
-Validate:
-
-* SMS and email steps stay in correct order  
-* Scheduled timing works  
-* Lead does not receive two messages at the same time  
-* If lead replies to SMS, future SMS/email automation stops  
-* If lead replies to email, future SMS/email automation stops  
-* AI can respond if AI is enabled
-
-AI Bulk Reply Test:  
-Please simulate replies from bulk campaign leads.
-
-Example:  
-Campaign sends to 300 fake leads.  
-Simulate 20 replies.  
-AI should create responses for those 20 leads if AI is enabled.
-
-Validate:
-
-* AI responds to multiple replies correctly  
-* AI does not respond to unsubscribed leads  
-* AI does not respond if campaign/AI is paused  
-* AI does not duplicate replies  
-* AI handles many replies at once without delay or failure
-
-Rate Limit Testing:  
-Please validate campaign throttle settings.
+# **SMS Campaign Validation**
 
 Test:
 
-* 10 messages/minute  
-* 25 messages/minute  
-* 50 messages/minute  
-* 100 messages/minute if safe  
-* 300 messages/minute only if queue/worker/provider limits support it
+* 100 leads  
+* 500 leads  
+* 1,000 leads
 
-Do not send 1,000 messages instantly.
+Validate:
 
-Default logic should be:  
-Campaign Started  
-↓  
-Leads Added  
-↓  
-Queue Created  
-↓  
-Send First Batch  
-↓  
-Wait Based On Rate Limit  
-↓  
-Send Next Batch  
-↓  
-Continue Until Complete
+* Queue creation  
+* Delivery updates  
+* Failure logging  
+* Reply handling  
+* Pause  
+* Resume  
+* Stop  
+* Unsubscribe  
+* AI stop rules
 
-Campaign Statuses Needed:
+---
+
+# **Email Campaign Validation**
+
+Test:
+
+* 100 emails  
+* 500 emails  
+* 1,000 emails
+
+Validate:
+
+* Email queue creation  
+* Delivery tracking  
+* Bounce handling  
+* Reply detection  
+* Unsubscribe handling  
+* Pause  
+* Resume  
+* Stop
+
+---
+
+# **Mixed Campaign Validation**
+
+Example:
+
+Day 1  
+ SMS
+
+Day 2  
+ Email
+
+Day 3  
+ SMS
+
+QA Mode:
+
+Every 2 minutes
+
+Validate:
+
+* Correct order maintained  
+* No skipped steps  
+* No duplicate steps  
+* No simultaneous sends  
+* Future automation stops after reply
+
+If lead replies on Day 1 SMS:
+
+Day 2 email should NOT send.
+
+Day 3 SMS should NOT send.
+
+---
+
+# **AI Reply Load Testing**
+
+Simulate:
+
+300 leads  
+ 20 replies
+
+Validate:
+
+* AI responds to all 20  
+* No duplicate responses  
+* No response to unsubscribed leads  
+* No response when AI paused  
+* Human takeover works  
+* AI queue handles spikes
+
+---
+
+# **Campaign Statuses**
+
+Required:
 
 * Draft  
 * Scheduled  
@@ -134,15 +284,61 @@ Campaign Statuses Needed:
 * Completed  
 * Failed
 
-Please confirm:
+Recommended:
 
-1. Max SMS campaign send rate currently supported  
-2. Max email campaign send rate currently supported  
-3. Whether rate limits are configurable per account/plan  
-4. Whether previous dev already implemented queue batching  
-5. Whether campaigns are safe for 100, 500, and 1,000 leads  
-6. Whether fake/test mode exists or needs to be added  
-7. Whether logs show every send attempt, success, failure, reply, unsubscribe, pause, resume, and stop event
+* Cancelled  
+* Processing  
+* Stopping
 
-This needs to be validated before I test with real contacts.
+These help prevent status confusion.
+
+---
+
+# **Event Logging (Critical)**
+
+Every event should create a log record.
+
+Log:
+
+* Campaign Created  
+* Campaign Started  
+* Campaign Paused  
+* Campaign Resumed  
+* Campaign Stopped  
+* Queue Created  
+* SMS Sent  
+* Email Sent  
+* SMS Failed  
+* Email Failed  
+* Reply Received  
+* AI Replied  
+* Unsubscribed  
+* Delivery Confirmed
+
+Every log should include:
+
+* Timestamp  
+* Campaign ID  
+* Lead ID  
+* Message ID  
+* Event Type
+
+---
+
+# **Questions Dev Must Answer Before Launch**
+
+1. What is the maximum SMS throughput currently supported?  
+2. What is the maximum email throughput currently supported?  
+3. Are rate limits configurable by plan/account?  
+4. Is queue batching already implemented?  
+5. Have 100, 500, and 1,000 lead campaigns been successfully tested?  
+6. Does Test Mode exist, or must it be built?  
+7. Does the system log every send attempt, delivery, failure, reply, unsubscribe, pause, resume, and stop action?  
+8. Does campaign scheduling fire at the exact scheduled time?  
+9. Does AI Improve Tone preserve merge fields?  
+10. Does personalization properly remove empty variables?  
+11. Does replying to either SMS or Email stop all future campaign automation for that lead?  
+12. Can campaigns safely continue when workers restart or fail?
+
+If WarmChats passes all of the above in both Test Mode and live testing, then it will be operating much closer to the mass campaign behavior agents expect from platforms like Follow Up Boss, Lofty, and GoHighLevel.
 

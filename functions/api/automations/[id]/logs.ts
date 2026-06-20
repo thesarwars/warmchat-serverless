@@ -64,11 +64,43 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     preview: (r.body || "").slice(0, 120),
   }));
 
-  // Lightweight rollup so the UI can show "X enrolled · Y sent · Z stopped".
-  const enrolled = new Set(rows.map((r) => r.contact_id).filter((x) => x != null)).size;
-  const sent = rows.filter((r) => r.status === "sent").length;
-  const stopped = rows.filter((r) => r.status === "cancelled").length;
-  const failed = rows.filter((r) => r.status === "failed").length;
+  // Rollup over the WHOLE campaign (not just the 200-row event feed above, which
+  // would undercount a large campaign). Drives the live "X sent · Y queued ·
+  // sending now" status the UI polls.
+  const agg = await queryFirst<{
+    enrolled: number; sent: number; queued: number; sending: number; stopped: number; failed: number; total: number;
+  }>(
+    env.D1DB,
+    `SELECT COUNT(DISTINCT contact_id) AS enrolled,
+            SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent,
+            SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) AS queued,
+            SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending,
+            SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS stopped,
+            SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+            COUNT(*) AS total
+       FROM scheduled_message WHERE automation_id = ?`,
+    id,
+  );
 
-  return json({ events, summary: { enrolled, sent, stopped, failed, total: rows.length } });
+  // "Sending now" = there's a live queue with at least one message already due.
+  const dueNow = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(*) AS n FROM scheduled_message
+      WHERE automation_id = ? AND status = 'scheduled' AND datetime(scheduled_at) <= datetime('now')`,
+    id,
+  );
+
+  return json({
+    events,
+    summary: {
+      enrolled: Number(agg?.enrolled ?? 0),
+      sent: Number(agg?.sent ?? 0),
+      queued: Number(agg?.queued ?? 0),
+      sending: Number(agg?.sending ?? 0),
+      stopped: Number(agg?.stopped ?? 0),
+      failed: Number(agg?.failed ?? 0),
+      total: Number(agg?.total ?? 0),
+      due_now: Number(dueNow?.n ?? 0),
+    },
+  });
 };

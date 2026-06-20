@@ -4,7 +4,7 @@ import { json, error } from "../../../_shared/http.ts";
 import { queryFirst } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { isOrgMember } from "../../../_shared/orgAccess.ts";
-import { computeAutomationRecipientStats } from "../../../_shared/automationAnalytics.ts";
+import { computeAutomationStatsBatch } from "../../../_shared/automationAnalytics.ts";
 import { deriveAutomationType, safeJson, type AutomationRow } from "../../../_shared/automationHelpers.ts";
 
 /**
@@ -26,7 +26,19 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (!Number.isInteger(orgId)) return error("Invalid org id on automation", 500);
   if (!(await isOrgMember(env, user.id, orgId))) return error("User not part of organization", 403);
 
-  const stats = await computeAutomationRecipientStats(env, automation, orgId);
+  // Use the BATCHED path (a fixed ~5 org-wide reads) rather than the per-automation
+  // path that builds an IN-list of every lead phone/id. On a large campaign (e.g.
+  // 1,375 leads) that IN-list overflowed D1's bound-param limit AND the subrequest
+  // cap, 500'ing the endpoint. Output is identical for a single automation.
+  const statsByAutomation = await computeAutomationStatsBatch(env, [automation], orgId);
+  const stats = statsByAutomation.get(Number(automation.id));
+  if (!stats) return error("Failed to compute automation stats", 500);
+
+  // Workspace timezone - send times are stored/scheduled in this zone, so the UI
+  // labels every time with it (e.g. "Day 0 · 4:33 AM PDT") to remove the
+  // "is this UTC or local?" ambiguity.
+  const orgRow = await queryFirst<{ timezone: string | null }>(
+    env.D1DB, `SELECT timezone FROM organization WHERE id = ?`, orgId);
 
   return json({
     id: automation.id,
@@ -37,9 +49,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       channels: safeJson<string[]>(automation.channels, []),
       is_archived: Boolean(automation.is_archived),
       created_at: automation.created_at,
+      timezone: (orgRow?.timezone || "").trim() || null,
     },
     stats: {
-      sent: stats.contacts_sent,
+      // SENT = real messages actually sent (not the lead/audience count).
+      sent: stats.messages_sent,
       messages_sent: stats.messages_sent,
       delivered: stats.delivered,
       opened: stats.opened,

@@ -26,6 +26,13 @@ const Signup: React.FC = () => {
     setCaptchaKey((k) => k + 1);
   };
 
+  // Optional promo code (validated against Stripe). The discount only applies at
+  // paid-plan checkout - here we just validate + remember the code so it can be
+  // pre-applied when the user upgrades.
+  const [promo, setPromo] = useState("");
+  const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  const [promoDesc, setPromoDesc] = useState("");
+
   const API_BASE = import.meta.env.VITE_API_BASE;
   const navigate = useNavigate();
   const { roleName } = useRole();
@@ -39,13 +46,14 @@ const Signup: React.FC = () => {
   // Kick off Stripe checkout for a paid plan. successPath threads through Stripe
   // -> /billing/success so the user lands in onboarding (SMS + email) once paid.
   // Returns true if we redirected to Stripe (caller should stop).
-  const startCheckoutForPlan = async (planId: string): Promise<boolean> => {
+  const startCheckoutForPlan = async (planId: string, successPath: string = "/onboarding"): Promise<boolean> => {
     try {
+      const promoCode = (promoStatus === "valid" && promo.trim()) || localStorage.getItem("wc_promo_code") || "";
       const res = await fetch(`${API_BASE}/billing/create-checkout-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ planId, cancelPath: "/pricing", successPath: "/onboarding" }),
+        body: JSON.stringify({ planId, cancelPath: "/pricing", successPath, promoCode }),
       });
       const data = await res.json();
       if (data.checkout_url) {
@@ -66,13 +74,20 @@ const Signup: React.FC = () => {
     if (!userId) return;
     let cancelled = false;
     // Already signed in and arriving with a paid plan selected (e.g. clicked
-    // "Start Now" on pricing) -> send straight to checkout instead of onboarding.
+    // "Start Now" on pricing). Match the signup order: onboarding FIRST, then
+    // pay. If they haven't onboarded yet, carry the plan and send them to
+    // onboarding (checkout fires at "Finish setup"). If they've already
+    // onboarded, there's nothing left to set up -> go straight to checkout.
     if (isPaidPlan) {
-      startCheckoutForPlan(selectedPlan).then((redirected) => {
-        if (!redirected && !cancelled) {
-          resolvePostAuthDestination(API_BASE, userId).then((dest) => {
-            if (!cancelled) navigate(dest, { replace: true });
+      resolvePostAuthDestination(API_BASE, userId).then((dest) => {
+        if (cancelled) return;
+        if (dest === "/dashboard") {
+          startCheckoutForPlan(selectedPlan, "/dashboard").then((redirected) => {
+            if (!redirected && !cancelled) navigate(dest, { replace: true });
           });
+        } else {
+          localStorage.setItem("wc_pending_plan", selectedPlan);
+          navigate(dest, { replace: true });
         }
       });
       return () => { cancelled = true; };
@@ -116,11 +131,11 @@ const Signup: React.FC = () => {
     storeAuthSession(data);
     toast.success("Account created successfully!");
 
-    // Paid plan selected on pricing -> pay first, then onboarding sets up SMS+email.
+    // Paid plan selected on pricing: ONBOARD FIRST, then pay. Carry the plan so
+    // the end of onboarding ("Finish setup") sends them to Stripe checkout for
+    // it. (A free signup carries nothing and just goes to onboarding.)
     if (isPaidPlan) {
-      const redirected = await startCheckoutForPlan(selectedPlan);
-      if (redirected) return;
-      toast.error("Couldn't start checkout - you can upgrade from onboarding.");
+      localStorage.setItem("wc_pending_plan", selectedPlan);
     }
 
     try {
@@ -129,6 +144,31 @@ const Signup: React.FC = () => {
     } catch (err) {
       console.error("onboarding lookup failed:", err);
       toast.error("Couldn't verify your account status. Please try logging in again.");
+    }
+  };
+
+  const applyPromo = async () => {
+    const code = promo.trim();
+    if (!code) return;
+    setPromoStatus("checking");
+    try {
+      const res = await fetch(`${API_BASE}/billing/validate-promo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (data?.valid) {
+        setPromoStatus("valid");
+        setPromoDesc(data.description || "Discount applies at checkout");
+        localStorage.setItem("wc_promo_code", data.code || code);
+      } else {
+        setPromoStatus("invalid");
+        setPromoDesc("");
+        localStorage.removeItem("wc_promo_code");
+      }
+    } catch {
+      setPromoStatus("invalid");
     }
   };
 
@@ -242,6 +282,37 @@ const Signup: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-gray-400 outline-hidden"
               />
+            </div>
+
+            <div>
+              <label className="text-sm text-gray-600">
+                Promo code <span className="text-gray-400">(optional)</span>
+              </label>
+              <div className="mt-1 flex gap-2">
+                <input
+                  value={promo}
+                  onChange={(e) => {
+                    setPromo(e.target.value);
+                    if (promoStatus !== "idle") setPromoStatus("idle");
+                  }}
+                  placeholder=""
+                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-gray-400 outline-hidden"
+                />
+                <button
+                  type="button"
+                  onClick={applyPromo}
+                  disabled={!promo.trim() || promoStatus === "checking"}
+                  className="rounded-md border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {promoStatus === "checking" ? "Checking…" : "Apply"}
+                </button>
+              </div>
+              {promoStatus === "valid" && (
+                <p className="mt-1 text-xs font-medium text-green-600">✓ {promoDesc} — applies at checkout</p>
+              )}
+              {promoStatus === "invalid" && (
+                <p className="mt-1 text-xs font-medium text-red-500">That code isn&apos;t valid</p>
+              )}
             </div>
 
             <Turnstile

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "./Icon";
@@ -302,6 +302,18 @@ const FLOW_FALLBACK_SMS = [
 ];
 const FLOW_DAY_NUMS = [0, 1, 3, 5, 7, 10, 14, 21];
 
+/** "05:00" -> "5:00 AM", "13:30" -> "1:30 PM". Leaves already-formatted or
+ * non-time strings ("Send instantly", "10:00 AM") untouched. */
+function fmtClock12(value: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((value || "").trim());
+  if (!m) return value;
+  let hour = Number(m[1]);
+  const minute = m[2];
+  const meridiem = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  return `${hour}:${minute} ${meridiem}`;
+}
+
 interface CampaignFlowMsg { step: number; day: string; date: string; channel: string; text: string }
 
 // A campaign card view-model derived from a real automation.
@@ -318,7 +330,10 @@ interface OrgAutomation {
   id: number; name: string; status: string; channels?: string[];
   messages_sent?: number; reply_rate?: number; is_archived?: boolean;
   message?: string; opening_send_time?: string | null; created_at?: string;
-  leads?: number; converted_count?: number;
+  // `leads` from the org list endpoint is the RECIPIENTS ARRAY (objects), not a
+  // count - the count lives in `contacts_sent`. Stringifying the array gave the
+  // "[object Object]" the card used to show.
+  leads?: unknown; contacts_sent?: number; converted_count?: number;
   followup_steps?: { delay_days?: number; message?: string; send_time?: string }[];
 }
 
@@ -352,7 +367,7 @@ function automationToCampaign(a: OrgAutomation): Campaign {
   return {
     id: a.id, name: a.name || "Untitled workflow", icon: "send", live, status: a.status || "Draft",
     channel: chanLabel, steps, updated: relTime(a.created_at),
-    leads: String(a.leads ?? 0),
+    leads: String(a.contacts_sent ?? (Array.isArray(a.leads) ? a.leads.length : 0)),
     reply: `${Math.round(a.reply_rate ?? 0)}%`,
     appts: String(a.converted_count ?? 0),
     trigger: { title: "Lead opts in", sub: "Enrolled into this sequence" },
@@ -447,7 +462,7 @@ function CampaignCard({ w, onToggle, onDelete, onEdit }: { w: Campaign; onToggle
                       <span className="wc-tpl-dot">·</span>
                       {msg.date === "Send instantly"
                         ? <span className="wc-tpl-time is-instant"><Icon name="zap" size={12} />Send instantly</span>
-                        : <span className="wc-tpl-time"><Icon name="clock" size={12} />{msg.date}</span>}
+                        : <span className="wc-tpl-time"><Icon name="clock" size={12} />{fmtClock12(msg.date)}</span>}
                       <ChannelPill channel={mch} size="sm" />
                     </div>
                     <div className="wc-tpl-step-text"><VarText text={msg.text} /></div>
@@ -505,7 +520,18 @@ function OutboundBody() {
       followups: d.followups.map((f, i) => ({ delay_days: f.delayDays ?? (i + 1), message: f.message, send_time: f.time, channel: f.channel, ...(f.subject ? { subject: f.subject } : {}) })),
     }),
     onSuccess: () => { refresh(); setWizard(false); },
+    // Reset the re-entrancy lock whether the create succeeded or failed so a
+    // failed attempt can be retried (success unmounts the wizard anyway).
+    onSettled: () => { creatingRef.current = false; },
   });
+  // Synchronous guard: "Start Workflow" double-clicks fired two creates before
+  // React re-rendered the disabled/pending state, making duplicate campaigns.
+  const creatingRef = useRef(false);
+  const handleWizardLaunch = (d: WizardLaunch) => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    createAuto.mutate(d);
+  };
 
   return (
     <div className="wc-v3-body">
@@ -551,7 +577,7 @@ function OutboundBody() {
         <TemplatesTab list={tplList} setList={setTplList} onNew={() => setTplWizard(true)} />
       )}
 
-      {wizard && <WorkflowWizard seed={wizardSeed} onClose={() => { setWizard(false); setWizardSeed(null); }} onLaunch={(d) => createAuto.mutate(d)} />}
+      {wizard && <WorkflowWizard seed={wizardSeed} onClose={() => { setWizard(false); setWizardSeed(null); }} onLaunch={handleWizardLaunch} busy={createAuto.isPending} />}
       {tplWizard && <WorkflowWizard mode="template" onClose={() => setTplWizard(false)} onLaunch={() => {}} onSaveTemplate={(t) => { setTplList((prev) => [t as unknown as TplItem, ...prev]); setTplWizard(false); setTab("templates"); }} />}
       {browse && <BrowseTemplatesModal onClose={() => setBrowse(false)} onUse={(seed) => { setBrowse(false); setWizardSeed(seed); setWizard(true); }} />}
 

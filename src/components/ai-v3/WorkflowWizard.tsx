@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "./Icon";
 import { V3Portal } from "./Portal";
 import { fetchOrgLeads, fetchOrgTimezone } from "../../helpers/backend";
-import { DEFAULT_STEP_SEND_TIME, isTimeInFutureToday, defaultFutureSendTime, formatZoneNow } from "../../utils/workflowSchedule";
+import { DEFAULT_STEP_SEND_TIME, isTimeInFutureToday, defaultFutureSendTime, formatZoneNow, formatSendTime } from "../../utils/workflowSchedule";
 
 /* Create-Workflow wizard, ported from docs/updated-docs/ai-agent.jsx (§5).
    Self-contained (inline styles + Icon). Calls onLaunch with the assembled
@@ -18,11 +18,11 @@ const AI_TONES = [
 ];
 function aiToneText(tone: string): { subject: string; text: string } {
   switch (tone) {
-    case "professional": return { subject: "Following up on your home search", text: "Hi {{first_name}}, thank you for your interest in {{area}}. I'd be glad to share a few suitable options and answer any questions. When would be a good time for a brief call?" };
-    case "shorter": return { subject: "Quick question", text: "Hi {{first_name}} — still looking in {{area}}? Happy to help." };
-    case "friendlier": return { subject: "Great to connect!", text: "Hey {{first_name}}! So glad you're looking in {{area}} — want me to send over a few great options I think you'll love?" };
+    case "professional": return { subject: "Following up on your home search", text: "Hi {{first_name}}, thanks for reaching out about your home search. I'd be glad to share a few options in {{area}} and answer any questions. When would be a good time for a brief call?" };
+    case "shorter": return { subject: "Quick question", text: "Hi {{first_name}}, are you still looking for a home in {{area}}?" };
+    case "friendlier": return { subject: "Great to connect!", text: "Hey {{first_name}}! So glad you're searching for a home in {{area}}. Want me to send over a few great options I think you'll love?" };
     case "appointment": return { subject: "Want to tour a few homes?", text: "Hi {{first_name}}, would you like to tour a few homes in {{area}} this week? I can set up a quick showing whenever works best for you." };
-    case "followup": return { subject: "Just checking in", text: "Hey {{first_name}}, just circling back — are you still exploring {{area}}? No rush at all, happy to help whenever you're ready." };
+    case "followup": return { subject: "Just checking in", text: "Hi {{first_name}}, just checking in. Are you still looking for a home in {{area}}? No rush at all, happy to help whenever you're ready." };
     default: return { subject: "", text: "" };
   }
 }
@@ -33,6 +33,21 @@ const STAGE_DOT: Record<string, string> = { "New Lead": "#FF6A3D", "Contacted": 
 const WF_AUD_FILTERS = ["Hot Leads", "Needs Reply", "Appointment Ready", "Human Takeover", "No Response 7 Days"];
 
 const toggleIn = (s: Set<string>, v: string) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; };
+
+/** Human "when" for a scheduled follow-up: "Saturday, June 20 at 2:04 AM PST".
+ * Falls back gracefully when the date/time is missing. */
+function followupWhenLabel(date: string | undefined, time: string, timezone: string): string {
+  const timeLabel = time ? (formatSendTime(time) || time) : "";
+  let dayLabel = "";
+  if (date) {
+    const d = new Date(`${date}T00:00:00`);
+    dayLabel = Number.isNaN(d.getTime())
+      ? date
+      : d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  }
+  const head = dayLabel || "Follow-up";
+  return `${head}${timeLabel ? ` at ${timeLabel}` : ""}${timezone ? ` ${timezone}` : ""}`;
+}
 
 export interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; subject?: string; delayDays?: number }
 
@@ -126,7 +141,7 @@ export interface WizardLaunch {
   leads: { id: number; name: string; phone: string; email: string }[];
 }
 
-interface OrgLead { id: number; name?: string | null; first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null; source?: string | null; lead_type?: string | null }
+interface OrgLead { id: number; name?: string | null; first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null; source?: string | null; lead_type?: string | null; status?: string | null; intent?: string | null }
 const leadName = (l: OrgLead) => (l.name || [l.first_name, l.last_name].filter(Boolean).join(" ") || "Unnamed lead").trim();
 const wfInitials = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
 
@@ -134,7 +149,7 @@ export interface WizardSeed { name?: string; channel?: string; message?: string;
 /** A template built by the wizard in template mode (saved to the Templates tab). */
 export interface WizardTemplate { id: string; channel: string; name: string; stage: string; sent: number; flow: Record<string, unknown>[] }
 
-export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onSaveTemplate }: { seed?: WizardSeed | null; onClose: () => void; onLaunch: (d: WizardLaunch) => void; mode?: "workflow" | "template"; onSaveTemplate?: (t: WizardTemplate) => void }) {
+export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onSaveTemplate, busy = false }: { seed?: WizardSeed | null; onClose: () => void; onLaunch: (d: WizardLaunch) => void; mode?: "workflow" | "template"; onSaveTemplate?: (t: WizardTemplate) => void; busy?: boolean }) {
   const isTpl = mode === "template";
   const lastStep = isTpl ? 2 : 3;
   const seedCh = seed?.channel === "email" ? "email" : "sms";
@@ -157,6 +172,8 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   const [audMode, setAudMode] = useState<"select" | "filter">("select");
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [leadSearch, setLeadSearch] = useState("");
+  const [pageSize, setPageSize] = useState(100);
+  const [page, setPage] = useState(1);
   const orgId = localStorage.getItem("org_id") || "";
   const { data: tzData } = useQuery({ queryKey: ["org-timezone", orgId], queryFn: () => fetchOrgTimezone(orgId) as Promise<{ timezone?: string }>, enabled: Boolean(orgId) });
   const acctTz = (tzData as { timezone?: string } | undefined)?.timezone || "";
@@ -165,10 +182,52 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   const shownLeads = leadSearch.trim()
     ? leads.filter((l) => (leadName(l) + " " + (l.phone || l.email || "") + " " + (l.source || "")).toLowerCase().includes(leadSearch.trim().toLowerCase()))
     : leads;
-  const allSel = leads.length > 0 && sel.size === leads.length;
-  const someSel = sel.size > 0 && !allSel;
+  // Live preview of which existing leads match the chosen filters, so the user
+  // can SEE who the filter targets (Lead type + Stage, plus Hot Leads via intent).
+  // Behavioral filters that need joined data (Needs Reply, etc.) are noted as
+  // applied at enrollment rather than guessed here.
+  const matchedLeads = useMemo(() => {
+    const norm = (s: string | null | undefined) => (s || "").trim().toLowerCase();
+    const alnum = (s: string | null | undefined) => norm(s).replace(/[^a-z0-9]/g, "");
+    const types = [...audType].map(norm);
+    const stages = [...audStage].map(alnum);
+    const hotOnly = audFilter.has("Hot Leads");
+    const HOT = new Set(["hot", "high intent", "high_intent", "high-intent", "interested"]);
+    return leads.filter((l) => {
+      if (types.length && !types.some((t) => norm(l.lead_type).includes(t))) return false;
+      if (stages.length) {
+        const st = alnum(l.status);
+        if (!stages.some((s) => st === s || st.includes(s) || s.includes(st))) return false;
+      }
+      if (hotOnly && !HOT.has(norm(l.intent))) return false;
+      return true;
+    });
+  }, [leads, audType, audStage, audFilter]);
   const toggleLead = (id: number) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleAllLeads = () => setSel(allSel ? new Set() : new Set(leads.map((l) => l.id)));
+  // Pagination over the (search-)filtered list. All leads are loaded client-side,
+  // so paging is a slice. Reset to page 1 whenever the filter or page size changes.
+  useEffect(() => { setPage(1); }, [leadSearch, pageSize]);
+  const totalFiltered = shownLeads.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const pagedLeads = shownLeads.slice(pageStart, pageStart + pageSize);
+  const rangeFrom = totalFiltered === 0 ? 0 : pageStart + 1;
+  const rangeTo = Math.min(pageStart + pageSize, totalFiltered);
+  // Header checkbox acts on the CURRENT PAGE; the banner buttons handle all-filtered
+  // / all-in-database so a 1,375-lead set isn't an all-or-nothing toggle.
+  const pageIds = pagedLeads.map((l) => l.id);
+  const pageAllSel = pageIds.length > 0 && pageIds.every((id) => sel.has(id));
+  const pageSomeSel = pageIds.some((id) => sel.has(id)) && !pageAllSel;
+  const togglePage = () => setSel((s) => {
+    const n = new Set(s);
+    if (pageAllSel) pageIds.forEach((id) => n.delete(id));
+    else pageIds.forEach((id) => n.add(id));
+    return n;
+  });
+  const selectAllFiltered = () => setSel((s) => { const n = new Set(s); shownLeads.forEach((l) => n.add(l.id)); return n; });
+  const selectAllInDatabase = () => setSel(new Set(leads.map((l) => l.id)));
+  const clearSelection = () => setSel(new Set());
   const [pstNow, setPstNow] = useState("");
   useEffect(() => {
     const tick = () => setPstNow(new Date().toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }) + " PST");
@@ -182,7 +241,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   // Same-day scheduled opening must still be in the future (account tz) - block
   // launch otherwise so a lead enrolled today never gets a past-dated send.
   const openingPast = timing === "scheduled" && !isTimeInFutureToday(openingTime, acctTz);
-  const launch = () => { if (openingPast) return; onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, openingTime, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] }); };
+  const launch = () => { if (openingPast || busy) return; onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, openingTime, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] }); };
 
   // Template mode: build a reusable template (opening + follow-ups) and hand it
   // back to the Templates tab. stage is CUSTOM, sent 0, day 0/1/2/... by index.
@@ -233,22 +292,34 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                   <div><h3 style={{ fontSize: 32, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>{isTpl ? "Create New Template" : "Name & Channel"}</h3><p style={{ fontSize: 16, color: "var(--ink-3)", margin: 0 }}>{isTpl ? "Build a reusable sequence to save and use later" : "Name your workflow, pick a channel, and choose who to enroll"}</p></div>
                   <div style={{ fontSize: 16, color: "var(--ink-3)", fontWeight: 600 }}>Step 1 of {lastStep}</div>
                 </div>
-                <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>{isTpl ? "Template Name" : "Workflow name"}</label>
-                <input value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} autoFocus placeholder={isTpl ? "New Lead Follow-Up" : "e.g. Buyer speed-to-lead"} style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
-                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{name ? `${name.length}/80` : "Give it a clear name you'll recognize later."}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", margin: "24px 0 12px" }}>Choose Channel</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                  {[{ k: "sms", t: "SMS", d: "Fast replies", icon: "message" }, { k: "email", t: "Email", d: "Rich content", icon: "mail" }].map((c) => {
-                    const on = channels.includes(c.k);
-                    return (
-                      <button key={c.k} onClick={() => toggleChannel(c.k)} style={{ position: "relative", textAlign: "left", padding: 18, borderRadius: 14, border: on ? "2px solid var(--accent-strong)" : "2px solid var(--line)", background: on ? "#FFF8F5" : "var(--panel)", cursor: "pointer" }}>
-                        <span style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: c.k === "sms" ? "#FFEDE3" : "#E7F4FB", color: c.k === "sms" ? "var(--accent-strong)" : "#0EA5E9", marginBottom: 10 }}><Icon name={c.icon} size={18} /></span>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--ink)" }}>{c.t}</div>
-                        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>{c.d}</div>
-                        {on && <span style={{ position: "absolute", top: 14, right: 14, width: 22, height: 22, borderRadius: "50%", background: "var(--accent-strong)", color: "#fff", display: "grid", placeItems: "center" }}><Icon name="check" size={13} /></span>}
-                      </button>
-                    );
-                  })}
+                {/* Name (left) + Channel (right) on one row; the name field is
+                    sized down so the SMS/Email cards sit beside it. Wraps to two
+                    stacked rows on a narrow viewport. "Who to enroll" stays full
+                    width below both. */}
+                <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 260px", minWidth: 240 }}>
+                    <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>{isTpl ? "Template Name" : "Workflow name"}</label>
+                    <input value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} autoFocus placeholder={isTpl ? "New Lead Follow-Up" : "e.g. Buyer speed-to-lead"} style={{ width: "100%", height: 62, padding: "0 16px", borderRadius: 12, border: "2px solid var(--accent-strong)", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                    <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{name ? `${name.length}/80` : "Give it a clear name you'll recognize later."}</div>
+                  </div>
+                  <div style={{ flex: "1 1 340px", minWidth: 300 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", margin: "0 0 8px" }}>Choose Channel</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      {[{ k: "sms", t: "SMS", d: "Fast replies", icon: "message" }, { k: "email", t: "Email", d: "Rich content", icon: "mail" }].map((c) => {
+                        const on = channels.includes(c.k);
+                        return (
+                          <button key={c.k} onClick={() => toggleChannel(c.k)} style={{ position: "relative", height: 62, display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "0 12px", borderRadius: 12, border: on ? "2px solid var(--accent-strong)" : "2px solid var(--line)", background: on ? "#FFF8F5" : "var(--panel)", cursor: "pointer", boxSizing: "border-box" }}>
+                            <span style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", background: c.k === "sms" ? "#FFEDE3" : "#E7F4FB", color: c.k === "sms" ? "var(--accent-strong)" : "#0EA5E9", flex: "none" }}><Icon name={c.icon} size={17} /></span>
+                            <span style={{ minWidth: 0 }}>
+                              <span style={{ display: "block", fontSize: 15, fontWeight: 800, color: "var(--ink)", lineHeight: 1.2 }}>{c.t}</span>
+                              <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", lineHeight: 1.2 }}>{c.d}</span>
+                            </span>
+                            {on && <span style={{ marginLeft: "auto", width: 20, height: 20, borderRadius: "50%", background: "var(--accent-strong)", color: "#fff", display: "grid", placeItems: "center", flex: "none" }}><Icon name="check" size={12} /></span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Who to enroll - moved into Step 1 (under the channel choice) so
@@ -279,17 +350,25 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                         <Icon name="search" size={15} />
                         <input value={leadSearch} onChange={(e) => setLeadSearch(e.target.value)} placeholder="Search leads…" style={{ border: "none", outline: "none", background: "transparent", fontSize: 14, fontFamily: "inherit", width: "100%", color: "var(--ink)" }} />
                       </div>
+                      {/* Bulk-select banner: page checkbox handles the current page;
+                          these select across ALL filtered / all in the database. */}
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                        <button onClick={selectAllFiltered} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)", cursor: "pointer" }}>Select all {totalFiltered.toLocaleString()}{leadSearch ? " filtered" : ""}</button>
+                        {leadSearch.trim() && <button onClick={selectAllInDatabase} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)", cursor: "pointer" }}>Select all {leads.length.toLocaleString()} in database</button>}
+                        {sel.size > 0 && <button onClick={clearSelection} style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "transparent", fontSize: 12.5, fontWeight: 700, color: "var(--ink-3)", cursor: "pointer" }}>Clear</button>}
+                        <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: "var(--accent-strong)" }}>{sel.size.toLocaleString()} selected</span>
+                      </div>
                       <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
-                        <button onClick={toggleAllLeads} style={{ width: "100%", display: "grid", gridTemplateColumns: "28px 1fr 110px 70px", alignItems: "center", gap: 12, padding: "11px 14px", background: "var(--line-soft)", border: "none", cursor: "pointer", textAlign: "left" }}>
-                          <span style={{ width: 20, height: 20, borderRadius: 6, display: "grid", placeItems: "center", flex: "none", border: allSel || someSel ? "none" : "2px solid var(--line)", background: allSel || someSel ? "var(--accent)" : "var(--panel)" }}>{allSel ? <Icon name="check" size={13} style={{ color: "#fff" }} /> : someSel ? <Icon name="minus" size={13} style={{ color: "#fff" }} /> : null}</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>{allSel ? "Deselect all" : "Select all"}</span>
+                        <button onClick={togglePage} style={{ width: "100%", display: "grid", gridTemplateColumns: "28px 1fr 110px 70px", alignItems: "center", gap: 12, padding: "11px 14px", background: "var(--line-soft)", border: "none", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ width: 20, height: 20, borderRadius: 6, display: "grid", placeItems: "center", flex: "none", border: pageAllSel || pageSomeSel ? "none" : "2px solid var(--line)", background: pageAllSel || pageSomeSel ? "var(--accent)" : "var(--panel)" }}>{pageAllSel ? <Icon name="check" size={13} style={{ color: "#fff" }} /> : pageSomeSel ? <Icon name="minus" size={13} style={{ color: "#fff" }} /> : null}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>{pageAllSel ? "Deselect page" : "Select page"}</span>
                           <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>Source</span>
                           <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)" }}>Type</span>
                         </button>
-                        <div style={{ maxHeight: 268, overflowY: "auto" }}>
+                        <div style={{ maxHeight: 360, overflowY: "auto" }}>
                           {!leadsRaw && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>Loading leads…</div>}
-                          {leadsRaw && shownLeads.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>No leads {leadSearch ? `match "${leadSearch}"` : "yet"}.</div>}
-                          {shownLeads.map((l) => {
+                          {leadsRaw && totalFiltered === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>No leads {leadSearch ? `match "${leadSearch}"` : "yet"}.</div>}
+                          {pagedLeads.map((l) => {
                             const on = sel.has(l.id);
                             const type = (l.lead_type || "").trim();
                             const seller = type.toLowerCase() === "seller";
@@ -309,8 +388,25 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                             );
                           })}
                         </div>
+                        {/* Pagination footer */}
+                        {totalFiltered > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "10px 14px", borderTop: "1px solid var(--line)", background: "var(--line-soft)", fontSize: 12.5, color: "var(--ink-2)" }}>
+                            <span>Showing <strong>{rangeFrom.toLocaleString()}–{rangeTo.toLocaleString()}</strong> of <strong>{totalFiltered.toLocaleString()}</strong> leads</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              Page size
+                              <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 12.5, fontWeight: 600, color: "var(--ink)", cursor: "pointer" }}>
+                                {[100, 200, 300, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                              </select>
+                            </span>
+                            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 12.5, fontWeight: 700, color: safePage <= 1 ? "var(--ink-faint)" : "var(--ink-2)", cursor: safePage <= 1 ? "not-allowed" : "pointer" }}>Previous</button>
+                              <span style={{ fontWeight: 700 }}>Page {safePage} of {totalPages}</span>
+                              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 12.5, fontWeight: 700, color: safePage >= totalPages ? "var(--ink-faint)" : "var(--ink-2)", cursor: safePage >= totalPages ? "not-allowed" : "pointer" }}>Next</button>
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 12 }}><strong style={{ color: "var(--ink-2)" }}>{sel.size}</strong> of {leads.length} leads selected for enrollment.</div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 12 }}><strong style={{ color: "var(--ink-2)" }}>{sel.size.toLocaleString()}</strong> of {leads.length.toLocaleString()} leads selected for enrollment.</div>
                     </div>
                   ) : (
                     <div>
@@ -330,6 +426,34 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                         <div style={groupLbl}>Filters</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                           {WF_AUD_FILTERS.map((f) => { const on = audFilter.has(f); return <button key={f} onClick={() => setAudFilter((s) => toggleIn(s, f))} style={chip(on)}><span style={{ width: 16, height: 16, borderRadius: 5, display: "grid", placeItems: "center", flex: "none", border: on ? "none" : "1.5px solid var(--line)", background: on ? "var(--accent-strong)" : "transparent" }}>{on && <Icon name="check" size={11} style={{ color: "#fff" }} />}</span>{f}</button>; })}
+                        </div>
+                      </div>
+                      {/* Live preview of the leads matching the chosen filters. */}
+                      <div style={{ marginBottom: 14, border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+                        <div style={{ padding: "10px 14px", background: "var(--line-soft)", fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)" }}>
+                          {!leadsRaw ? "Loading leads…" : `${matchedLeads.length} of ${leads.length} leads match these filters`}
+                        </div>
+                        <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                          {leadsRaw && matchedLeads.length === 0 ? (
+                            <div style={{ padding: 20, textAlign: "center", color: "var(--ink-3)", fontSize: 13.5 }}>No leads match these filters yet.</div>
+                          ) : (
+                            matchedLeads.map((l) => {
+                              const type = (l.lead_type || "").trim();
+                              const seller = type.toLowerCase() === "seller";
+                              return (
+                                <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr 70px", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
+                                  <span style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
+                                    <span style={{ width: 32, height: 32, borderRadius: "50%", background: "#EEECE8", color: "#9A938A", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, flex: "none" }}>{wfInitials(leadName(l))}</span>
+                                    <span style={{ minWidth: 0 }}>
+                                      <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{leadName(l)}</span>
+                                      <span style={{ display: "block", fontSize: 12, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.phone || l.email || "—"}</span>
+                                    </span>
+                                  </span>
+                                  <span>{type && <span style={{ fontSize: 11, fontWeight: 700, color: seller ? "var(--accent-strong)" : "var(--blue)", background: seller ? "var(--accent-soft)" : "var(--blue-bg)", padding: "3px 8px", borderRadius: 6 }}>{type}</span>}</span>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 12, padding: "14px 16px", background: "#fff8f5", border: "1px solid #ffd9c2", borderRadius: 12, alignItems: "flex-start" }}>
@@ -461,8 +585,8 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                 <div style={{ padding: 20, background: "var(--line-soft)", borderRadius: 14 }}>
                   <h4 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)", margin: "0 0 16px" }}>Message Flow — How This Workflow Runs</h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {[{ tag: "Opening message", channel: msgChannel, subject: msgChannel === "email" ? emailSubject : "", body: message, when: timing === "instant" ? "Sent immediately when the lead opts in" : "Sent at your scheduled opening time" },
-                      ...followups.map((f, i) => ({ tag: `Follow-up ${i + 1}`, channel: f.channel || "sms", subject: f.channel === "email" ? f.subject || "" : "", body: f.message, when: (f.date || "Follow-up") + (f.time ? ` at ${f.time}` : "") + ` ${f.timezone}` })),
+                    {[{ tag: "Opening message", channel: msgChannel, subject: msgChannel === "email" ? emailSubject : "", body: message, when: timing === "instant" ? "Sent immediately" : `Sending at ${formatSendTime(openingTime) || openingTime} ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}` },
+                      ...followups.map((f, i) => ({ tag: `Follow-up ${i + 1}`, channel: f.channel || "sms", subject: f.channel === "email" ? f.subject || "" : "", body: f.message, when: followupWhenLabel(f.date, f.time, f.timezone) })),
                     ].map((m, i) => {
                       const email = m.channel === "email";
                       return (
@@ -497,7 +621,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
               ? <button className="wc-primary" disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>Continue<Icon name="arrowRight" size={15} /></button>
               : isTpl
                 ? <button className="wc-primary" onClick={saveTemplate}><Icon name="check" size={15} />Save Template</button>
-                : <button className="wc-primary" disabled={openingPast} onClick={launch}><Icon name="outbound" size={15} />Start Workflow</button>}
+                : <button className="wc-primary" disabled={openingPast || busy} onClick={launch}><Icon name="outbound" size={15} />{busy ? "Starting…" : "Start Workflow"}</button>}
           </div>
         </div>
       </div>

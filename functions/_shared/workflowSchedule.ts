@@ -47,12 +47,19 @@ function localParts(date: Date, timezone: string): { year: number; month: number
 function wallTimeToUtc(
   year: number, month: number, day: number, hour: number, minute: number, timezone: string,
 ): Date {
-  let candidate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  // The wall time we want, as a "naive" epoch (the components read as if UTC).
+  const wantedNaive = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let candidate = new Date(wantedNaive);
   for (let i = 0; i < 3; i++) {
     const local = localParts(candidate, timezone);
-    const diffMin = (hour * 60 + minute) - (local.hour * 60 + local.minute);
-    if (diffMin === 0) break;
-    candidate = new Date(candidate.getTime() + diffMin * 60_000);
+    // Compare the FULL date+time, not just hour:minute. The old hour-only diff
+    // converged on the wrong CALENDAR DAY whenever the candidate's local time
+    // fell on a different day than the target (e.g. a pre-07:00 send time in a
+    // UTC-offset-negative zone), landing the message a day early.
+    const localNaive = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, 0);
+    const diffMs = wantedNaive - localNaive;
+    if (diffMs === 0) break;
+    candidate = new Date(candidate.getTime() + diffMs);
   }
   return candidate;
 }
