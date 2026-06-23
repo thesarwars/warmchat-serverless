@@ -116,10 +116,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // redact: OTP code is in the body and must never be persisted to mock logs.
+  // transactional: mark as a transactional send so ElasticEmail keeps it out of
+  // the Promotions/Spam tab and skips the appended unsubscribe footer - a
+  // verification code is not marketing and must land in the inbox in seconds.
   const res = await mockElasticSendEmail(env, {
     to: email,
     subject: "Your WarmChats verification code",
     isHtml: true,
+    transactional: true,
     body: `<p>Your verification code is <b>${code}</b>. It expires in 10 minutes.</p>`,
   }, { redact: true });
   if (!res.ok) return error(res.error || "Failed to send verification email", 502);

@@ -13,6 +13,7 @@ import { sendLeadEmail } from "./leadEmail.ts";
 import { getAvailability, findOpenSlots, isSlotBookable } from "./availability.ts";
 import { createProposedAppointment } from "./booking.ts";
 import { openEscalation } from "./escalation.ts";
+import { loadPersonaUi } from "./personaUi.ts";
 import { createTask } from "./tasks.ts";
 import { applyAiDealUpdate, ensureDealForLead } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
@@ -547,12 +548,12 @@ async function executeTool(
     }
     case "upsert_deal": {
       const res = await applyAiDealUpdate(env, orgId, lead.id, {
-        dealType: args.deal_type !== undefined ? String(args.deal_type) : undefined,
-        stage: args.stage !== undefined ? String(args.stage) : undefined,
-        reason: args.reason !== undefined ? String(args.reason) : undefined,
-        value: args.value !== undefined ? Number(args.value) : undefined,
-        probability: args.probability !== undefined ? Number(args.probability) : undefined,
-        status: args.status !== undefined ? String(args.status) : undefined,
+        dealType: args.deal_type !== undefined ? String(args.deal_type) : null,
+        stage: args.stage !== undefined ? String(args.stage) : null,
+        reason: args.reason !== undefined ? String(args.reason) : null,
+        value: args.value !== undefined ? Number(args.value) : null,
+        probability: args.probability !== undefined ? Number(args.probability) : null,
+        status: args.status !== undefined ? String(args.status) : null,
       });
       if (res.kind === "invalid") return res.message;
       if (res.kind === "suggested") {
@@ -671,9 +672,18 @@ async function runAgentLoop(
   const listingCount = listingsEnabled ? await countOfferableListings(env, orgId, lead.owner_id ?? userId) : 0;
   const listingsActive = listingsEnabled && listingCount > 0;
   // MMS (texting listing photos) is an SMS-only capability; never offer it on email.
-  const tools = listingsActive
+  let tools = listingsActive
     ? [...TOOLS, SEARCH_LISTINGS_TOOL, ...(channel === "sms" ? [SEND_MMS_TOOL] : [])]
-    : TOOLS;
+    : [...TOOLS];
+  // AI Settings "Human Takeover Detection" (Inbound). When OFF, withhold the
+  // discretionary escalate_to_agent tool so the AI handles the conversation itself
+  // instead of auto-handing-off on its own judgment. Deterministic keyword
+  // escalations (inboundProcessing.escalateOnKeywordMatch) are explicit agent
+  // rules and still fire. Absent key -> defaults ON -> tool present -> unchanged.
+  const ui = await loadPersonaUi(env, orgId, lead.owner_id ?? userId);
+  if (ui.humanDetect === false) {
+    tools = tools.filter((t) => t.function?.name !== "escalate_to_agent");
+  }
 
   const channelLine = channel === "email"
     ? "You are replying over EMAIL. Write a brief, professional reply - a short paragraph is fine, but stay concise and ask at most one question. Plain text only (no markdown or HTML). The subject is handled for you; do not write one."

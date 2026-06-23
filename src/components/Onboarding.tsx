@@ -525,6 +525,12 @@ const Onboarding: React.FC = () => {
       const data = await res.json();
       if (data.checkout_url) {
         window.location.assign(data.checkout_url);
+      } else if (data.comped) {
+        // 100%-off promo: comped instantly in D1, no Stripe / no card. Route via
+        // the success page so the plan is reflected (SMS/AI unlock) on return.
+        window.location.assign(
+          `/billing/success?comped=1&plan=${encodeURIComponent(data.plan || planId)}&return=${encodeURIComponent(successPath)}`,
+        );
       } else {
         // Surface the real Stripe error - "No such price" / "test mode key
         // used with live price" etc. is actionable info, not a generic toast.
@@ -619,8 +625,8 @@ const Onboarding: React.FC = () => {
       setBusinessOtpSent(true);
       setBusinessNotice(
         data.domain_submitted === false
-          ? "Verification code sent. We'll prepare DNS records after you verify the code."
-          : "Verification code sent. Elastic Email domain setup is prepared for DNS records after verification."
+          ? "Verification code sent - check your inbox (and spam/promotions). We'll prepare DNS records after you verify the code."
+          : "Verification code sent - check your inbox (and spam/promotions). Elastic Email domain setup is prepared for DNS records after verification."
       );
     } catch {
       toast.error("Failed to send code");

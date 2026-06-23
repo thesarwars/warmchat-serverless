@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -43,6 +44,7 @@ import {
   fetchOrgTimezone,
   fetchSendingAddress,
   openBillingPortal,
+  fetchPaymentMethods,
   patchNotificationSettings,
   patchOrgQuietHours,
   patchOrgTimezone,
@@ -1510,6 +1512,13 @@ export function BillingTab() {
   // Track which button triggered the portal so only that one shows "Opening...".
   const [portalBusyKey, setPortalBusyKey] = useState<string | null>(null);
   const portalBusy = portalBusyKey !== null;
+  const [showCancel, setShowCancel] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+  // Only show "Cancel plan" when there's actually something to cancel.
+  const canCancel = ["active", "past_due", "trialing", "comp"].includes(status);
+  // Saved Stripe cards for this customer (empty for free/comp/no-customer orgs).
+  const cardsQ = useQuery({ queryKey: ["payment-methods"], queryFn: fetchPaymentMethods, retry: false });
+  const cards = cardsQ.data?.cards ?? [];
   const openPortal = async (key: string) => {
     setPortalBusyKey(key);
     try {
@@ -1525,6 +1534,71 @@ export function BillingTab() {
     }
   };
 
+  // Route a "Choose plan" click. An ACTIVE real Stripe subscriber switches plan
+  // in the Customer Portal (proration handled by Stripe). A free / comp /
+  // canceled org has NO Stripe subscription for the Portal to manage, so it
+  // would dead-end there - start a real Checkout instead (which also comps out
+  // instantly if the org carries a 100%-off promo code).
+  const startPlanChange = async (key: string) => {
+    const hasManageableSub = status === "active" || status === "past_due" || status === "trialing";
+    if (hasManageableSub) { void openPortal(`plan-${key}`); return; }
+    setPortalBusyKey(`plan-${key}`);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${import.meta.env.VITE_API_BASE}/billing/create-checkout-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          planId: key,
+          cancelPath: "/settings?tab=billing",
+          successPath: "/settings?tab=billing",
+          promoCode: localStorage.getItem("wc_promo_code") || "",
+        }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) window.location.assign(data.checkout_url);
+      else if (data.comped) {
+        window.location.assign(
+          `/billing/success?comped=1&plan=${encodeURIComponent(data.plan || key)}&return=${encodeURIComponent("/settings?tab=billing")}`,
+        );
+      } else toast.error((data as { message?: string; error?: string }).message || (data as { error?: string }).error || "Couldn't start checkout.");
+    } catch {
+      toast.error("Couldn't start checkout.");
+    } finally {
+      setPortalBusyKey(null);
+    }
+  };
+
+  const cancelPlan = async () => {
+    setCanceling(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${import.meta.env.VITE_API_BASE}/billing/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error((data as { message?: string; error?: string }).message || (data as { error?: string }).error || "Couldn't cancel. Please try again.");
+        return;
+      }
+      if (data.immediate) {
+        toast.success(data.message || "Plan canceled - you're back on the Free plan.");
+      } else {
+        const when = data.ends_at
+          ? new Date(data.ends_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+          : "the end of your billing period";
+        toast.success(`Your plan will cancel on ${when}. You keep full access until then.`, { duration: 7000 });
+      }
+      setShowCancel(false);
+      setTimeout(() => window.location.reload(), 1600);
+    } catch {
+      toast.error("Couldn't cancel. Please try again.");
+    } finally {
+      setCanceling(false);
+    }
+  };
+
   return (
     <div className="wc-billing">
       <div className="wc-admin-grid">
@@ -1537,12 +1611,43 @@ export function BillingTab() {
             {startedLabel ? <div className="wc-band-d">Subscribed on {startedLabel}</div> : null}
             <div className="wc-conn-btns" style={{ marginTop: 14 }}>
               <button className="wc-primary wc-sm" onClick={() => void openPortal("manage")} disabled={portalBusy}><Icon name="settings" size={14} />{portalBusyKey === "manage" ? "Opening..." : "Manage subscription"}</button>
+              {canCancel ? (
+                <button
+                  className="wc-ghostbtn wc-sm"
+                  onClick={() => setShowCancel(true)}
+                  disabled={portalBusy || canceling}
+                  style={{ color: "#dc2626", borderColor: "#f0c2c2" }}
+                >
+                  Cancel plan
+                </button>
+              ) : null}
             </div>
-            <div className="wc-band-d" style={{ marginTop: 8 }}>Change card, swap plan, view invoices, or cancel in the secure Stripe portal.</div>
+            <div className="wc-band-d" style={{ marginTop: 8 }}>Change card, swap plan, or view invoices in the secure Stripe portal. Cancel keeps your access until the end of the billing period.</div>
           </Card>
 
           <Card icon="file" title="Payment method">
-            <div className="wc-band-d">Payment cards are managed securely in Stripe - WarmChats never stores your card details.</div>
+            {cards.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {cards.map((c) => (
+                  <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span className="wc-mono" style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", background: "#eef1f6", color: "#33415c", borderRadius: 6, padding: "5px 9px" }}>
+                      {c.brand || "Card"}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="wc-mono" style={{ fontSize: 14, letterSpacing: 1.5 }}>{"•••• •••• •••• "}{c.last4 || "••••"}</div>
+                      {c.exp_month && c.exp_year ? (
+                        <div className="wc-band-d" style={{ marginTop: 2 }}>Expires {String(c.exp_month).padStart(2, "0")} / {c.exp_year}</div>
+                      ) : null}
+                    </div>
+                    {c.is_default && cards.length > 1 ? (
+                      <span className="wc-statuspill" style={{ fontSize: 11 }}>Default</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="wc-band-d">No card on file. Cards are managed securely in Stripe - WarmChats never stores your card details.</div>
+            )}
             <div className="wc-conn-btns" style={{ marginTop: 12 }}>
               <button className="wc-ghostbtn wc-sm" onClick={() => void openPortal("payment")} disabled={portalBusy}><Icon name="file" size={14} />{portalBusyKey === "payment" ? "Opening..." : "Update payment method"}</button>
             </div>
@@ -1568,8 +1673,9 @@ export function BillingTab() {
         </div>
       </div>
 
-      {/* prototype.css pins .wc-changeplan to order:-1 (top); override so it sits last. */}
-      <div className="wc-panel-card pad wc-admincard wc-changeplan" style={{ order: 0, marginTop: 18, marginBottom: 0 }}>
+      {/* prototype.css pins .wc-changeplan to order:-1 so it renders at the TOP
+          of the flex column (above Current plan / Usage). */}
+      <div className="wc-panel-card pad wc-admincard wc-changeplan">
         <div className="wc-admincard-h"><span className="wc-admincard-ic"><Icon name="layers" size={17} /></span>Change plan</div>
         <div className="wc-plans">
           {PLAN_CARDS.map((p) => {
@@ -1593,7 +1699,7 @@ export function BillingTab() {
                     // portal (no in-app card form), matching the other billing
                     // buttons above.
                     if (p.key === "custom_brokerage") window.open(BROKERAGE_DEMO_URL, "_blank", "noopener");
-                    else void openPortal(`plan-${p.key}`);
+                    else void startPlanChange(p.key);
                   }}
                 >
                   {isCurrent
@@ -1612,6 +1718,32 @@ export function BillingTab() {
           })}
         </div>
       </div>
+
+      {showCancel ? createPortal((
+        <div
+          onClick={() => { if (!canceling) setShowCancel(false); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "grid", placeItems: "center", zIndex: 2000, padding: 16 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 440, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.28)" }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700, color: "#1a1a1a" }}>Cancel your subscription?</h3>
+            <p style={{ margin: "0 0 20px", color: "#555", fontSize: 14, lineHeight: 1.55 }}>
+              {status === "comp"
+                ? "This ends your promo access and moves you to the Free plan right away. You can resubscribe anytime."
+                : `You'll keep your ${displayPlan} plan and all its features until the end of your current billing period, then your account moves to the Free plan. You can resubscribe anytime.`}
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="wc-ghostbtn wc-sm" onClick={() => setShowCancel(false)} disabled={canceling}>Keep my plan</button>
+              <button
+                onClick={() => void cancelPlan()}
+                disabled={canceling}
+                style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 9, padding: "9px 18px", fontWeight: 600, fontSize: 14, cursor: canceling ? "default" : "pointer", opacity: canceling ? 0.7 : 1 }}
+              >
+                {canceling ? "Canceling..." : "Yes, cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body) : null}
     </div>
   );
 }

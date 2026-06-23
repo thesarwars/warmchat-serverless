@@ -8,6 +8,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ChatbaseWidget } from "./components/ChatbaseWidget";
 import RoleProtectedRoute from "./components/RoleProtectedRoute";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
+import OrgAdminRoute from "./components/OrgAdminRoute";
 import { ROLES } from "./constants/roles";
 import SessionExpiredModal from "./components/SessionExpiredModal";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -655,14 +656,16 @@ const App: React.FC = () => {
             }
           />
 
-          {/* Admin business control center (6 tabs). Linked from the sidebar for
-              site admins only. Gated on user.is_admin like the rest of /admin/*. */}
+          {/* Admin business control center (6 tabs). Per-ORG: visible to an org's
+              Owner/Manager (and the platform owner). Data is org-scoped server-side,
+              so each admin only sees their own org. The platform super-admin TOOLS
+              below stay locked to is_admin via AdminProtectedRoute. */}
           <Route
             path="/admin"
             element={
-              <AdminProtectedRoute>
+              <OrgAdminRoute>
                 <AdminPage />
-              </AdminProtectedRoute>
+              </OrgAdminRoute>
             }
           />
 

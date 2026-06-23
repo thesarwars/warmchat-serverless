@@ -33,10 +33,13 @@ export async function getOrgPlan(env: Env, userId: number): Promise<
   };
 }
 
-/** True when the org has a paid plan AND an active-enough subscription status. */
+/** True when the org has a paid plan AND an active-enough subscription status.
+ *  'comp' is a 100%-off promo grant (paid plan, no Stripe) and must count as
+ *  fully active so comp users can provision SMS / use every paid feature until
+ *  the comp lapses - see [[comp-billing-model]]. */
 export function isPaidPlanActive(plan: string, subscriptionStatus: string): boolean {
   if (!PAID_PLANS.has(plan)) return false;
-  return subscriptionStatus === "active" || subscriptionStatus === "trialing";
+  return subscriptionStatus === "active" || subscriptionStatus === "trialing" || subscriptionStatus === "comp";
 }
 
 /**

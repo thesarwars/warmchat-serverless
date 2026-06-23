@@ -40,7 +40,32 @@ interface DueRow {
   sender_business_address: string | null;
 }
 
-const MAX_PER_TICK = 200;
+// Each due step sends via ONE provider fetch() = one SUBREQUEST. The whole cron
+// invocation shares a subrequest budget (FREE: 50, PAID: 1000) across ALL jobs
+// (this + scheduledMessages + gmail/escalation), so the combined drainer total
+// must stay well under 50. This drainer caps at 15, scheduledMessages at 20.
+// PRODUCTION/PAID toggle: restore 200 below once on Workers Paid (1000 cap +
+// heavier user load). 200 on free overran the limit -> "Too many subrequests".
+// const MAX_PER_TICK = 15;         // FREE tier (50-subrequest/invocation cap)
+const MAX_PER_TICK = 200;           // PAID / production (1000-subrequest cap) - ACTIVE since 2026-06-21 upgrade
+
+/**
+ * A THROWN send error here is the free-tier "Too many subrequests" overrun (or a
+ * network/runtime throw) - transient infra, not a permanent rejection. Such steps
+ * go back to 'scheduled' to retry next tick instead of being dropped as 'failed'.
+ * (Mirror of the same helper in scheduledMessages.ts.)
+ */
+function isRetryableSendError(msg: string | null | undefined): boolean {
+  const s = String(msg || "").toLowerCase();
+  if (!s) return false;
+  if (s.includes("too many subrequests")) return true;
+  if (s.includes("network") || s.includes("timeout") || s.includes("timed out") ||
+      s.includes("connection") || s.includes("fetch failed") || s.includes("socket")) return true;
+  const m = s.match(/http\s+(\d{3})/);
+  if (m) { const code = Number(m[1]); return code === 429 || code >= 500; }
+  if (s.startsWith("error:")) return true;
+  return false;
+}
 
 export async function runSequenceDispatch(env: CronEnv): Promise<void> {
   const now = new Date().toISOString();
@@ -73,7 +98,7 @@ export async function runSequenceDispatch(env: CronEnv): Promise<void> {
   }
   console.log(`[cron:sequenceDispatch] ${due.length} due step(s)${due.length === MAX_PER_TICK ? ` (capped at ${MAX_PER_TICK}/tick)` : ""}`);
 
-  let sent = 0, failed = 0, skippedQuiet = 0, skippedLimit = 0, errored = 0, skippedAiOff = 0;
+  let sent = 0, failed = 0, skippedQuiet = 0, skippedLimit = 0, errored = 0, skippedAiOff = 0, retried = 0;
   // Per-tick caches for the AI-switch lookups (one query per distinct org / user).
   const masterCache = new Map<number, boolean>();
   const agentCache = new Map<string, boolean>();
@@ -187,14 +212,22 @@ export async function runSequenceDispatch(env: CronEnv): Promise<void> {
       if (dispatched) sent++; else failed++;
       console.log(`[cron:sequenceDispatch] exec=${row.exec_id} ${channel} -> ${dispatched ? "sent" : "failed"}`);
     } catch (err) {
+      // Transient infra (free-tier subrequest overrun / network) -> retry next tick
+      // by leaving the step 'scheduled', instead of permanently dropping it.
+      const retry = isRetryableSendError(String(err));
       await env.D1DB.prepare(
-        `UPDATE step_executions SET status = 'failed', result = ? WHERE id = ?`,
-      ).bind(JSON.stringify({ error: String(err) }), row.exec_id).run();
-      errored++;
-      console.error(`[cron:sequenceDispatch] exec=${row.exec_id} errored`, err);
+        `UPDATE step_executions SET status = ?, result = ? WHERE id = ?`,
+      ).bind(retry ? "scheduled" : "failed", JSON.stringify({ error: String(err).slice(0, 300), retry }), row.exec_id).run();
+      if (retry) {
+        retried++;
+        console.warn(`[cron:sequenceDispatch] exec=${row.exec_id} deferred (transient): ${String(err).slice(0, 120)}`);
+      } else {
+        errored++;
+        console.error(`[cron:sequenceDispatch] exec=${row.exec_id} errored`, err);
+      }
     }
   }
-  console.log(`[cron:sequenceDispatch] summary: sent=${sent} failed=${failed} skippedQuiet=${skippedQuiet} skippedAiOff=${skippedAiOff} skippedLimit=${skippedLimit} errored=${errored}`);
+  console.log(`[cron:sequenceDispatch] summary: sent=${sent} failed=${failed} retried=${retried} skippedQuiet=${skippedQuiet} skippedAiOff=${skippedAiOff} skippedLimit=${skippedLimit} errored=${errored}`);
 }
 
 async function sendEmail(env: CronEnv, row: DueRow): Promise<boolean> {

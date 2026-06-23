@@ -82,6 +82,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       archived_at: c.archived_at,
       contacts_sent: analytics.contacts_sent,
       messages_sent: analytics.messages_sent,
+      pending: analytics.pending ?? 0,
       delivered_count: analytics.delivered,
       opened_count: c.opened_count || 0,
       converted_count: analytics.converted,

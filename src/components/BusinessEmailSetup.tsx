@@ -689,7 +689,7 @@ const BusinessEmailSetup: React.FC<Props> = ({
                       Not all DNS records are verified yet.
                       {(() => {
                         const allMissing = dnsRecords
-                          .filter((r) => recStatuses[r.key] !== "verified")
+                          .filter((r) => r.required && recStatuses[r.key] !== "verified")
                           .map((r) => r.label);
                         return allMissing.length > 0
                           ? <> Missing: <strong>{allMissing.join(", ")}</strong>.</>

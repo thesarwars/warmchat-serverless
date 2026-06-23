@@ -36,7 +36,8 @@ export async function getBillingSnapshot(env: Env, userId: number): Promise<Bill
   if (!row) return null;
   const plan = row.plan || "free_channel";
   const status = row.subscription_status || (plan === "free_channel" ? "free" : "active");
-  const isActive = status === "free" || status === "active" || status === "trialing";
+  // 'comp' = 100%-off promo grant (paid plan, no Stripe) - counts as active.
+  const isActive = status === "free" || status === "active" || status === "trialing" || status === "comp";
   return {
     plan,
     subscription_status: status,

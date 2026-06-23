@@ -187,10 +187,13 @@ function SideBar({ isOpen, toggleSidebar, floatingOnDesktop }: SideBarProps) {
   const settingsNavItems = (
     <Section title="Workspace">
       <NavItem to="/deals" icon={Tag} text="Deals" />
-      {/* Site admins get the Admin control center (Settings folded into its Users
-          tab) - one unified entry. The standalone Settings page is retired, so
-          non-admins get no Workspace settings link. */}
-      {typeof window !== "undefined" && localStorage.getItem("is_admin") === "1" ? (
+      {/* The Admin control center (Settings folded into its Users tab) is the
+          per-ORG business panel - shown to an org's Owner/Manager and the
+          platform owner. Regular members (Representative/Guest) get no link.
+          Platform super-admin TOOLS live under /admin/tools (is_admin only). */}
+      {typeof window !== "undefined" &&
+      (localStorage.getItem("is_admin") === "1" ||
+        ["Owner", "Manager"].includes(localStorage.getItem("role_name") || "")) ? (
         <NavItem to="/admin" icon={BarChart3} text="Admin" />
       ) : null}
       {/* <NavItem to="/dashboard/support" icon={LifeBuoy} text="Support" /> */}

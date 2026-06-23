@@ -5,6 +5,7 @@ import {
   queueScheduledMessage, renderTemplate, isAiMasterEnabled, type LeadFull,
 } from "./autoResponse.ts";
 import { appendComplianceFooter } from "./smsCompliance.ts";
+import { resolveReplyDelayMs } from "./aiAgents.ts";
 
 /**
  * Send a single instant AI opening when the agent explicitly chooses "Send now"
@@ -62,10 +63,13 @@ export async function scheduleInstantReply(env: Env, leadId: number): Promise<{ 
       recipientOptedIn: lead.sms_consent_status === "opted_in",
     },
   );
+  // Honor the agent's "Response Time" (AI Settings); defaults to the 30s natural
+  // delay when unset, matching the prior hardcoded value.
+  const delayMs = await resolveReplyDelayMs(env, lead.org_id, lead.owner_id);
   const id = await queueScheduledMessage(env, {
     leadId: lead.id, orgId: lead.org_id, userId: lead.owner_id,
     channel: "sms", toAddress: lead.phone, body,
-    scheduledAt: new Date(Date.now() + 30_000).toISOString(),
+    scheduledAt: new Date(Date.now() + delayMs).toISOString(),
     sentByAi: true,
   });
   return { scheduled: id > 0 };

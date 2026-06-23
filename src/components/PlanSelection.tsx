@@ -173,6 +173,13 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
       });
       const data = await res.json();
       if (data.checkout_url) window.location.assign(data.checkout_url);
+      else if (data.comped) {
+        // 100%-off promo: comped instantly in D1, no Stripe. Advance onboarding
+        // just like the free path - the paid plan is already active.
+        localStorage.setItem("selectedPlan", plan.id);
+        localStorage.removeItem("wc_promo_code");
+        onStepComplete(plan.id);
+      }
       else alert("Failed to initiate checkout.");
     } catch (err) {
       console.error(err);

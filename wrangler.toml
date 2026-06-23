@@ -37,14 +37,14 @@ ENV = "prod"
 
 MOCK_SEND_APIS = "0"
 # ---- App identity / URLs ----
-# Canonical user-facing domain is dev.warmchats.com (custom domain on this Pages
-# project). Keep these on that domain so OAuth callbacks + app links don't bounce
-# the user across origins (which split the session pages.dev <-> dev.warmchats.com).
-# NOTE: provider webhooks (Telnyx/Elastic) still target the *.pages.dev origin and
-# are configured separately - do not change those here.
-FRONTEND_URL = "https://dev.warmchats.com"
-PUBLIC_SITE_URL = "https://dev.warmchats.com"
-PUBLIC_BASE_URL = "https://dev.warmchats.com"
+# Canonical user-facing domain is warmchats.com (custom domain on this Pages
+# project; dev.warmchats.com remains as a dev alias). Keep these on the canonical
+# domain so OAuth callbacks + app links don't bounce the user across origins
+# (which would split the session). NOTE: provider webhooks (Telnyx/Elastic) still
+# target the *.pages.dev origin and are configured separately - don't change those.
+FRONTEND_URL = "https://warmchats.com"
+PUBLIC_SITE_URL = "https://warmchats.com"
+PUBLIC_BASE_URL = "https://warmchats.com"
 REPLY_DOMAIN = "mail.warmchats.com"
 SUPPORT_EMAIL = "hello@warmchats.com"
 
@@ -59,11 +59,16 @@ FERNET_KEY = "***REMOVED***"
 # secret; prefer rotating via `wrangler pages secret put TURNSTILE_SECRET_KEY`.
 TURNSTILE_SECRET_KEY = "***REMOVED***"
 
+# ---- Platform super-admin allowlist ----
+# Comma-separated emails that get platform-owner powers (/admin/* tools + the
+# is_admin flag). Authoritative when set: a stray DB is_admin=1 grants nothing.
+SUPER_ADMIN_EMAILS = "jv@jovrealestate.com"
+
 # ---- Google OAuth (login) & Gmail OAuth ----
 GOOGLE_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
-GMAIL_OAUTH_CLIENT_ID = "371782771740-oq7htlbjcmggu3a97alhmao9beg8sjt7.apps.googleusercontent.com"
+GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
 GMAIL_OAUTH_CLIENT_SECRET = "***REMOVED***"
-GMAIL_OAUTH_REDIRECT_URI = "https://dev.warmchats.com/api/gmail/oauth/callback"
+GMAIL_OAUTH_REDIRECT_URI = "https://www.warmchats.com/api/gmail/oauth/callback"
 GMAIL_PUBSUB_TOPIC_FULL_NAME = "projects/warmchats-496922/topics/gmail-replies"
 
 # ---- AI provider (OpenAI) ----
@@ -74,13 +79,13 @@ STRIPE_SECRET_KEY = "***REMOVED***"
 STRIPE_WEBHOOK_SECRET = "***REMOVED***"
 # Plan id (frontend / org.plan column) -> Stripe price id. Leave blank to disable a plan.
 # Live:
-# STRIPE_PRICE_FREE    = "price_1TZJ11Fk4wccBvlX81QWgw7x"
-# STRIPE_PRICE_STARTER = "price_1TZJ0UFk4wccBvlXMBZhRYKv"
-# STRIPE_PRICE_GROWTH  = "price_1TZJ0oFk4wccBvlXse5j4Okr"
+STRIPE_PRICE_FREE = "price_1TZJ11Fk4wccBvlX81QWgw7x"
+STRIPE_PRICE_STARTER = "price_1TZJ0UFk4wccBvlXMBZhRYKv"
+STRIPE_PRICE_GROWTH = "price_1TZJ0oFk4wccBvlXse5j4Okr"
 # Sandbox:
-STRIPE_PRICE_FREE = "price_1TatIwFk4wccBvlXdQb2JZIe"
-STRIPE_PRICE_STARTER = "price_1TbOAPFk4wccBvlXWI4DBvGD"
-STRIPE_PRICE_GROWTH = "price_1TbOBKFk4wccBvlXgImS2XxD"
+# STRIPE_PRICE_FREE = "price_1TatIwFk4wccBvlXdQb2JZIe"
+# STRIPE_PRICE_STARTER = "price_1TbOAPFk4wccBvlXWI4DBvGD"
+# STRIPE_PRICE_GROWTH = "price_1TbOBKFk4wccBvlXgImS2XxD"
 
 
 # ---- SMS: Telnyx (current 10DLC) ----

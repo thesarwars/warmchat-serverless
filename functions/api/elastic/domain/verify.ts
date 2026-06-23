@@ -104,7 +104,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const dmarcHost     = "_dmarc";
   const dmarcExpected = "v=DMARC1; p=none;";
 
-  const spfMatches      = Boolean(pickSpf      && norm(pickSpf)      === norm(spfExpected));
+  // SPF: accept ANY valid v=spf1 record that authorizes Elastic (contains
+  // `include:_spf.elasticemail.com`), not an exact string match. A domain can
+  // have only ONE SPF TXT record, so a domain that already sends via Outlook /
+  // Google MUST merge Elastic's include into the existing record - that merged
+  // value is correct and is all Elastic needs to send. Exact-match wrongly
+  // failed those domains (matches the lenient MX/DMARC checks below).
+  const spfMatches      = Boolean(pickSpf && norm(pickSpf).startsWith("v=spf1") && norm(pickSpf).includes("include:_spf.elasticemail.com"));
   const dkimMatches     = Boolean(pickDkim     && dkimExpected && norm(pickDkim)     === norm(dkimExpected));
   const trackingMatches = Boolean(pickTracking && norm(pickTracking) === norm(trackingExpected));
   // MX: just check that elastic's host appears in the resolved list. Strict

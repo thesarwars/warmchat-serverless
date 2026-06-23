@@ -2,6 +2,7 @@
 import { queryFirst, execute, nowIso } from "./db.ts";
 import { signAccessToken, signRefreshToken, verifyAccessToken, tokenTtl, refreshTtl } from "./jwt.ts";
 import { readCookie, ACCESS_COOKIE } from "./cookies.ts";
+import { resolveSiteAdmin } from "./adminAccess.ts";
 import type { Env } from "./env.ts";
 
 export interface UserRow {
@@ -112,23 +113,38 @@ export async function buildAuthBody(env: Env, user: UserRow, session: IssuedSess
   );
 
   // Site-wide admin flag - the login row may not have included this column so
-  // re-read it directly. Cheap (single row by PK).
+  // re-read it directly. Cheap (single row by PK). Resolved through the
+  // SUPER_ADMIN_EMAILS allowlist (when configured) so platform-owner status is
+  // pinned to specific emails, not just any DB is_admin=1 - see adminAccess.ts.
   const adminRow = await queryFirst<{ is_admin: number }>(
     env.D1DB,
     `SELECT is_admin FROM "user" WHERE id = ?`,
     user.id,
   );
 
+  // role_name comes off the membership row; owners normally have one ("Owner"),
+  // but fall back to the org-owner check so an owner whose membership row lacks a
+  // role still reports "Owner" (the per-org admin gate depends on this).
+  let roleName = membership?.role_name ?? null;
+  if (!roleName && membership?.org_id) {
+    const owns = await queryFirst<{ ok: number }>(
+      env.D1DB,
+      `SELECT 1 AS ok FROM organization WHERE id = ? AND owner_id = ?`,
+      membership.org_id, user.id,
+    );
+    if (owns) roleName = "Owner";
+  }
+
   return {
     user_id: user.id,
     name: user.name,
     email: user.email,
     is_email_confirmed: Boolean(user.is_email_confirmed),
-    is_admin: adminRow?.is_admin === 1,
+    is_admin: resolveSiteAdmin(env, user.email, adminRow?.is_admin === 1),
     org_id: membership?.org_id ?? null,
     org_name: membership?.org_name ?? null,
     role_id: membership?.role_id ?? null,
-    role_name: membership?.role_name ?? null,
+    role_name: roleName,
     plan: membership?.plan ?? null,
     access_token_expires_at: session.accessExpiresAt,
     refresh_token_expires_at: session.refreshExpiresAt,
