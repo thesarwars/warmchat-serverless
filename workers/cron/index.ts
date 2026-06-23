@@ -18,6 +18,7 @@ import { runGmailTokenRefresh } from "./jobs/gmailTokenRefresh.ts";
 import { runAppointmentReminders } from "./jobs/appointmentReminders.ts";
 import { runEscalationAdvance } from "./jobs/escalationAdvance.ts";
 import { runCleanup } from "./jobs/cleanup.ts";
+import { runCompExpiry } from "./jobs/compExpiry.ts";
 
 /**
  * Per-job wall-clock budget. On the Workers Paid plan a Cron Trigger invocation
@@ -73,6 +74,8 @@ async function runAllJobs(env: CronEnv, trigger: string): Promise<void> {
     // delete is effectively free, so it self-throttles to zero cost when
     // there's nothing old to remove.
     runJob("cleanup", () => runCleanup(env)),
+    // Revert lapsed 100%-off comps back to free + alert the owner to add a card.
+    runJob("compExpiry", () => runCompExpiry(env)),
   ]);
   console.log(`[cron] tick complete in ${Date.now() - t0}ms`);
 }

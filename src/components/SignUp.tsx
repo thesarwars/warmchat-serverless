@@ -60,6 +60,14 @@ const Signup: React.FC = () => {
         window.location.assign(data.checkout_url);
         return true;
       }
+      // 100%-off promo: comped instantly in D1, no Stripe. Route through the
+      // success page (which clears the promo + lands them in onboarding).
+      if (data.comped) {
+        window.location.assign(
+          `/billing/success?comped=1&plan=${encodeURIComponent(data.plan || planId)}&return=${encodeURIComponent(successPath)}`,
+        );
+        return true;
+      }
     } catch (err) {
       console.error("checkout init failed:", err);
     }

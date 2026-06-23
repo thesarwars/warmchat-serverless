@@ -6,6 +6,8 @@ import {
 } from "./autoResponse.ts";
 import { appendComplianceFooter } from "./smsCompliance.ts";
 import { stepScheduledAt } from "./workflowSchedule.ts";
+import { resolveReplyDelayMs } from "./aiAgents.ts";
+import { loadPersonaUi, frequencyMultiplier } from "./personaUi.ts";
 
 /**
  * Speed-to-lead: enroll a NEW lead (form / webhook / integration / manual
@@ -80,6 +82,13 @@ export async function enrollSpeedToLead(
     lead.owner_id, lead.org_id);
   if (!settings || !settings.enabled) return { enrolled: false, reason: "inbound off" };
 
+  // AI Settings "Follow-Up AI" (Outbound). When the agent turns it off, we do not
+  // auto-enroll new leads into the follow-up sequence. Absent key -> defaults ON
+  // (uiBool dflt=true) -> today's behavior. followUpFrequency tunes the cadence.
+  const ui = await loadPersonaUi(env, lead.org_id, lead.owner_id);
+  if (ui.followUp === false) return { enrolled: false, reason: "follow-up off" };
+  const mult = frequencyMultiplier(ui.followUpFrequency);
+
   const org = await queryFirst<{ timezone: string | null }>(
     env.D1DB, `SELECT timezone FROM organization WHERE id = ?`, lead.org_id);
   const tz = lead.timezone || org?.timezone || "";
@@ -89,7 +98,14 @@ export async function enrollSpeedToLead(
 
   const seq = seqFor(lead.lead_type);
   const baseMs = opts.startAtMs && opts.startAtMs > Date.now() ? opts.startAtMs : Date.now();
-  const instantDelayMs = lead.lead_type === "open_house" ? 20 * 60_000 : 30_000;
+  // Opening delay follows "Response Time" (defaults to 30s when unset); open-house
+  // keeps its deliberate 20-min "let them leave first" delay per Ai_Flow.md.
+  const personaDelayMs = await resolveReplyDelayMs(env, lead.org_id, lead.owner_id);
+  const instantDelayMs = lead.lead_type === "open_house" ? 20 * 60_000 : personaDelayMs;
+  // Follow-up cadence scaled by frequency: aggressive sooner (x0.5), light later
+  // (x2.0), standard unchanged. FU1 in minutes, FU2 day offset (light pushes +1 day).
+  const fu1DelayMins = Math.max(5, Math.round(seq.fu1Mins * mult));
+  const fu2Days = ui.followUpFrequency === "light" ? 2 : 1;
 
   // Instant opening carries the AI disclosure + STOP footer (first auto message);
   // the two follow-ups are same-thread nudges and don't repaste it.
@@ -108,10 +124,11 @@ export async function enrollSpeedToLead(
   let queued = 0;
   const a = await queueScheduledMessage(env, { ...common, body: instantBody, scheduledAt: new Date(baseMs + instantDelayMs).toISOString() });
   if (a > 0) queued++;
-  const b = await queueScheduledMessage(env, { ...common, body: fu1Body, scheduledAt: new Date(baseMs + instantDelayMs + seq.fu1Mins * 60_000).toISOString() });
+  const b = await queueScheduledMessage(env, { ...common, body: fu1Body, scheduledAt: new Date(baseMs + instantDelayMs + fu1DelayMins * 60_000).toISOString() });
   if (b > 0) queued++;
-  // FU2: next calendar day at 10:00 local (org/lead timezone).
-  const c = await queueScheduledMessage(env, { ...common, body: fu2Body, scheduledAt: stepScheduledAt(baseMs, 1, "10:00", tz) });
+  // FU2: next calendar day at 10:00 local (org/lead timezone); "light" frequency
+  // pushes it one more day out.
+  const c = await queueScheduledMessage(env, { ...common, body: fu2Body, scheduledAt: stepScheduledAt(baseMs, fu2Days, "10:00", tz) });
   if (c > 0) queued++;
 
   return { enrolled: queued > 0, queued };

@@ -32,6 +32,9 @@ export interface Env {
   PUBLIC_BASE_URL: string;
   REPLY_DOMAIN: string;
   SUPPORT_EMAIL: string;
+  // Comma-separated emails pinned as PLATFORM super-admins (gates /admin/* tools
+  // + the is_admin flag). Authoritative when set; see adminAccess.ts.
+  SUPER_ADMIN_EMAILS?: string;
 
   // ---- Auth / crypto ----
   JWT_SECRET: string;

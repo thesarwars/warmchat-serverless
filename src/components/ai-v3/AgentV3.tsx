@@ -318,7 +318,7 @@ interface CampaignFlowMsg { step: number; day: string; date: string; channel: st
 
 // A campaign card view-model derived from a real automation.
 interface Campaign {
-  id: number; name: string; icon: string; live: boolean; status: string;
+  id: number; name: string; icon: string; live: boolean; completed: boolean; status: string;
   channel: string; steps: number; updated: string;
   leads: string; reply: string; appts: string;
   trigger: { title: string; sub: string };
@@ -328,13 +328,13 @@ interface Campaign {
 
 interface OrgAutomation {
   id: number; name: string; status: string; channels?: string[];
-  messages_sent?: number; reply_rate?: number; is_archived?: boolean;
+  messages_sent?: number; pending?: number; reply_rate?: number; is_archived?: boolean;
   message?: string; opening_send_time?: string | null; created_at?: string;
   // `leads` from the org list endpoint is the RECIPIENTS ARRAY (objects), not a
   // count - the count lives in `contacts_sent`. Stringifying the array gave the
   // "[object Object]" the card used to show.
   leads?: unknown; contacts_sent?: number; converted_count?: number;
-  followup_steps?: { delay_days?: number; message?: string; send_time?: string }[];
+  followup_steps?: { delay_days?: number; message?: string; send_time?: string; channel?: string; subject?: string }[];
 }
 
 const relTime = (iso?: string): string => {
@@ -353,6 +353,9 @@ function automationToCampaign(a: OrgAutomation): Campaign {
   const followups = a.followup_steps || [];
   const steps = 1 + followups.length;
   const live = (a.status || "").toLowerCase() === "running";
+  // A Running workflow whose queue is fully drained (nothing pending, something
+  // sent) is actually finished - surface "Completed" instead of a forever "Live".
+  const completed = live && (a.pending ?? 0) === 0 && (a.messages_sent ?? 0) > 0;
   const openTime = (a.opening_send_time || "").trim();
   const msgs: CampaignFlowMsg[] = [
     { step: 1, day: "Day 0", date: openTime ? openTime : "Send instantly", channel: channels[0]?.toLowerCase() === "email" ? "Email" : "SMS", text: a.message || FLOW_FALLBACK_SMS[0] },
@@ -365,7 +368,7 @@ function automationToCampaign(a: OrgAutomation): Campaign {
     })),
   ];
   return {
-    id: a.id, name: a.name || "Untitled workflow", icon: "send", live, status: a.status || "Draft",
+    id: a.id, name: a.name || "Untitled workflow", icon: "send", live, completed, status: a.status || "Draft",
     channel: chanLabel, steps, updated: relTime(a.created_at),
     leads: String(a.contacts_sent ?? (Array.isArray(a.leads) ? a.leads.length : 0)),
     reply: `${Math.round(a.reply_rate ?? 0)}%`,
@@ -390,14 +393,17 @@ function CampaignCard({ w, onToggle, onDelete, onEdit }: { w: Campaign; onToggle
             <div>
               <div className="wc-cmp-titlerow">
                 <span className="wc-cmp-name">{w.name}</span>
-                {w.live ? <span className="wc-pill-live"><PulseDot on />Live</span> : <span className="wc-pill-draft">{w.status}</span>}
+                {w.completed
+                  ? <span className="wc-pill-live" style={{ background: "#dcfce7", color: "#15803d" }}>Completed</span>
+                  : w.live ? <span className="wc-pill-live"><PulseDot on />Live</span>
+                  : <span className="wc-pill-draft">{w.status}</span>}
               </div>
               <div className="wc-cmp-sub">{w.channel} · {w.steps}-step sequence · Enrolled {w.updated}</div>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, position: "relative" }}>
             <button className="wc-cmp-viewflow" onClick={() => setFlow((o) => !o)}>{flow ? "Hide flow" : "View flow"}</button>
-            <Toggle on={w.live} onChange={onToggle} />
+            <Toggle on={w.live && !w.completed} onChange={onToggle} disabled={w.completed} />
             <div style={{ position: "relative" }}>
               <button className="wc-iconbtn-sm" onClick={() => setMenu((m) => !m)}>•••</button>
               {menu && (
@@ -436,7 +442,7 @@ function CampaignCard({ w, onToggle, onDelete, onEdit }: { w: Campaign; onToggle
             <div className="wc-cmp-stat"><span className="wc-cmp-stat-v">{w.leads}</span><span className="wc-cmp-stat-l">Leads</span></div>
             <div className="wc-cmp-stat"><span className="wc-cmp-stat-v">{w.reply}</span><span className="wc-cmp-stat-l">Reply Rate</span></div>
             <div className="wc-cmp-stat"><span className="wc-cmp-stat-v">{w.appts}</span><span className="wc-cmp-stat-l">{w.appts === "1" ? "Appt" : "Appts"}</span></div>
-            <div className="wc-cmp-stat"><span className="wc-cmp-status"><PulseDot on={w.live} />{w.live ? "Live" : "Draft"}</span><span className="wc-cmp-stat-l">{w.live ? "Active" : "Not Active"}</span></div>
+            <div className="wc-cmp-stat"><span className="wc-cmp-status"><PulseDot on={w.live && !w.completed} />{w.completed ? "Completed" : w.live ? "Live" : "Draft"}</span><span className="wc-cmp-stat-l">{w.completed ? "Done" : w.live ? "Active" : "Not Active"}</span></div>
             <div className="wc-cmp-stat"><span className="wc-cmp-stat-l">Last Updated</span><span className="wc-cmp-updated">{w.updated}</span></div>
           </div>
         </div>

@@ -338,6 +338,7 @@ export interface ReplySectionRow {
 export interface AutomationRecipientStats {
   contacts_sent: number;
   messages_sent: number;
+  pending?: number; // scheduled_message rows still status='scheduled' (0 => drained/Completed); set by computeAutomationStatsBatch
   replied_lead_count: number;
   reply_rate: number;
   conversion_rate: number;
@@ -562,6 +563,20 @@ export async function computeAutomationStatsBatch(
   const sentByAutomation = new Map<number, number>();
   for (const r of sentRows) sentByAutomation.set(Number(r.automation_id), Number(r.sent));
 
+  // Still-pending (queued) rows per automation. pending=0 with messages_sent>0
+  // means the campaign has fully drained -> the UI can show "Completed" instead
+  // of a perpetual "Running"/"Live".
+  const pendingRows = await queryAll<{ automation_id: number; pending: number }>(
+    env.D1DB,
+    `SELECT automation_id, COUNT(*) AS pending
+       FROM scheduled_message
+      WHERE org_id = ? AND status = 'scheduled' AND automation_id IS NOT NULL
+      GROUP BY automation_id`,
+    orgId,
+  );
+  const pendingByAutomation = new Map<number, number>();
+  for (const r of pendingRows) pendingByAutomation.set(Number(r.automation_id), Number(r.pending));
+
   // Bucket org-wide rows by their natural key.
   const emailByThread = new Map<number, OrgEmailInboundRow[]>();
   for (const r of emailRows) {
@@ -643,7 +658,10 @@ export async function computeAutomationStatsBatch(
 
     out.set(
       Number(automation.id),
-      assembleAutomationStats(automation, leads, emailMap, smsMap, messagesSent, converted),
+      {
+        ...assembleAutomationStats(automation, leads, emailMap, smsMap, messagesSent, converted),
+        pending: pendingByAutomation.get(Number(automation.id)) ?? 0,
+      },
     );
   }
   return out;

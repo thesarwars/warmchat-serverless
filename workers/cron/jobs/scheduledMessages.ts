@@ -16,7 +16,6 @@ import type { CronEnv } from "../env.ts";
 import { checkQuietHours } from "../_shared/quietHours.ts";
 import {
   tryAcquireSlot,
-  tryAcquireHourlySlot,
   DEFAULT_RATE_LIMITS,
   currentSecondBucket,
   type SendChannel,
@@ -50,13 +49,21 @@ interface DueRow {
   sent_by_ai: number | null;
 }
 
-// Cap rows per tick. Each row makes several D1 round-trips, and a single Worker
-// invocation has a ceiling on subrequests (D1 binding calls count), so we keep
-// the batch comfortably under it. The rows are processed CONCURRENTLY (see
-// PROCESS_CONCURRENCY) so wall-clock is a small multiple of one round-trip, not
-// the sum of every row - that is what lets the queue actually approach the
-// per-second provider caps instead of dribbling out ~1/sec.
-const MAX_PER_TICK = 100;
+// Cap rows per tick. Each row sends via ONE provider fetch() (Telnyx/ElasticEmail),
+// and each fetch() is a SUBREQUEST. A single Worker invocation has a hard subrequest
+// ceiling - 50 on the free plan, 1000 on paid - and ALL cron jobs in this tick
+// (sequenceDispatch + scheduledMessages + gmail/escalation) share that one budget.
+// So the COMBINED drainer total per tick must stay well under 50: this drainer is
+// capped at 20 and sequenceDispatch at 15, leaving ~15 headroom for the other jobs.
+// 20/tick x 1 tick/min = ~1200/hr of capacity, far above the hourly send caps, so
+// the hourly limiter (not this) remains the real send-rate governor.
+//
+// PRODUCTION/PAID toggle: on Workers Paid the subrequest cap is 1000, so restore
+// the high-throughput value below (kept for the live production server's heavier
+// user load). The 100 overran the FREE 50-subrequest limit and stranded hundreds
+// of rows as 'failed' ("Too many subrequests by single Worker invocation").
+// const MAX_PER_TICK = 20;         // FREE tier (50-subrequest/invocation cap)
+const MAX_PER_TICK = 100;           // PAID / production (1000-subrequest cap) - ACTIVE since 2026-06-21 upgrade
 const PROCESS_CONCURRENCY = 12;
 // Rows left in status='sending' by a crashed / timed-out previous tick are
 // stranded forever (the due query only selects 'scheduled'). Reclaim any that
@@ -67,12 +74,33 @@ const PROCESS_CONCURRENCY = 12;
 // 60s margin over the 120s drain budget.
 const STUCK_SENDING_GRACE_SECONDS = 180;
 
+/**
+ * Is a send error TRANSIENT (leave the row 'scheduled' to retry next tick) vs a
+ * PERMANENT rejection of this specific message (mark 'failed', terminal)?
+ * Retryable: the free-tier subrequest overrun, network/timeout throws, provider
+ * 429 (rate limited) and 5xx (provider server error) - all clear on a later tick.
+ * Terminal: 4xx other than 429 (bad number, auth, validation), unknown channel.
+ * A bare thrown Error with no HTTP code is infra (subrequest/runtime) -> retry.
+ */
+function isRetryableSendError(msg: string | null | undefined): boolean {
+  const s = String(msg || "").toLowerCase();
+  if (!s) return false;
+  if (s.includes("too many subrequests")) return true;
+  if (s.includes("network") || s.includes("timeout") || s.includes("timed out") ||
+      s.includes("connection") || s.includes("fetch failed") || s.includes("socket")) return true;
+  const m = s.match(/http\s+(\d{3})/);
+  if (m) { const code = Number(m[1]); return code === 429 || code >= 500; }
+  // Thrown Error (String(err) -> "Error: ...") with no HTTP code = transient infra.
+  if (s.startsWith("error:")) return true;
+  return false;
+}
+
 /** Run `fn` over `items` with at most `limit` in flight at once. */
 async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
-      const item = items[cursor++];
+      const item = items[cursor++]!; // guarded by the while condition
       await fn(item);
     }
   });
@@ -153,6 +181,13 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
        LEFT JOIN "user" u ON u.id = sm.user_id
        LEFT JOIN automation a ON a.id = sm.automation_id
       WHERE sm.status = 'scheduled' AND sm.scheduled_at <= ?
+      -- Skip rows of a PAUSED automation in the QUERY, not just in processRow.
+      -- Otherwise paused rows (often the oldest scheduled_at) sort first and eat
+      -- the whole MAX_PER_TICK budget every tick, starving live/Running sends -
+      -- the tick burns on rows it will only skip. They stay 'scheduled' and flow
+      -- again the moment the automation is resumed. (processRow keeps the pause
+      -- check as a defensive backstop against a status change mid-tick.)
+      AND (sm.automation_id IS NULL OR COALESCE(a.status, '') <> 'Paused')
       -- Inbound AI replies (reactive, no automation_id) are conversational and
       -- time-sensitive: a lead is waiting on the other end. Drain them BEFORE
       -- outbound automation drips so a large queued campaign can never starve a
@@ -199,7 +234,7 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
     }),
   ]);
 
-  let sent = 0, failed = 0, skippedQuiet = 0, cancelledOptOut = 0, rateLimited = 0, errored = 0, skippedPaused = 0, skippedAiOff = 0, pacedDeferred = 0;
+  let sent = 0, failed = 0, skippedQuiet = 0, cancelledOptOut = 0, rateLimited = 0, errored = 0, skippedPaused = 0, skippedAiOff = 0, pacedDeferred = 0, retried = 0;
 
   const processRow = async (row: DueRow): Promise<void> => {
     try {
@@ -292,18 +327,6 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
       const senderKey = senderCache.get(`${row.channel}:${row.user_id}`) ?? "shared";
       const channel: SendChannel = row.channel === "email" ? "email" : "sms";
 
-      // Per-hour, per-org cap on OUTBOUND campaign drips (automation rows only).
-      // Inbound AI replies (no automation_id) are time-sensitive and exempt, and
-      // the due query already drains them first. When the hour's budget is spent,
-      // HOLD the row in 'scheduled' so it resumes next hour - never dropped.
-      if (row.automation_id && row.org_id) {
-        const withinHourly = await tryAcquireHourlySlot(env, channel, row.org_id);
-        if (!withinHourly) {
-          rateLimited++;
-          return;
-        }
-      }
-
       const acquired = await tryAcquireSlot(env, channel, senderKey, DEFAULT_RATE_LIMITS);
       if (!acquired) {
         // Cap hit for this second - leave 'scheduled' and try again next tick.
@@ -363,21 +386,29 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         }
       }
 
+      // Transient provider failures (429 / 5xx) go back to 'scheduled' to retry
+      // next tick instead of being dropped as terminal 'failed'. Only a permanent
+      // rejection (4xx, bad config) stays 'failed'. (sent_at / sent_message_id
+      // are only set on success, so a retried row stays clean for the next pass.)
+      const finalStatus = ok ? "sent" : (isRetryableSendError(errMsg) ? "scheduled" : "failed");
       await env.D1DB.prepare(
         `UPDATE scheduled_message
            SET status = ?, error_message = ?, sent_at = ?, sent_message_id = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-      ).bind(ok ? "sent" : "failed", errMsg, ok ? new Date().toISOString() : null, ok ? providerMessageId : null, row.id).run();
-      if (ok) sent++; else failed++;
-      console.log(`[cron:scheduledMessages] msg=${row.id} ${row.channel} -> ${ok ? "sent" : `failed (${errMsg})`}`);
+      ).bind(finalStatus, errMsg, ok ? new Date().toISOString() : null, ok ? providerMessageId : null, row.id).run();
+      if (ok) sent++; else if (finalStatus === "scheduled") retried++; else failed++;
+      console.log(`[cron:scheduledMessages] msg=${row.id} ${row.channel} -> ${ok ? "sent" : finalStatus === "scheduled" ? `retry (${errMsg})` : `failed (${errMsg})`}`);
 
-      // Surface the send in the AI Activity feed + per-agent Logs. On failure
-      // the reason (provider error / config issue) leads the detail.
-      await logSendActivity(env, row, {
-        event: ok ? "message.sent" : "message.failed",
-        status: ok ? "ok" : "error",
-        reason: ok ? null : (errMsg || "Send failed"),
-      });
+      // Surface the send in the AI Activity feed + per-agent Logs. A transient
+      // retry is NOT a failure, so don't log it as one (avoids false "failed"
+      // entries in the feed for rows that will send on the next tick).
+      if (ok || finalStatus === "failed") {
+        await logSendActivity(env, row, {
+          event: ok ? "message.sent" : "message.failed",
+          status: ok ? "ok" : "error",
+          reason: ok ? null : (errMsg || "Send failed"),
+        });
+      }
 
       // "AI replied" notification for AI conversational replies that were queued
       // with a natural delay (sent_by_ai=1, no automation). The interactive path
@@ -423,12 +454,23 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         }
       }
     } catch (err) {
+      // A THROWN send error is the free-tier "Too many subrequests" overrun (or a
+      // network/runtime throw) - transient infra, NOT a permanent rejection of this
+      // message. Leave it 'scheduled' so the next (lighter) tick retries it instead
+      // of permanently dropping the recipient. This (plus the lower MAX_PER_TICK) is
+      // the fix for the hundreds of rows that were stranded as 'failed'.
+      const retry = isRetryableSendError(String(err));
       await env.D1DB.prepare(
-        `UPDATE scheduled_message SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      ).bind(String(err), row.id).run();
-      errored++;
-      await logSendActivity(env, row, { event: "message.failed", status: "error", reason: String(err).slice(0, 200) });
-      console.error(`[cron:scheduledMessages] msg=${row.id} errored`, err);
+        `UPDATE scheduled_message SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      ).bind(retry ? "scheduled" : "failed", String(err).slice(0, 300), row.id).run();
+      if (retry) {
+        retried++;
+        console.warn(`[cron:scheduledMessages] msg=${row.id} deferred (transient): ${String(err).slice(0, 120)}`);
+      } else {
+        errored++;
+        await logSendActivity(env, row, { event: "message.failed", status: "error", reason: String(err).slice(0, 200) });
+        console.error(`[cron:scheduledMessages] msg=${row.id} errored`, err);
+      }
     }
   };
 
@@ -439,7 +481,7 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
   // single-threaded, so `sent++` etc. never interleave.
   await mapPool(due, PROCESS_CONCURRENCY, processRow);
 
-  console.log(`[cron:scheduledMessages] summary: sent=${sent} failed=${failed} skippedQuiet=${skippedQuiet} skippedPaused=${skippedPaused} skippedAiOff=${skippedAiOff} cancelledOptOut=${cancelledOptOut} rateLimited=${rateLimited} pacedDeferred=${pacedDeferred} errored=${errored}`);
+  console.log(`[cron:scheduledMessages] summary: sent=${sent} failed=${failed} retried=${retried} skippedQuiet=${skippedQuiet} skippedPaused=${skippedPaused} skippedAiOff=${skippedAiOff} cancelledOptOut=${cancelledOptOut} rateLimited=${rateLimited} pacedDeferred=${pacedDeferred} errored=${errored}`);
 }
 
 /** Look up the 10DLC phone (SMS) or sending domain (email) for rate keying. */

@@ -351,9 +351,20 @@ const AutomationDetails: React.FC = () => {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="rounded-full bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-700">
-                {automation.header.status}
-              </span>
+              {(() => {
+                // A "Running" workflow with nothing left in the queue (all sent,
+                // none queued/sending) is actually finished - the engine has no
+                // "Completed" state, so derive it here instead of showing a
+                // perpetual "Running".
+                const done = automation.header.status === "Running" && !!logSummary
+                  && (logSummary.queued ?? 0) === 0 && (logSummary.sending ?? 0) === 0
+                  && (logSummary.sent ?? 0) > 0;
+                return (
+                  <span className={`rounded-full px-3 py-1 text-sm font-semibold ${done ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"}`}>
+                    {done ? "Completed" : automation.header.status}
+                  </span>
+                );
+              })()}
               {editing ? (
                 <>
                   <button
@@ -527,7 +538,7 @@ const AutomationDetails: React.FC = () => {
                       </div>
                       <div className="mb-2 inline-flex items-center gap-1.5 text-xs text-gray-500">
                         <Zap size={11} className="text-orange-400" />
-                        If started today, lands {describeStep(Number(step.delay_days) || 1, step.send_time).dateLabel} at {describeStep(Number(step.delay_days) || 1, step.send_time).timeLabel}
+                        If started today, lands {describeStep(Number(step.delay_days ?? 1), step.send_time).dateLabel} at {describeStep(Number(step.delay_days ?? 1), step.send_time).timeLabel}
                       </div>
                       {(step.channel || "sms") === "email" && (
                         <input
@@ -569,7 +580,7 @@ const AutomationDetails: React.FC = () => {
                       <div className="rounded-l-lg border border-gray-200 bg-gray-50 p-4 md:border-r-0">
                         <div className="font-bold text-gray-950">{delayLabel(step, index)}</div>
                         <div className="mt-1 text-xs font-medium text-gray-400">
-                          {describeStep(Number(step.delay_days) || 1, step.send_time || step.sendTime, { base: createdBase }).dateLabel}
+                          {describeStep(Number(step.delay_days ?? 1), step.send_time || step.sendTime, { base: createdBase }).dateLabel}
                         </div>
                         <div className="mt-2 text-sm font-medium text-gray-500">
                           {sendTimeLabel(step) || formatSendTime(DEFAULT_STEP_SEND_TIME)}

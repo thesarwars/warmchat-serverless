@@ -137,6 +137,10 @@ export const fetchSendingAddress = () => get(`/elastic/sending-address`);
 export const saveSendingPrefix = (data: { sending_prefix: string }) =>
   post(`/elastic/sending-address`, data, {}, false, true);
 export const openBillingPortal = () => post(`/billing/portal-session`, {}, {}, false, true);
+export const fetchPaymentMethods = () =>
+  get(`/billing/payment-methods`) as Promise<{
+    cards: Array<{ id: string; brand: string | null; last4: string | null; exp_month: number | null; exp_year: number | null; is_default: boolean }>;
+  }>;
 export const sendTestNotification = (body?: Record<string, unknown>) =>
   post(`/notifications/test`, body ?? {}, {}, false, true);
 export const fetchComplianceSummary = () => get(`/compliance/summary`);

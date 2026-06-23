@@ -6,6 +6,7 @@ import { CreditCard } from "lucide-react";
 const BillingSuccess: React.FC = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session_id");
+  const comped = searchParams.get("comped");
   const navigate = useNavigate();
   const API_BASE = import.meta.env.VITE_API_BASE;
   const token = localStorage.getItem("token");
@@ -13,6 +14,18 @@ const BillingSuccess: React.FC = () => {
   const [status, setStatus] = useState("Verifying your payment...");
 
   useEffect(() => {
+    // 100%-off promo: the comp plan was already activated in D1 with NO Stripe
+    // payment, so there's nothing to verify. Confirm + route the user onward.
+    if (comped) {
+      const plan = searchParams.get("plan") || "";
+      if (plan) localStorage.setItem("selectedPlan", plan);
+      localStorage.removeItem("wc_promo_code");
+      setStatus("Promo applied - you're all set! Redirecting...");
+      const ret = searchParams.get("return");
+      const dest = ret && ret.startsWith("/") ? ret : "/dashboard";
+      setTimeout(() => navigate(dest), 1200);
+      return;
+    }
     if (!sessionId || !userId || !token) {
       setStatus("Invalid payment session.");
       return;
@@ -55,7 +68,7 @@ const BillingSuccess: React.FC = () => {
       }
     };
     verifyPayment();
-  }, [sessionId, userId, token, API_BASE, navigate, searchParams]);
+  }, [sessionId, comped, userId, token, API_BASE, navigate, searchParams]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-linear-to-br from-purple-50 via-white to-orange-50 p-6">

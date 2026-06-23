@@ -23,15 +23,14 @@ compatibility_date = "2025-05-18"
 preview_urls = false
 workers_dev = false
 
-# NOTE: On the Workers FREE plan the per-invocation CPU ceiling cannot be raised
-# above the plan default, so the paid-only `[limits] cpu_ms = 300_000` block was
-# removed. If you later upgrade to Workers Paid and a busy queue-draining tick
-# (the scheduled-message + sequence dispatchers do many D1 round-trips) gets
-# killed mid-pass, restore it:
-#   [limits]
-#   cpu_ms = 300_000
-# (D1/network waits don't count against CPU time; a Cron Trigger may use up to
-# 15 min of CPU on paid.)
+# Workers PAID (upgraded 2026-06-21): raise the per-invocation CPU ceiling so a
+# busy queue-draining tick (scheduled-message + sequence dispatchers, many D1
+# round-trips, MAX_PER_TICK 100/200) is never killed mid-pass. (D1/network waits
+# don't count against CPU; a Cron Trigger may use up to 15 min of CPU on paid.)
+# PAID-ONLY block: if a deploy ever rejects it, the account dropped back to free
+# and MAX_PER_TICK must be lowered to ~20/15 again.
+[limits]
+cpu_ms = 300000
 
 [observability.logs]
 enabled = true
@@ -77,8 +76,8 @@ EMAIL_UNSUB_SIGNING_KEY = "9ad1c55c33d55b83b551e62ce400f2f69f24dc9f0bb0bf2f71d5e
 FERNET_KEY = "lWPNdUL_iG672PKUtYNOGAceD5VocxeMeAKW3vpAM2c="
 GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
 GMAIL_OAUTH_CLIENT_SECRET = "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"
-FRONTEND_URL = "https://warmchats-700.pages.dev"
-PUBLIC_BASE_URL = "https://warmchats-700.pages.dev"
+FRONTEND_URL = "https://warmchats.com"
+PUBLIC_BASE_URL = "https://warmchats.com"
 
 # ---- Web Push (VAPID) ----
 VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"

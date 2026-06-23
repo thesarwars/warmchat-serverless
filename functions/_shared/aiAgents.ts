@@ -5,6 +5,7 @@ import { buildLeadAssistantSystemPrompt } from "./openai.ts";
 import { dealPipelineText } from "./deals.ts";
 import { countOfferableListings } from "./listings.ts";
 import { getBookingEnabled } from "./availability.ts";
+import { responseTimeToMs } from "./personaUi.ts";
 
 /** Stable agent identifiers used by the UI, routes, and DB rows. */
 export const AGENT_KEYS = ["assistant", "inbound", "outbound"] as const;
@@ -27,9 +28,16 @@ export async function resolveReplyDelayMs(env: Env, orgId: number, userId: numbe
     const row = await queryFirst<{ persona_json: string | null }>(
       env.D1DB, `SELECT persona_json FROM agent_profile WHERE org_id = ? AND user_id = ? LIMIT 1`, orgId, userId,
     );
-    const timing = row?.persona_json
-      ? String((JSON.parse(row.persona_json) as { timing?: string }).timing || "").toLowerCase()
-      : "";
+    const parsed = row?.persona_json
+      ? (JSON.parse(row.persona_json) as { timing?: string; ui?: { responseTime?: string } })
+      : null;
+    // AI Settings "Response Time" (persona.ui.responseTime) takes precedence when
+    // the user has set it. Present-key-ONLY: an absent key returns null here so we
+    // fall through to the legacy `timing` field and the 30s default - existing
+    // agents (no ui key) keep today's behavior exactly.
+    const uiMs = responseTimeToMs(parsed?.ui?.responseTime);
+    if (uiMs !== null) return uiMs;
+    const timing = String(parsed?.timing || "").toLowerCase();
     if (timing.includes("immediate")) return 0;
     if (timing.includes("random")) return 30_000 + Math.floor(Math.random() * 90_000);
     return 30_000; // "natural delay (30 seconds)" and the default
