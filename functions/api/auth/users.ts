@@ -18,11 +18,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   const rows = await queryAll<{
-    id: number; name: string | null; email: string;
+    id: number; name: string | null; email: string; business_address: string | null;
     org_id: number; org_name: string; role_id: number | null; role_name: string | null;
   }>(
     env.D1DB,
-    `SELECT u.id, u.name, u.email,
+    `SELECT u.id, u.name, u.email, u.business_address,
             o.id AS org_id, o.name AS org_name,
             r.id AS role_id, r.name AS role_name
        FROM membership m

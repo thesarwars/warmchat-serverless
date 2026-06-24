@@ -8,7 +8,7 @@ import AdminMessagingTab from "@/components/admin/AdminMessagingTab";
 import AdminGoalsTab from "@/components/admin/AdminGoalsTab";
 import { BillingTab as SettingsBillingTab, ProfileCard, NotificationsCard, PasswordCard, TimezoneCard, DealDefaultsCard, EmailChannelCard, SmsChannelCard } from "@/components/settings/SettingsPage";
 import { fetchConnectedAccounts } from "@/api/connectedAccounts";
-import { inviteUser } from "@/helpers/backend";
+import { inviteUser, fetchOrgUsers } from "@/helpers/backend";
 import toast from "react-hot-toast";
 import "@/components/ai-v2/prototype.css";
 
@@ -76,6 +76,21 @@ function Card({ icon, title, children, className }: { icon: string; title: strin
 }
 
 /* ---- Users tab (= WorkspaceTab: users + notifications + channels + timezone + password) ---- */
+interface OrgUser {
+  id: number;
+  name: string | null;
+  email: string;
+  business_address: string | null;
+  role_name: string | null;
+}
+const initialsOf = (name?: string | null, email?: string): string => {
+  const base = (name || email || "?").trim();
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return base.slice(0, 2).toUpperCase();
+};
+const roleLabel = (r?: string | null): string => (r === "Representative" ? "Agent" : r || "Member");
+
 function UsersTab() {
   const navigate = useNavigate();
   // Wire the channel / timezone cards to the SAME live data as Settings → Workspace.
@@ -84,6 +99,9 @@ function UsersTab() {
   const canManage = true; // the Admin tab is gated to workspace admins
   const connectedQ = useQuery({ queryKey: ["connected-accounts"], queryFn: () => fetchConnectedAccounts(token), enabled: Boolean(token) });
   const conn = connectedQ.data ?? null;
+  // Real org members (Owner/Manager only). Powers the Users table below.
+  const usersQ = useQuery({ queryKey: ["admin-org-users"], queryFn: fetchOrgUsers, enabled: Boolean(token) });
+  const users = (usersQ.data?.users ?? []) as OrgUser[];
   const [busy, setBusy] = useState<string | null>(null);
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
@@ -144,22 +162,22 @@ function UsersTab() {
           </div>
           <div className="wc-orgtable-wrap">
             <table className="wc-reptable">
-              <thead><tr><th>User</th><th>Role</th><th>Team</th><th>Office</th><th>Status</th><th>Leads</th><th>Appts</th><th>Deals</th><th>Lead→Appt</th><th>Avg Response</th><th>Revenue</th><th></th></tr></thead>
+              <thead><tr><th>User</th><th>Role</th><th>Business address</th><th></th></tr></thead>
               <tbody>
-                <tr>
-                  <td><div className="wc-goalrow-agent"><span className="wc-agoal-lav">JB</span><div><div className="wc-agoal-row-t">Jordan Brooks</div><div className="wc-band-d">jordan@acmerealty.com</div></div></div></td>
-                  <td><span className="wc-cbadge" style={{ color: "#0EA5E9", background: "#E7F6FD" }}>Admin</span></td>
-                  <td className="wc-band-d">Listings</td>
-                  <td className="wc-band-d">Burbank HQ</td>
-                  <td><span className="wc-actstatus is-online"><span className="wc-actdot-on" />Active</span></td>
-                  <td className="wc-mono"><b>142</b></td>
-                  <td className="wc-mono"><b>18</b></td>
-                  <td className="wc-mono"><b>4</b></td>
-                  <td className="wc-mono">14.8%</td>
-                  <td className="wc-mono">42s</td>
-                  <td className="wc-mono"><b>$1.24M</b></td>
-                  <td><button className="wc-task-open" title="Manage" onClick={() => navigate("/team/users")}><Icon name="more" size={15} /></button></td>
-                </tr>
+                {usersQ.isLoading ? (
+                  <tr><td colSpan={4} className="wc-band-d">Loading users…</td></tr>
+                ) : usersQ.isError ? (
+                  <tr><td colSpan={4} className="wc-band-d">Couldn't load users.</td></tr>
+                ) : users.length === 0 ? (
+                  <tr><td colSpan={4} className="wc-band-d">No users yet. Invite your first teammate.</td></tr>
+                ) : users.map((u) => (
+                  <tr key={u.id}>
+                    <td><div className="wc-goalrow-agent"><span className="wc-agoal-lav">{initialsOf(u.name, u.email)}</span><div><div className="wc-agoal-row-t">{u.name || "—"}</div><div className="wc-band-d">{u.email}</div></div></div></td>
+                    <td><span className="wc-cbadge" style={{ color: "#0EA5E9", background: "#E7F6FD" }}>{roleLabel(u.role_name)}</span></td>
+                    <td className="wc-band-d">{u.business_address?.trim() || "—"}</td>
+                    <td><button className="wc-task-open" title="Manage" onClick={() => navigate("/team/users")}><Icon name="more" size={15} /></button></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
