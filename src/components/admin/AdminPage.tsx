@@ -147,7 +147,7 @@ function UsersTab() {
               <thead><tr><th>User</th><th>Role</th><th>Team</th><th>Office</th><th>Status</th><th>Leads</th><th>Appts</th><th>Deals</th><th>Lead→Appt</th><th>Avg Response</th><th>Revenue</th><th></th></tr></thead>
               <tbody>
                 <tr>
-                  <td><div className="wc-goalrow-agent"><span className="wc-agoal-lav">JV</span><div><div className="wc-agoal-row-t">Joseph Velasquez</div><div className="wc-band-d">joseph@jovrealestate.com</div></div></div></td>
+                  <td><div className="wc-goalrow-agent"><span className="wc-agoal-lav">JB</span><div><div className="wc-agoal-row-t">Jordan Brooks</div><div className="wc-band-d">jordan@acmerealty.com</div></div></div></td>
                   <td><span className="wc-cbadge" style={{ color: "#0EA5E9", background: "#E7F6FD" }}>Admin</span></td>
                   <td className="wc-band-d">Listings</td>
                   <td className="wc-band-d">Burbank HQ</td>

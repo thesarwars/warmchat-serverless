@@ -863,7 +863,7 @@ const Onboarding: React.FC = () => {
                   <input
                     value={brokerage}
                     onChange={(e) => setBrokerage(e.target.value)}
-                    placeholder="e.g. JOV Realty"
+                    placeholder="e.g. Acme Realty"
                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                   />
                 </label>
@@ -873,7 +873,7 @@ const Onboarding: React.FC = () => {
                   <input
                     value={market}
                     onChange={(e) => setMarket(e.target.value)}
-                    placeholder="e.g. San Francisco, CA"
+                    placeholder="e.g. Austin, TX"
                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                   />
                 </label>
