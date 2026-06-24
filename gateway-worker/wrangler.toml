@@ -12,7 +12,7 @@
 
 name = "warmchats-calling-gateway"
 # Pin to the monsieur.sarwar account (token can see the velasquez account too).
-account_id = "d402791d04565670e13364b7c7343649"
+account_id = "5b89e8d5fce043f60538d6d2cd350da5"
 main = "src/index.ts"
 compatibility_date = "2026-05-22"
 
@@ -32,7 +32,7 @@ invocation_logs = true
 [[d1_databases]]
 binding = "D1DB"
 database_name = "warmchats-db"
-database_id = "06ed8724-2cd2-494e-8d2a-2074135b5f49"
+database_id = "7882957a-7723-4bdb-a3f3-178cf089163a"
 
 # R2 bucket for call-recording / voicemail storage (same bucket as the Pages
 # project's ATTACHMENTS). The processCallInsights cron job downloads recordings

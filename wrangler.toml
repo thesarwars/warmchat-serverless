@@ -23,7 +23,7 @@ compatibility_date = "2026-05-22"
 [[d1_databases]]
 binding = "D1DB"
 database_name = "warmchats-db"
-database_id = "06ed8724-2cd2-494e-8d2a-2074135b5f49"
+database_id = "7882957a-7723-4bdb-a3f3-178cf089163a"
 # preview_database_id = "DB" # Required for Pages local development
 
 # [observability.logs]
@@ -40,8 +40,9 @@ MOCK_SEND_APIS = "0"
 # Canonical user-facing domain is warmchats.com (custom domain on this Pages
 # project; dev.warmchats.com remains as a dev alias). Keep these on the canonical
 # domain so OAuth callbacks + app links don't bounce the user across origins
-# (which would split the session). NOTE: provider webhooks (Telnyx/Elastic) still
-# target the *.pages.dev origin and are configured separately - don't change those.
+# (which would split the session). NOTE: provider webhooks (Telnyx/Elastic/Stripe)
+# now target https://www.warmchats.com (NOT apex - apex 301s and POST webhooks won't
+# follow) and are configured separately in each provider's dashboard.
 FRONTEND_URL = "https://warmchats.com"
 PUBLIC_SITE_URL = "https://warmchats.com"
 PUBLIC_BASE_URL = "https://warmchats.com"
@@ -93,14 +94,14 @@ TELNYX_API_KEY = "***REMOVED***"
 TELNYX_PUBLIC_KEY = "x4JTjmM2mUkbTAd8t/QI/OjqKUKEr2Ga9dpi1p01TK0="
 
 # ---- Voice: Telnyx Call Control + WebRTC (fill from Telnyx portal) ----
-TELNYX_CONNECTION_ID = "2976504018823546696"             # Sandbox Cloudflare Warmchats Calling (Voice API app)
-TELNYX_CREDENTIAL_CONNECTION_ID = "***REMOVED***"  # cloudflare-warmchats-sandbox (credential SIP connection for WebRTC)
+TELNYX_CONNECTION_ID = "2976504018823546696"             # Production Cloudflare Warmchats Calling (Voice API app)
+TELNYX_CREDENTIAL_CONNECTION_ID = "***REMOVED***"  # cloudflare-warmchats-production (credential SIP connection for WebRTC)
 TELNYX_SIP_DOMAIN = "sip.telnyx.com"                     # default; change if a custom SIP subdomain is set on the SIP Connection
-TELNYX_VOICE_PROFILE_ID = "2976506312185087973"          # Sandbox-Cloudflare-Warmchat-Outbound
+TELNYX_VOICE_PROFILE_ID = "2976506312185087973"          # Production-Cloudflare-Warmchat-Outbound
 # 10DLC "ISV Platform Umbrella" - ONE shared profile/campaign/brand for ALL
 # agents. New numbers are assigned to these; we never register per-client
 # brands/campaigns.
-TELNYX_MESSAGING_PROFILE_ID = "40019e9e-7040-4235-9aa6-cf7047d4c3ac"  # Sandbox WarmChats Messaging (webhook -> warmchats-700.pages.dev)
+TELNYX_MESSAGING_PROFILE_ID = "40019e9e-7040-4235-9aa6-cf7047d4c3ac"  # Production WarmChats Messaging (inbound webhook -> www.warmchats.com)
 TELNYX_MASTER_CAMPAIGN_ID = "4b30019d-b165-ecc2-aff0-fedd0df37d98"
 TELNYX_MASTER_BRAND_ID = "4b20019d-a98b-a4e7-1a00-357bf2aca97d"  # Warmchats LLC (TCR BGS5W5V) - owns the master campaign
 
@@ -108,7 +109,7 @@ TELNYX_MASTER_BRAND_ID = "4b20019d-a98b-a4e7-1a00-357bf2aca97d"  # Warmchats LLC
 ELASTIC_SENDER_NAME = "WarmChats"
 ELASTIC_SENDER_EMAIL = "hello@warmchats.com"
 ELASTIC_EMAIL_API_KEY = "***REMOVED***"
-ELASTIC_WEBHOOK_URL = "https://warmchats-700.pages.dev/api/elastic/inbound"
+ELASTIC_WEBHOOK_URL = "https://www.warmchats.com/api/elastic/inbound"
 
 # ---- Web Push (VAPID) ----
 VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"
