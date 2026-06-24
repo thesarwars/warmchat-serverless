@@ -45,7 +45,7 @@ const SOURCES: Source[] = [
   { name: "Meta Ads", leads: 22, appts: 3, closed: 1, status: "Connected", color: "#1877F2", letter: "M", desc: "Facebook & Instagram forms" },
   { name: "Open House", leads: 18, appts: 5, closed: 1, status: "Connected", color: "#8B5CF6", letter: "O", desc: "Sign-in app" },
   { name: "Google PPC", leads: 16, appts: 2, closed: 0, status: "Connected", color: "#34A853", letter: "G", desc: "Search & Local Services Ads" },
-  { name: "Website", leads: 14, appts: 2, closed: 1, status: "Connected", color: "#0D9488", letter: "W", desc: "jovrealestate.com forms" },
+  { name: "Website", leads: 14, appts: 2, closed: 1, status: "Connected", color: "#0D9488", letter: "W", desc: "acmerealty.com forms" },
   { name: "Referral", leads: 12, appts: 4, closed: 1, status: "Connected", color: "#D97706", letter: "R", desc: "Manual referral entry" },
   { name: "Manual Entry", leads: 8, appts: 1, closed: 0, status: "Connected", color: "#64748B", letter: "E", desc: "Added by agents" },
   { name: "Other", leads: 7, appts: 1, closed: 0, status: "Connected", color: "#475569", letter: "O", desc: "Uncategorized sources" },
@@ -92,7 +92,7 @@ interface AgentGoal {
 }
 const AGENT_GOALS: AgentGoal[] = [
   {
-    id: "jv", name: "Joseph Velasquez", email: "joseph@jovrealestate.com",
+    id: "jv", name: "Jordan Brooks", email: "jordan@acmerealty.com",
     deals: 4, upcoming: 2, volume: 3800000, earned: 95000, pending: 38000, goal: 120000,
     assignedLeads: 12, conversations: 28, appts: 18,
     personal: [{ text: "Hit 5 closings before July", done: false }, { text: "Launch seller nurture campaign", done: true }],
@@ -101,7 +101,7 @@ const AGENT_GOALS: AgentGoal[] = [
     recentLeads: [{ name: "Brandon Kowalski", src: "Zillow", stage: "Hot", e: 2, m: 4, c: 1 }, { name: "Marisol Garcia", src: "Site form", stage: "Hot", e: 1, m: 3, c: 0 }],
   },
   {
-    id: "sc", name: "Sarah Chen", email: "sarah@jovrealestate.com",
+    id: "sc", name: "Sarah Chen", email: "sarah@acmerealty.com",
     deals: 3, upcoming: 1, volume: 2400000, earned: 72000, pending: 24000, goal: 100000,
     assignedLeads: 9, conversations: 21, appts: 14,
     personal: [{ text: "Convert 3 open-house leads", done: false }],
@@ -110,7 +110,7 @@ const AGENT_GOALS: AgentGoal[] = [
     recentLeads: [{ name: "Devon S.", src: "Zillow", stage: "Warm", e: 0, m: 2, c: 1 }],
   },
   {
-    id: "mr", name: "Michael Ross", email: "michael@jovrealestate.com",
+    id: "mr", name: "Michael Ross", email: "michael@acmerealty.com",
     deals: 2, upcoming: 3, volume: 1600000, earned: 48000, pending: 60000, goal: 90000,
     assignedLeads: 7, conversations: 12, appts: 9,
     personal: [],
@@ -119,7 +119,7 @@ const AGENT_GOALS: AgentGoal[] = [
     recentLeads: [{ name: "The Pham family", src: "Referral", stage: "Warm", e: 1, m: 1, c: 0 }],
   },
   {
-    id: "dw", name: "Dana Whitfield", email: "dana@jovrealestate.com",
+    id: "dw", name: "Dana Whitfield", email: "dana@acmerealty.com",
     deals: 1, upcoming: 0, volume: 640000, earned: 16000, pending: 0, goal: 0,
     assignedLeads: 4, conversations: 0, appts: 0,
     personal: [],
@@ -145,7 +145,7 @@ const CALL_OUTCOMES: BarRow[] = [
   { label: "Missed (inbound)", value: 14, color: "#EF4444" },
 ];
 const CALL_AGENTS = [
-  { name: "Joseph Velasquez", calls: 142, talk: "9h 28m", connect: 64 },
+  { name: "Jordan Brooks", calls: 142, talk: "9h 28m", connect: 64 },
   { name: "Sarah Chen", calls: 88, talk: "6h 12m", connect: 61 },
   { name: "Inbound AI", calls: 64, talk: "3h 40m", connect: 58 },
   { name: "Michael Ross", calls: 24, talk: "1h 44m", connect: 55 },
@@ -225,9 +225,9 @@ const APPT_TYPES: BarRow[] = [
   { label: "Zoom Meeting", value: 2, color: "#14B8A6" },
 ];
 const APPT_UPCOMING = [
-  { title: "Buyer showing", who: "Anna L.", loc: "1422 Maple St", when: "Today 2:00 PM", agent: "Joseph Velasquez", kind: "Showing" },
+  { title: "Buyer showing", who: "Anna L.", loc: "1422 Maple St", when: "Today 2:00 PM", agent: "Jordan Brooks", kind: "Showing" },
   { title: "Listing consult", who: "C. Hernandez", loc: "88 Hillcrest Ave", when: "Today 4:30 PM", agent: "Sarah Chen", kind: "Listing" },
-  { title: "Buyer consultation", who: "Maria Lopez", loc: "Office", when: "Fri 1:00 PM", agent: "Joseph Velasquez", kind: "Consult" },
+  { title: "Buyer consultation", who: "Maria Lopez", loc: "Office", when: "Fri 1:00 PM", agent: "Jordan Brooks", kind: "Consult" },
   { title: "Zoom walkthrough", who: "The Pham family", loc: "Video call", when: "Fri 3:30 PM", agent: "Michael Ross", kind: "Zoom" },
   { title: "Final walkthrough", who: "Grace Holloway", loc: "1180 Cedar Ln", when: "Mon 11:00 AM", agent: "Sarah Chen", kind: "Showing" },
 ];
@@ -668,7 +668,7 @@ function GoalsTab() {
   return (
     <div>
       <div className="wc-goalbar">
-        <div className="wc-goalbar-crumb"><span className="wc-card-h2">{year} Goals</span><Icon name="chevronRight" size={14} /><span className="wc-goalbar-team"><Icon name="users" size={14} />JOV Realty · {agents.length} team members</span></div>
+        <div className="wc-goalbar-crumb"><span className="wc-card-h2">{year} Goals</span><Icon name="chevronRight" size={14} /><span className="wc-goalbar-team"><Icon name="users" size={14} />Acme Realty · {agents.length} team members</span></div>
         <div className="wc-yearsel">
           <button onClick={() => setYear((y) => y - 1)}><Icon name="chevronDown" size={15} style={{ transform: "rotate(90deg)" }} /></button>
           <span className="wc-mono">{year}</span>

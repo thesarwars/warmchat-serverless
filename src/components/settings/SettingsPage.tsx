@@ -217,9 +217,9 @@ interface RoutingRule { name: string; cond: string; then: string; on: boolean }
 const ROUTING_RULES: RoutingRule[] = [
   { name: "Zillow buyer leads", cond: "Source is Zillow", then: "Round-robin → Buyers team", on: true },
   { name: "Seller / valuation requests", cond: "Form is Home Value", then: "Assign → Listings team", on: true },
-  { name: "Spanish-speaking leads", cond: "Language is Spanish", then: "Assign → Joseph Velasquez", on: true },
+  { name: "Spanish-speaking leads", cond: "Language is Spanish", then: "Assign → Jordan Brooks", on: true },
   { name: "After-hours inbound", cond: "Outside business hours", then: "Assign → Inside Sales (ISA)", on: true },
-  { name: "High-value ($1M+)", cond: "Budget over $1M", then: "Notify + assign → Joseph Velasquez", on: false },
+  { name: "High-value ($1M+)", cond: "Budget over $1M", then: "Notify + assign → Jordan Brooks", on: false },
 ];
 
 function AdmToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
