@@ -14,6 +14,7 @@ import Confetti from "react-confetti";
 import BusinessEmailSetup from "./BusinessEmailSetup";
 import ConnectPhoneNumber from "./ConnectPhoneNumber";
 import { logoutCurrentSession } from "../utils/authSession";
+import { validateBusinessAddress } from "../utils/addressValidator";
 
 /* ---------------- TYPES ---------------- */
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -45,6 +46,7 @@ const Onboarding: React.FC = () => {
   // Redesigned wizard: Step 1 = business profile, Step 2 = lead & pipeline.
   const [brokerage, setBrokerage] = useState("");
   const [market, setMarket] = useState("");
+  const [businessAddress, setBusinessAddress] = useState("");
   const [bizRole, setBizRole] = useState("agent");
   const [goalAppts, setGoalAppts] = useState("");
   const [goalDeals, setGoalDeals] = useState("");
@@ -213,6 +215,7 @@ const Onboarding: React.FC = () => {
         }
         if (data.brokerage) setBrokerage(String(data.brokerage));
         if (data.market) setMarket(String(data.market));
+        if (data.business_address) setBusinessAddress(String(data.business_address));
         if (data.role) setBizRole(String(data.role));
         if (data.goal_appts) setGoalAppts(String(data.goal_appts));
         if (data.goal_deals) setGoalDeals(String(data.goal_deals));
@@ -702,8 +705,9 @@ const Onboarding: React.FC = () => {
   const hasSmsAccess = orgPlan && orgPlan !== "free_channel";
   const smsApproved = smsTelnyxStatus === "approved";
   const canContinue = (currentStep: Step) => {
-    // Step 1 business profile: brokerage + market + a valid commission %.
-    if (currentStep === 1 && !(brokerage.trim() && market.trim() && Number(avgCommission) > 0)) return false;
+    // Step 1 business profile: brokerage + market + a valid commission % + a
+    // valid business mailing address (required for CAN-SPAM marketing footers).
+    if (currentStep === 1 && !(brokerage.trim() && market.trim() && Number(avgCommission) > 0 && businessAddress.trim() && !validateBusinessAddress(businessAddress))) return false;
     // Step 2 lead & pipeline: both goals set.
     if (currentStep === 2 && !(Number(goalDeals) > 0 && Number(goalAppts) > 0)) return false;
     // Step 3 connect tools: a connected email is required.
@@ -876,6 +880,22 @@ const Onboarding: React.FC = () => {
                     placeholder="e.g. Austin, TX"
                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                   />
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-700">Business mailing address</span>
+                  <textarea
+                    value={businessAddress}
+                    onChange={(e) => setBusinessAddress(e.target.value)}
+                    rows={2}
+                    placeholder="e.g. 123 Main St, Austin, TX 78701"
+                    className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                  />
+                  {businessAddress.trim() && validateBusinessAddress(businessAddress) ? (
+                    <span className="mt-1 block text-[11px] text-red-600">{validateBusinessAddress(businessAddress)}</span>
+                  ) : (
+                    <span className="mt-1 block text-[11px] text-gray-500">Shown in the footer of every marketing email you send (required by law).</span>
+                  )}
                 </label>
 
                 <div>
@@ -1526,7 +1546,7 @@ const Onboarding: React.FC = () => {
                   // Business profile -> persist brokerage (org name) + market/role
                   // and the commission rate (deal defaults).
                   await saveDealDefaults();
-                  updateStep(2, { brokerage: brokerage.trim(), market: market.trim(), role: bizRole });
+                  updateStep(2, { brokerage: brokerage.trim(), market: market.trim(), role: bizRole, business_address: businessAddress.trim() });
                 }}
                 className="px-6 py-3 rounded-lg font-semibold text-white bg-[#f4731e] hover:opacity-90 transition disabled:opacity-40 sm:ml-auto"
               >

@@ -35,8 +35,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   );
 
   // Was the user invited (vs self-serve)?
-  const inv = await queryFirst<{ is_invited: number }>(
-    env.D1DB, `SELECT is_invited FROM "user" WHERE id = ?`, userId);
+  const inv = await queryFirst<{ is_invited: number; business_address: string | null }>(
+    env.D1DB, `SELECT is_invited, business_address FROM "user" WHERE id = ?`, userId);
 
   if (!row) {
     // No row -> treat as completed so Login routes straight to /dashboard.
@@ -56,6 +56,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     flow_activated: Boolean(row.flow_activated),
     payment_cleared: Boolean(row.payment_cleared),
     is_invited: Boolean(inv?.is_invited),
+    business_address: inv?.business_address ?? null,
     brokerage: row.brokerage,
     market: row.market,
     role: row.biz_role,

@@ -3,12 +3,15 @@ import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
 import { queryFirst, execute, nowIso } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
+import { validateBusinessAddress } from "../../../_shared/addressValidator.ts";
 
 interface StepBody {
   step?: number;
   // Business-profile / pipeline fields collected by the redesigned wizard.
   brokerage?: string;
   market?: string;
+  // CAN-SPAM mailing address -> "user".business_address (see handle()).
+  business_address?: string;
   // Stored as biz_role (the `role` identifier is a table name in this schema).
   role?: string;
   goal_appts?: number;
@@ -79,6 +82,18 @@ async function handle(context: EventContext<Env, "userId", Record<string, unknow
   const body = (await readJson<StepBody>(request)) || {};
   const step = Number(body.step);
   if (!Number.isInteger(step)) return error("step must be an integer", 400);
+
+  // Business mailing address -> "user".business_address. Required (CAN-SPAM)
+  // before marketing automations/sequences will send; re-validated server-side
+  // so a tampered client can't sneak placeholder text past the footer rules.
+  // Only written when a non-empty value is sent, so advancing later steps that
+  // omit it never clears a previously-saved address.
+  if (typeof body.business_address === "string" && body.business_address.trim()) {
+    const addr = body.business_address.trim();
+    const reason = validateBusinessAddress(addr);
+    if (reason) return error(reason, 400, { code: "INVALID_BUSINESS_ADDRESS" });
+    await execute(env.D1DB, `UPDATE "user" SET business_address = ? WHERE id = ?`, addr, targetId);
+  }
 
   await setStep(env, targetId, step);
   await saveProfile(env, targetId, body);
