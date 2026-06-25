@@ -502,6 +502,12 @@ export default function Inbox() {
     email: [],
     sms: [],
   });
+  // Reverse pagination of the open thread: cursors point at the OLDEST loaded
+  // message per channel; scrolling to the top fetches the next older page.
+  const [threadHasMore, setThreadHasMore] = useState(false);
+  const oldestEmailIdRef = useRef<number | null>(null);
+  const oldestSmsIdRef = useRef<number | null>(null);
+  const loadingOlderRef = useRef(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState("");
   // Client-side conversation filter chips. These narrow the already-fetched
@@ -831,6 +837,18 @@ export default function Inbox() {
     // freshly appended message.
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     pinnedToBottomRef.current = distance <= 32;
+    // Near the top edge -> load the next older page and keep the viewport
+    // anchored: capture height before the prepend, restore scrollTop after so
+    // older content appears above with no jump.
+    if (el.scrollTop < 120 && threadHasMore && !loadingOlderRef.current) {
+      const prevHeight = el.scrollHeight;
+      void loadOlderMessages().then(() => {
+        requestAnimationFrame(() => {
+          const elNow = messagesScrollRef.current;
+          if (elNow) elNow.scrollTop = elNow.scrollHeight - prevHeight;
+        });
+      });
+    }
   };
 
   const selectedSummary = useMemo(() => {
@@ -1256,6 +1274,52 @@ export default function Inbox() {
     }
   };
 
+  // Merge two message arrays by id (updates win on collision). The unified
+  // timeline re-sorts by timestamp, so array order here is irrelevant.
+  const mergeMessagesById = (
+    base: ContactMessage[],
+    updates: ContactMessage[],
+  ): ContactMessage[] => {
+    const map = new Map<string, ContactMessage>();
+    for (const m of base) map.set(m.id, m);
+    for (const m of updates) map.set(m.id, m);
+    return [...map.values()];
+  };
+
+  // Fetch the next OLDER page (before the oldest loaded id of each channel) and
+  // prepend it. Independent email + SMS cursors; has-more comes from the server.
+  const loadOlderMessages = async () => {
+    const leadId = selectedLeadIdRef.current;
+    if (!token || !leadId || loadingOlderRef.current || !threadHasMore) return;
+    loadingOlderRef.current = true;
+    try {
+      const qs = new URLSearchParams({ limit: "30" });
+      if (oldestEmailIdRef.current != null) qs.set("before_email_id", String(oldestEmailIdRef.current));
+      if (oldestSmsIdRef.current != null) qs.set("before_sms_id", String(oldestSmsIdRef.current));
+      const res = await fetch(`${API_BASE}/inbox/contacts/${leadId}/messages?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || selectedLeadIdRef.current !== leadId) return;
+      const olderEmail = Array.isArray(data?.email_messages) ? data.email_messages : [];
+      const olderSms = Array.isArray(data?.sms_messages) ? data.sms_messages : [];
+      const olderUnified = Array.isArray(data?.unified_messages) ? data.unified_messages : [];
+      if (olderEmail.length || olderSms.length) {
+        setMessagesByTab((prev) => ({
+          email: mergeMessagesById(prev.email, olderEmail),
+          sms: mergeMessagesById(prev.sms, olderSms),
+          unified: mergeMessagesById(prev.unified, olderUnified),
+        }));
+      }
+      if (data?.oldest_email_id != null) oldestEmailIdRef.current = data.oldest_email_id;
+      if (data?.oldest_sms_id != null) oldestSmsIdRef.current = data.oldest_sms_id;
+      setThreadHasMore(Boolean(data?.has_more_email) || Boolean(data?.has_more_sms));
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  };
+
   const fetchContactDetail = async (
     leadId: number,
     preserveComposer = true,
@@ -1314,11 +1378,27 @@ export default function Inbox() {
       // polling tick must not re-set selectedLeadId after the user navigates.
       if (!quiet) setSelectedLeadId(leadId);
       setSelectedContact(mergedContact);
-      setMessagesByTab({
-        email: emailMessages,
-        sms: smsMessages,
-        unified: unifiedMessages,
-      });
+      if (quiet) {
+        // Background poll: MERGE the newest page into whatever is loaded (including
+        // older pages the user scrolled up to) so polling never wipes history.
+        // Incoming wins on id collisions so delivery/read status stays fresh.
+        setMessagesByTab((prev) => ({
+          email: mergeMessagesById(prev.email, emailMessages),
+          sms: mergeMessagesById(prev.sms, smsMessages),
+          unified: mergeMessagesById(prev.unified, unifiedMessages),
+        }));
+      } else {
+        // Fresh open: replace + (re)seed the reverse-pagination cursors.
+        setMessagesByTab({
+          email: emailMessages,
+          sms: smsMessages,
+          unified: unifiedMessages,
+        });
+        oldestEmailIdRef.current = data?.oldest_email_id ?? null;
+        oldestSmsIdRef.current = data?.oldest_sms_id ?? null;
+        setThreadHasMore(Boolean(data?.has_more_email) || Boolean(data?.has_more_sms));
+        loadingOlderRef.current = false;
+      }
 
       const serverAppointments = Array.isArray(data?.appointments)
         ? (data.appointments as InboxAppointmentRecord[])
