@@ -1051,6 +1051,18 @@ export default function Leads() {
     s === "Appointment Booked" ? <CalendarCheck className="w-4 h-4 text-purple-500" /> :
     s === "AI Complete"        ? <CheckCircle2 className="w-4 h-4 text-teal-500"   /> : null;
 
+  // Pill-select option lists are pure functions of constant option arrays. Build
+  // them ONCE instead of rebuilding 5 arrays (with JSX icons) per row on every
+  // render - at 100+ rows that per-render allocation was a real cost on inline
+  // edits. (icon fns are pure, so [] deps is correct.)
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const leadTypeOptions = useMemo(() => LEAD_TYPE_OPTIONS.map((t) => ({ value: t, label: t, icon: leadTypeIcon(t), pillClass: leadTypePillClass(t) })), []);
+  const stageOptions = useMemo(() => STAGE_OPTIONS.map((s) => ({ value: s, label: s, icon: stageIcon(s), pillClass: stagePillClass(s) })), []);
+  const aiStatusOptions = useMemo(() => AI_STATUS_OPTIONS.map((s) => ({ value: s, label: s, icon: aiStatusIcon(s), pillClass: aiStatusPillClass(s) })), []);
+  const sourceOptions = useMemo(() => [{ value: "", label: "-" }, ...SOURCE_OPTIONS.map((s) => ({ value: s, label: s }))], []);
+  const priceRangeOptions = useMemo(() => [{ value: "", label: "-" }, ...PRICE_RANGE_OPTIONS.map((p) => ({ value: p, label: p }))], []);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   return (
     <MainLayout>
       <div className={`wcv2 space-y-6 transition-all duration-300 pt-4 px-4 sm:px-6 ${aiPanelOpen ? "sm:pr-85" : ""}`}>
@@ -1500,7 +1512,7 @@ export default function Leads() {
                               value={leadType}
                               pillClass={leadTypePillClass(leadType)}
                               ariaLabel="Lead Type"
-                              options={LEAD_TYPE_OPTIONS.map((t) => ({ value: t, label: t, icon: leadTypeIcon(t), pillClass: leadTypePillClass(t) }))}
+                              options={leadTypeOptions}
                               onChange={(v) => updateLeadField(lead.id, "lead_type", v)}
                             />
                           </td>
@@ -1512,7 +1524,7 @@ export default function Leads() {
                               value={stageVal}
                               pillClass={stagePillClass(stageVal)}
                               ariaLabel="Stage"
-                              options={STAGE_OPTIONS.map((s) => ({ value: s, label: s, icon: stageIcon(s), pillClass: stagePillClass(s) }))}
+                              options={stageOptions}
                               onChange={(v) => updateLeadField(lead.id, "status", v)}
                             />
                           </td>
@@ -1523,7 +1535,7 @@ export default function Leads() {
                               value={aiStat}
                               pillClass={aiStatusPillClass(aiStat)}
                               ariaLabel="AI Status"
-                              options={AI_STATUS_OPTIONS.map((s) => ({ value: s, label: s, icon: aiStatusIcon(s), pillClass: aiStatusPillClass(s) }))}
+                              options={aiStatusOptions}
                               onChange={(v) => updateLeadField(lead.id, "ai_status", v)}
                             />
                           </td>
@@ -1581,10 +1593,7 @@ export default function Leads() {
                               value={lead.source?.trim() ? lead.source : ""}
                               pillClass="bg-gray-100 text-gray-700"
                               ariaLabel="Source"
-                              options={[
-                                { value: "", label: "-" },
-                                ...SOURCE_OPTIONS.map((s) => ({ value: s, label: s })),
-                              ]}
+                              options={sourceOptions}
                               onChange={(v) => updateLeadField(lead.id, "source", v)}
                             />
                           </td>
@@ -1595,10 +1604,7 @@ export default function Leads() {
                               value={String(lead.price_range || lead.budget || "")}
                               pillClass="bg-emerald-50 text-emerald-700"
                               ariaLabel="Budget"
-                              options={[
-                                { value: "", label: "-" },
-                                ...PRICE_RANGE_OPTIONS.map((p) => ({ value: p, label: p })),
-                              ]}
+                              options={priceRangeOptions}
                               onChange={(v) => updateLeadField(lead.id, "price_range", v)}
                             />
                           </td>
