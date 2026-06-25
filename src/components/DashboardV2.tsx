@@ -1,6 +1,6 @@
 'use client';
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import MainLayout from "./MainLayout";
 import MissingBusinessAddressBanner from "./MissingBusinessAddressBanner";
 import SmsSetupBanner from "./SmsSetupBanner";
@@ -94,6 +94,18 @@ const inferByAi = (a: ApptItem): boolean => {
 
 const DashboardV2: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  // After a direct Gmail connect, ConnectAccount routes here with router state.
+  // Show the success toast + the "add leads?" prompt inside the normal app UI,
+  // then clear the state so a refresh / back-nav doesn't replay it.
+  const [showAddLeads, setShowAddLeads] = useState(false);
+  useEffect(() => {
+    if ((location.state as { gmailConnected?: boolean } | null)?.gmailConnected) {
+      toast.success("Gmail connected!");
+      setShowAddLeads(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
   const [, setBillingOpen] = useState(false);
   // Conversion-funnel range (days). Drives the performance fetch params.
   const [funnelDays, setFunnelDays] = useState<30 | 60 | 90>(30);
@@ -540,6 +552,20 @@ const DashboardV2: React.FC = () => {
           setUnhotLead(null);
         }}
         onCancel={() => setUnhotLead(null)}
+      />
+
+      <ConfirmDialog
+        open={showAddLeads}
+        title="Connected Successfully!"
+        message="Your Gmail is connected. Do you want to add leads now?"
+        confirmLabel="Yes, add leads"
+        cancelLabel="Later"
+        tone="primary"
+        onConfirm={() => {
+          setShowAddLeads(false);
+          navigate("/leads");
+        }}
+        onCancel={() => setShowAddLeads(false)}
       />
     </MainLayout>
   );
