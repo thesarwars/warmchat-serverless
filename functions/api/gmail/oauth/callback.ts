@@ -25,7 +25,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       code,
       client_id: env.GMAIL_OAUTH_CLIENT_ID,
       client_secret: env.GMAIL_OAUTH_CLIENT_SECRET,
-      redirect_uri: env.GMAIL_OAUTH_REDIRECT_URI,
+      // Must match the redirect_uri used in the auth request (connect-url.ts),
+      // which is this callback's own origin - the host Google redirected back to.
+      redirect_uri: `${url.origin}/api/gmail/oauth/callback`,
       grant_type: "authorization_code",
     }).toString(),
   });
@@ -69,7 +71,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   await saveGmailTokens(env, conn.id, t.refresh_token, t.access_token, t.expires_in, t.scope);
-  // ConnectAccount.tsx handles ?status=success on this route, then honors the
-  // gmail_oauth_return localStorage value to return to onboarding/dashboard.
-  return Response.redirect(`${env.FRONTEND_URL}/connect-email/gmail?status=success`, 302);
+  // Redirect back to the SAME origin Google called us on (GMAIL_OAUTH_REDIRECT_URI's
+  // host, e.g. www.warmchats.com) - NOT env.FRONTEND_URL. The app is reachable on
+  // BOTH the apex (warmchats.com) and www, which are separate localStorage origins.
+  // The user's auth token + gmail_oauth_return live on the origin they started the
+  // connect flow on (= this callback's origin). Redirecting to a different origin
+  // (apex) lands on a tokenless page that bounces to /login. ConnectAccount.tsx
+  // handles ?status=success here, then honors gmail_oauth_return to return to
+  // onboarding/dashboard.
+  return Response.redirect(`${url.origin}/connect-email/gmail?status=success`, 302);
 };
