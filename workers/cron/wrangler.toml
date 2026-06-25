@@ -76,8 +76,11 @@ EMAIL_UNSUB_SIGNING_KEY = "9ad1c55c33d55b83b551e62ce400f2f69f24dc9f0bb0bf2f71d5e
 FERNET_KEY = "lWPNdUL_iG672PKUtYNOGAceD5VocxeMeAKW3vpAM2c="
 GMAIL_OAUTH_CLIENT_ID = "709386696804-f6e5audi00u9cav9i3vjcb96ptmjbe7p.apps.googleusercontent.com"
 GMAIL_OAUTH_CLIENT_SECRET = "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"
-FRONTEND_URL = "https://warmchats.com"
-PUBLIC_BASE_URL = "https://warmchats.com"
+# Canonical www (matches Pages config + functions/_middleware.ts apex->www
+# redirect). PUBLIC_BASE_URL builds the CAN-SPAM unsubscribe links baked into
+# marketing emails, so keep it on the canonical origin.
+FRONTEND_URL = "https://www.warmchats.com"
+PUBLIC_BASE_URL = "https://www.warmchats.com"
 
 # ---- Web Push (VAPID) ----
 VAPID_PUBLIC_KEY = "BGBrRe0o1zTMGP5ThCs8R8Ek6ahBEmAYSE9ANcXJuwJU3atp60RMvyd2D3GxWPBbdsWPDZaWmzB2Smcu3gI8X8A"

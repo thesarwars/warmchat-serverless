@@ -37,15 +37,17 @@ ENV = "prod"
 
 MOCK_SEND_APIS = "0"
 # ---- App identity / URLs ----
-# Canonical user-facing domain is warmchats.com (custom domain on this Pages
-# project; dev.warmchats.com remains as a dev alias). Keep these on the canonical
-# domain so OAuth callbacks + app links don't bounce the user across origins
-# (which would split the session). NOTE: provider webhooks (Telnyx/Elastic/Stripe)
-# now target https://www.warmchats.com (NOT apex - apex 301s and POST webhooks won't
-# follow) and are configured separately in each provider's dashboard.
-FRONTEND_URL = "https://warmchats.com"
-PUBLIC_SITE_URL = "https://warmchats.com"
-PUBLIC_BASE_URL = "https://warmchats.com"
+# Canonical user-facing domain is www.warmchats.com. The app is served on both the
+# apex (warmchats.com) and www; functions/_middleware.ts 301s apex browser
+# navigations -> www so there's a SINGLE origin (per-origin localStorage/session
+# was splitting login + the Gmail OAuth round-trip). Keep these on www so OAuth
+# callbacks + app/email links stay same-origin. Provider webhooks (Telnyx/Elastic/
+# Stripe) also target https://www.warmchats.com and are configured in each
+# provider's dashboard (the middleware leaves /api/* unredirected so either host
+# still serves webhooks).
+FRONTEND_URL = "https://www.warmchats.com"
+PUBLIC_SITE_URL = "https://www.warmchats.com"
+PUBLIC_BASE_URL = "https://www.warmchats.com"
 REPLY_DOMAIN = "mail.warmchats.com"
 SUPPORT_EMAIL = "hello@warmchats.com"
 
