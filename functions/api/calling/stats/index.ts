@@ -39,60 +39,63 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const rangeStart = url.searchParams.get("startDate") || new Date(Date.now() - 30 * dayMs).toISOString();
   const rangeEnd = url.searchParams.get("endDate") || now.toISOString();
 
-  // Total calls today vs yesterday.
-  const today = await queryFirst<{ n: number }>(
-    env.D1DB, `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ?`, orgId, todayStart);
-  const yesterday = await queryFirst<{ n: number }>(
-    env.D1DB, `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND created_at < ?`,
-    orgId, yesterdayStart, todayStart);
-
-  // Missed today + unrecovered (no later COMPLETED outbound to same lead AND no appointment booked from the call).
-  const missed = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND status IN ${MISSED}`,
-    orgId, todayStart);
-  const unrecovered = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls c
-      WHERE c.org_id = ? AND c.created_at >= ? AND c.status IN ${MISSED}
-        AND NOT EXISTS (
-          SELECT 1 FROM calls c2
-           WHERE c2.lead_id = c.lead_id AND c2.direction = 'OUTBOUND'
-             AND c2.status = 'COMPLETED' AND c2.created_at > c.created_at)
-        AND NOT EXISTS (SELECT 1 FROM lead_appointment la WHERE la.call_id = c.id)`,
-    orgId, todayStart);
-
-  // Voicemails pending (unheard) + high priority (negative sentiment).
-  const voicemails = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND is_voicemail = 1 AND voicemail_heard = 0`, orgId);
-  const voicemailsHigh = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls c
-       JOIN call_ai_insights i ON i.call_id = c.id
-      WHERE c.org_id = ? AND c.is_voicemail = 1 AND c.voicemail_heard = 0 AND i.sentiment = 'negative'`,
-    orgId);
-
-  // Avg completed-call duration this week vs last week (seconds).
-  const avgThis = await queryFirst<{ a: number | null }>(
-    env.D1DB,
-    `SELECT AVG(duration) AS a FROM calls WHERE org_id = ? AND status = 'COMPLETED' AND created_at >= ?`,
-    orgId, weekStart);
-  const avgLast = await queryFirst<{ a: number | null }>(
-    env.D1DB,
-    `SELECT AVG(duration) AS a FROM calls WHERE org_id = ? AND status = 'COMPLETED' AND created_at >= ? AND created_at < ?`,
-    orgId, lastWeekStart, weekStart);
-
-  // Booked-from-calls + conversion over the range.
-  const booked = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(DISTINCT la.call_id) AS n FROM lead_appointment la
-      WHERE la.org_id = ? AND la.call_id IS NOT NULL AND la.created_at >= ? AND la.created_at <= ?`,
-    orgId, rangeStart, rangeEnd);
-  const rangeCalls = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND created_at <= ?`,
-    orgId, rangeStart, rangeEnd);
+  // All KPI aggregates are independent COUNT/AVG queries - fire them concurrently
+  // (was ~10 sequential D1 round-trips, the bulk of this endpoint's ~1s latency).
+  const [
+    today, yesterday, missed, unrecovered, voicemails, voicemailsHigh,
+    avgThis, avgLast, booked, rangeCalls,
+  ] = await Promise.all([
+    // Total calls today vs yesterday.
+    queryFirst<{ n: number }>(
+      env.D1DB, `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ?`, orgId, todayStart),
+    queryFirst<{ n: number }>(
+      env.D1DB, `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND created_at < ?`,
+      orgId, yesterdayStart, todayStart),
+    // Missed today + unrecovered (no later COMPLETED outbound to same lead AND no appointment booked from the call).
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND status IN ${MISSED}`,
+      orgId, todayStart),
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls c
+        WHERE c.org_id = ? AND c.created_at >= ? AND c.status IN ${MISSED}
+          AND NOT EXISTS (
+            SELECT 1 FROM calls c2
+             WHERE c2.lead_id = c.lead_id AND c2.direction = 'OUTBOUND'
+               AND c2.status = 'COMPLETED' AND c2.created_at > c.created_at)
+          AND NOT EXISTS (SELECT 1 FROM lead_appointment la WHERE la.call_id = c.id)`,
+      orgId, todayStart),
+    // Voicemails pending (unheard) + high priority (negative sentiment).
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND is_voicemail = 1 AND voicemail_heard = 0`, orgId),
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls c
+         JOIN call_ai_insights i ON i.call_id = c.id
+        WHERE c.org_id = ? AND c.is_voicemail = 1 AND c.voicemail_heard = 0 AND i.sentiment = 'negative'`,
+      orgId),
+    // Avg completed-call duration this week vs last week (seconds).
+    queryFirst<{ a: number | null }>(
+      env.D1DB,
+      `SELECT AVG(duration) AS a FROM calls WHERE org_id = ? AND status = 'COMPLETED' AND created_at >= ?`,
+      orgId, weekStart),
+    queryFirst<{ a: number | null }>(
+      env.D1DB,
+      `SELECT AVG(duration) AS a FROM calls WHERE org_id = ? AND status = 'COMPLETED' AND created_at >= ? AND created_at < ?`,
+      orgId, lastWeekStart, weekStart),
+    // Booked-from-calls + conversion over the range.
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(DISTINCT la.call_id) AS n FROM lead_appointment la
+        WHERE la.org_id = ? AND la.call_id IS NOT NULL AND la.created_at >= ? AND la.created_at <= ?`,
+      orgId, rangeStart, rangeEnd),
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls WHERE org_id = ? AND created_at >= ? AND created_at <= ?`,
+      orgId, rangeStart, rangeEnd),
+  ]);
 
   const callsToday = today?.n ?? 0;
   const callsYesterday = yesterday?.n ?? 0;
