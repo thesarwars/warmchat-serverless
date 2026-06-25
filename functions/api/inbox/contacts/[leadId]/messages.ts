@@ -16,6 +16,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const leadId = Number(params.leadId);
   if (!Number.isInteger(leadId)) return error("Invalid lead id", 400);
 
+  // Reverse pagination: load the newest `limit` messages by default; scrolling up
+  // passes before_email_id / before_sms_id (the integer id the client already
+  // holds) to fetch the next older page. Email + SMS paginate on independent
+  // cursors. Presence of any before_* = an "older page" load (must not mark-read).
+  const url = new URL(request.url);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 30, 1), 100);
+  const beforeEmailId = Number(url.searchParams.get("before_email_id")) || null;
+  const beforeSmsId = Number(url.searchParams.get("before_sms_id")) || null;
+  const isOlderPage = beforeEmailId !== null || beforeSmsId !== null;
+  let hasMoreEmail = false, oldestEmailId: number | null = null;
+  let hasMoreSms = false, oldestSmsId: number | null = null;
+
   const lead = await queryFirst<{
     id: number; org_id: number | null; name: string | null;
     first_name: string | null; last_name: string | null;
@@ -83,6 +95,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     // recipients, so selecting the whole thread leaked every other lead's emails
     // into this lead's conversation. Outbound to the lead -> to_email matches;
     // the lead's inbound reply -> sender_email matches.
+    // Fetch newest-first (so LIMIT bounds the page), then reverse to chronological
+    // ASC below so the existing render/latest logic is unchanged. limit+1 detects
+    // whether older messages remain.
     emailMessages = await queryAll<EmailMsg>(
       env.D1DB,
       `SELECT im.id, im.thread_id, im.direction, im.body, im.subject, im.attachments,
@@ -93,17 +108,27 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
          LEFT JOIN automation a ON a.id = im.automation_id
         WHERE im.thread_id IN (${placeholders})
           AND (LOWER(im.to_email) = ? OR LOWER(im.sender_email) = ?)
-        ORDER BY COALESCE(im.message_date, im.created_at) ASC, im.id ASC`,
-      ...threadIds, leadEmail, leadEmail,
+          ${beforeEmailId ? "AND im.id < ?" : ""}
+        ORDER BY COALESCE(im.message_date, im.created_at) DESC, im.id DESC
+        LIMIT ?`,
+      ...threadIds, leadEmail, leadEmail, ...(beforeEmailId ? [beforeEmailId] : []), limit + 1,
     );
-    // Mark only THIS lead's inbound messages as read (not the shared thread's).
-    await execute(
-      env.D1DB,
-      `UPDATE inbox_messages SET is_read = 1
-        WHERE thread_id IN (${placeholders})
-          AND (LOWER(to_email) = ? OR LOWER(sender_email) = ?) AND is_read = 0`,
-      ...threadIds, leadEmail, leadEmail,
-    );
+    hasMoreEmail = emailMessages.length > limit;
+    if (hasMoreEmail) emailMessages = emailMessages.slice(0, limit);
+    emailMessages.reverse(); // back to chronological ASC for render
+    oldestEmailId = emailMessages.length ? emailMessages[0].id : null;
+
+    // Mark only THIS lead's inbound messages as read - and only on the newest/
+    // initial page, never when paging older history.
+    if (!isOlderPage) {
+      await execute(
+        env.D1DB,
+        `UPDATE inbox_messages SET is_read = 1
+          WHERE thread_id IN (${placeholders})
+            AND (LOWER(to_email) = ? OR LOWER(sender_email) = ?) AND is_read = 0`,
+        ...threadIds, leadEmail, leadEmail,
+      );
+    }
 
     // Latest = this lead's own most recent email (list is ordered ASC).
     const lastMsg = emailMessages[emailMessages.length - 1];
@@ -153,15 +178,24 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               a.name AS campaign_name
          FROM sms_message sm
          LEFT JOIN automation a ON a.id = sm.automation_id
-        WHERE sm.conversation_id = ? ORDER BY sm.created_at ASC, sm.id ASC`,
-      conversation.id,
+        WHERE sm.conversation_id = ?
+          ${beforeSmsId ? "AND sm.id < ?" : ""}
+        ORDER BY sm.created_at DESC, sm.id DESC
+        LIMIT ?`,
+      conversation.id, ...(beforeSmsId ? [beforeSmsId] : []), limit + 1,
     );
-    await execute(
-      env.D1DB,
-      `UPDATE sms_message SET is_read = 1
-        WHERE conversation_id = ? AND direction='inbound' AND is_read = 0`,
-      conversation.id,
-    );
+    hasMoreSms = smsMessages.length > limit;
+    if (hasMoreSms) smsMessages = smsMessages.slice(0, limit);
+    smsMessages.reverse(); // back to chronological ASC for render
+    oldestSmsId = smsMessages.length ? smsMessages[0].id : null;
+    if (!isOlderPage) {
+      await execute(
+        env.D1DB,
+        `UPDATE sms_message SET is_read = 1
+          WHERE conversation_id = ? AND direction='inbound' AND is_read = 0`,
+        conversation.id,
+      );
+    }
   }
 
   // ---- Appointments ----
@@ -292,6 +326,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     sms_messages: smsOut,
     unified_messages: unified,
     appointments: apptOut,
+    // Reverse-pagination cursors for "scroll up to load older".
+    has_more_email: hasMoreEmail,
+    has_more_sms: hasMoreSms,
+    oldest_email_id: oldestEmailId,
+    oldest_sms_id: oldestSmsId,
   });
 };
 
