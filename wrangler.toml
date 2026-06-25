@@ -19,11 +19,11 @@ pages_build_output_dir = "./dist"
 compatibility_date = "2026-05-22"
 # compatibility_flags = ["nodejs_compat"]
 
-# ---- D1 database binding (warmchats-db) ----
+# ---- D1 database binding (warmchats-prod-us, WNAM/US region — moved from APAC for latency) ----
 [[d1_databases]]
 binding = "D1DB"
-database_name = "warmchats-db"
-database_id = "7882957a-7723-4bdb-a3f3-178cf089163a"
+database_name = "warmchats-prod-us"
+database_id = "9b16915e-4b67-4884-81be-a696d70790ee"
 # preview_database_id = "DB" # Required for Pages local development
 
 # [observability.logs]
