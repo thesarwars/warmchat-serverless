@@ -1,34 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import MainLayout from "./MainLayout";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { CheckCircle } from "lucide-react";
+import { Navigate, useLocation } from "react-router-dom";
 
 export default function ConnectAccount() {
   const API_BASE = import.meta.env.VITE_API_BASE;
   const token = localStorage.getItem("token");
   const [status, setStatus] = useState("");
-  const [showDialog, setShowDialog] = useState(false);
   const [connection, setConnection] = useState<{
     status: "unknown" | "not_connected" | "active" | "needs_reauth" | "revoked" | "error";
     email_address?: string;
   }>({ status: "unknown" });
-  const navigate = useNavigate();
   const location = useLocation();
 
-  // Captured once on first render: if we just came back from a successful
-  // Gmail OAuth AND a flow (onboarding/dashboard) stashed a return path, we
-  // bounce there immediately below - before MainLayout ever mounts - so the
-  // user never sees this page flicker in between.
-  const [successReturnPath] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("status") === "success"
+  // Captured once on first render. On a successful OAuth return we redirect
+  // immediately (guard below) - this page is NEVER painted on success, so the
+  // user never sees a standalone connect screen. successReturnPath is the path a
+  // flow (onboarding) stashed before starting OAuth; a direct connect has none
+  // and is sent to the dashboard, which shows the success toast + add-leads prompt.
+  const [oauthSuccess] = useState(
+    () => new URLSearchParams(window.location.search).get("status") === "success",
+  );
+  const [successReturnPath] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("status") === "success"
       ? localStorage.getItem("gmail_oauth_return")
-      : null;
-  });
+      : null,
+  );
 
   useEffect(() => {
-    if (successReturnPath) localStorage.removeItem("gmail_oauth_return");
-  }, [successReturnPath]);
+    if (oauthSuccess) localStorage.removeItem("gmail_oauth_return");
+  }, [oauthSuccess]);
 
   const loadConnection = useCallback(async () => {
     if (!token) return;
@@ -51,26 +51,14 @@ export default function ConnectAccount() {
     loadConnection();
   }, [loadConnection]);
 
+  // Non-success OAuth returns (reauth/expired/failed) surface a message on the card.
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const result = params.get("status");
-    if (!result) return;
-
-    if (result === "success") {
-      // When we have a return path we redirect immediately (see <Navigate>
-      // below), so skip the in-page "add leads?" dialog meant for users who
-      // landed here directly from the dashboard.
-      if (successReturnPath) return;
-      setStatus("Gmail connected successfully");
-      loadConnection().then(() => setShowDialog(true));
-    } else if (result === "reauth") {
-      setStatus("Gmail needs reconnect. Please try again.");
-    } else if (result === "expired") {
-      setStatus("Connection expired. Please reconnect.");
-    } else {
-      setStatus("Gmail connection failed. Please try again.");
-    }
-  }, [location.search, loadConnection, successReturnPath]);
+    const result = new URLSearchParams(location.search).get("status");
+    if (!result || result === "success") return;
+    if (result === "reauth") setStatus("Gmail needs reconnect. Please try again.");
+    else if (result === "expired") setStatus("Connection expired. Please reconnect.");
+    else setStatus("Gmail connection failed. Please try again.");
+  }, [location.search]);
 
   const startOAuth = async () => {
     if (!token) {
@@ -110,10 +98,17 @@ export default function ConnectAccount() {
     }
   };
 
-  // Came from an onboarding/dashboard flow: go straight back without ever
-  // painting this page (prevents the dashboard-then-onboarding flicker).
-  if (successReturnPath) {
-    return <Navigate to={successReturnPath} replace />;
+  // Just returned from a successful OAuth: never paint this page (this is what
+  // removed the full-black "Connected Successfully" screen). Onboarding/dashboard
+  // flows stashed a return path -> go straight back there. A direct connect lands
+  // on /dashboard, which shows a success toast + the "add leads?" prompt inside
+  // the normal app UI (DashboardV2 reads the router state below).
+  if (oauthSuccess) {
+    return successReturnPath ? (
+      <Navigate to={successReturnPath} replace />
+    ) : (
+      <Navigate to="/dashboard" replace state={{ gmailConnected: true }} />
+    );
   }
 
   const isActive = connection.status === "active";
@@ -156,35 +151,6 @@ export default function ConnectAccount() {
 
         {status && <p className="text-sm text-gray-700 mt-2">{status}</p>}
       </div>
-
-      {showDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-sm w-full text-center space-y-4">
-            <div className="flex justify-center">
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <h3 className="text-lg font-semibold">Connected Successfully!</h3>
-            <p>Do you want to add leads now?</p>
-            <div className="flex justify-around mt-4">
-              <button
-                onClick={() => {
-                  setShowDialog(false);
-                  navigate("/leads");
-                }}
-                className="bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setShowDialog(false)}
-                className="bg-gray-300 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-400"
-              >
-                Later
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </MainLayout>
   );
 }
