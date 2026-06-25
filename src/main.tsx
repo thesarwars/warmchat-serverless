@@ -7,7 +7,6 @@ import { NotificationsProvider } from "./context/NotificationsContext";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { loadStripe } from "@stripe/stripe-js";
-import { initMixpanel, mixpanelIdentify } from "./lib/mixpanel";
 import { getStoredAuthSession } from "./utils/authSession";
 import App from "./App";
 import "./index.css";
@@ -30,17 +29,29 @@ window.addEventListener("vite:preloadError", (event) => {
 
 loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
-initMixpanel();
+// Analytics is non-essential and heavy (mixpanel-browser ~120KB gz + session
+// replay). Defer it off the first-paint critical path - lazy-import + init when
+// the browser is idle so it never competes with rendering the app shell.
 const bootSession = getStoredAuthSession();
-if (bootSession.userId) {
-  mixpanelIdentify(bootSession.userId, {
-    email: bootSession.email,
-    name: bootSession.name,
-    org_id: bootSession.orgId,
-    org_name: bootSession.orgName,
-    role: bootSession.roleName,
-    plan: bootSession.plan,
+const startAnalytics = () => {
+  void import("./lib/mixpanel").then(({ initMixpanel, mixpanelIdentify }) => {
+    initMixpanel();
+    if (bootSession.userId) {
+      mixpanelIdentify(bootSession.userId, {
+        email: bootSession.email,
+        name: bootSession.name,
+        org_id: bootSession.orgId,
+        org_name: bootSession.orgName,
+        role: bootSession.roleName,
+        plan: bootSession.plan,
+      });
+    }
   });
+};
+if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+  (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(startAnalytics);
+} else {
+  setTimeout(startAnalytics, 2000);
 }
 
 const rootElement = document.getElementById('root')!;

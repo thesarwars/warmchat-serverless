@@ -75,3 +75,6 @@ CREATE INDEX IF NOT EXISTS ix_sms_message_org_id          ON sms_message (org_id
 CREATE INDEX IF NOT EXISTS ix_sms_message_conversation_id ON sms_message (conversation_id);
 CREATE INDEX IF NOT EXISTS ix_sms_message_provider_sid    ON sms_message (provider_message_sid);
 
+
+-- Per-conversation SMS thread + MAX(created_at) recency.
+CREATE INDEX IF NOT EXISTS ix_sms_message_conv_created ON sms_message (conversation_id, created_at);

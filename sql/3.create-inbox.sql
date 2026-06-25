@@ -91,3 +91,9 @@ CREATE TABLE IF NOT EXISTS thread_lead_assignments (
     lead_id     INTEGER NOT NULL REFERENCES lead (id),
     assigned_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Inbox per-thread latest-message subqueries + message thread fetch.
+CREATE INDEX IF NOT EXISTS ix_inbox_messages_thread_date
+    ON inbox_messages (thread_id, message_date DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_inbox_messages_thread_unread
+    ON inbox_messages (thread_id) WHERE is_read = 0;

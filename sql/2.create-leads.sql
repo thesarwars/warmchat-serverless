@@ -158,3 +158,6 @@ CREATE TABLE IF NOT EXISTS deal_assignee (
 );
 CREATE INDEX IF NOT EXISTS ix_deal_assignee_deal ON deal_assignee (deal_id);
 CREATE INDEX IF NOT EXISTS ix_deal_assignee_user ON deal_assignee (user_id);
+
+-- Leads list ordering: WHERE org_id = ? ORDER BY created_at DESC, id DESC.
+CREATE INDEX IF NOT EXISTS ix_lead_org_created ON lead (org_id, created_at DESC, id DESC);

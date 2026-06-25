@@ -46,9 +46,11 @@ export function initMixpanel() {
     track_pageview: true,
     persistence: "localStorage",
     ignore_dnt: false,
-    // Session Replay
-    // 100% in dev so we can verify; dial down (e.g. 10) for production load/cost.
-    record_sessions_percent: DEBUG ? 100 : 100,
+    // Session Replay. 100% in dev so we can verify; sampled at 10% in prod -
+    // continuous DOM recording at 100% is a major runtime cost (MutationObserver
+    // on every scroll/click) on data-dense screens like Inbox/Leads and was a
+    // big contributor to the "everything feels laggy" reports.
+    record_sessions_percent: DEBUG ? 100 : 10,
     // Mask all text by default. CRM screens contain lead PII, message bodies,
     // emails, and phone numbers - never unmask globally. If you need a specific
     // non-sensitive element visible in replays, add it as a `.mp-include` class
