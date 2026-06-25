@@ -1236,9 +1236,27 @@ export default function Inbox() {
   };
 
   // First-page load - called on mount and whenever the debounced search changes.
+  // Stale-while-revalidate: if a cached first page exists (from a recent visit),
+  // paint it INSTANTLY (no spinner) and revalidate in the background. New messages
+  // still arrive via this fresh fetch + the 20s poll + realtime, so the cache only
+  // speeds the first paint - it never blocks or delays updates. Only the unfiltered
+  // "all" list is cached (search results aren't).
   const loadFirstPageContacts = async () => {
     if (!token) return;
-    setContactsLoading(true);
+    const unfiltered = !contactsQuery.trim();
+    const cached = unfiltered
+      ? queryClient.getQueryData<{ contacts: InboxContact[]; filter_counts?: Record<InboxListFilter, number>; hasMore: boolean }>(INBOX_CONTACTS_KEY)
+      : undefined;
+    const hasCache = Boolean(cached && Array.isArray(cached.contacts) && cached.contacts.length);
+    if (hasCache && cached) {
+      setContacts(cached.contacts);
+      if (cached.filter_counts) setServerFilterCounts(cached.filter_counts);
+      setContactsPage(1);
+      setContactsHasMore(cached.hasMore);
+      setContactsLoading(false); // instant paint from cache; fetch fresh below
+    } else {
+      setContactsLoading(true);
+    }
     try {
       const res = await fetch(buildContactsUrl(1, CONTACTS_PAGE_SIZE, contactsQuery), {
         headers: { Authorization: `Bearer ${token}` },
@@ -1248,9 +1266,13 @@ export default function Inbox() {
       setContacts(nextContacts);
       if (data.filter_counts) setServerFilterCounts(data.filter_counts);
       setContactsPage(1);
-      setContactsHasMore(computeContactsHasMore(data, nextContacts.length, nextContacts.length));
+      const hasMore = computeContactsHasMore(data, nextContacts.length, nextContacts.length);
+      setContactsHasMore(hasMore);
+      if (unfiltered) {
+        queryClient.setQueryData(INBOX_CONTACTS_KEY, { contacts: nextContacts, filter_counts: data.filter_counts, hasMore });
+      }
     } catch {
-      toast.error("Failed to load inbox conversations.");
+      if (!hasCache) toast.error("Failed to load inbox conversations.");
     } finally {
       setContactsLoading(false);
     }
