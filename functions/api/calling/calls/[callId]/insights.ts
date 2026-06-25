@@ -19,30 +19,31 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (!callId) return error("callId is required", 400);
   if (!(await canAccessCall(env, user.id, callId))) return error("Forbidden", 403);
 
-  const insight = await queryFirst<{
-    transcript: string | null; summary: string | null; sentiment: string | null;
-    intent: string | null; budget_min: number | null; budget_max: number | null;
-    status: string;
-  }>(
-    env.D1DB,
-    `SELECT transcript, summary, sentiment, intent, budget_min, budget_max, status
-       FROM call_ai_insights WHERE call_id = ?`,
-    callId,
-  );
-
-  const tasks = await queryAll<{ id: string; type: string; label: string; done: number }>(
-    env.D1DB,
-    `SELECT id, type, label, done FROM call_tasks WHERE call_id = ? ORDER BY created_at ASC`,
-    callId,
-  );
-
-  const notes = await queryAll<{ id: string; body: string; author_id: number; author_name: string | null; created_at: string }>(
-    env.D1DB,
-    `SELECT n.id, n.body, n.author_id, u.name AS author_name, n.created_at
-       FROM call_notes n LEFT JOIN "user" u ON u.id = n.author_id
-      WHERE n.call_id = ? ORDER BY n.created_at DESC`,
-    callId,
-  );
+  // insight / tasks / notes are independent (all keyed on call_id) - run together.
+  const [insight, tasks, notes] = await Promise.all([
+    queryFirst<{
+      transcript: string | null; summary: string | null; sentiment: string | null;
+      intent: string | null; budget_min: number | null; budget_max: number | null;
+      status: string;
+    }>(
+      env.D1DB,
+      `SELECT transcript, summary, sentiment, intent, budget_min, budget_max, status
+         FROM call_ai_insights WHERE call_id = ?`,
+      callId,
+    ),
+    queryAll<{ id: string; type: string; label: string; done: number }>(
+      env.D1DB,
+      `SELECT id, type, label, done FROM call_tasks WHERE call_id = ? ORDER BY created_at ASC`,
+      callId,
+    ),
+    queryAll<{ id: string; body: string; author_id: number; author_name: string | null; created_at: string }>(
+      env.D1DB,
+      `SELECT n.id, n.body, n.author_id, u.name AS author_name, n.created_at
+         FROM call_notes n LEFT JOIN "user" u ON u.id = n.author_id
+        WHERE n.call_id = ? ORDER BY n.created_at DESC`,
+      callId,
+    ),
+  ]);
 
   return json({
     insight: insight

@@ -181,59 +181,65 @@ export async function listCallSummaries(
   limit: number,
   offset: number,
 ): Promise<{ items: CallSummaryJson[]; total: number }> {
-  const rows = await queryAll<CallRow>(
-    env.D1DB,
-    `SELECT * FROM calls WHERE ${where.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    ...where.params, limit, offset,
-  );
-  const total = await queryFirst<{ n: number }>(
-    env.D1DB,
-    `SELECT COUNT(*) AS n FROM calls WHERE ${where.sql}`,
-    ...where.params,
-  );
+  // Page rows + total count are independent - run together.
+  const [rows, total] = await Promise.all([
+    queryAll<CallRow>(
+      env.D1DB,
+      `SELECT * FROM calls WHERE ${where.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      ...where.params, limit, offset,
+    ),
+    queryFirst<{ n: number }>(
+      env.D1DB,
+      `SELECT COUNT(*) AS n FROM calls WHERE ${where.sql}`,
+      ...where.params,
+    ),
+  ]);
 
   // Batch-fetch agent + business number + lead + AI insights + task flags to
-  // avoid N+1. All keyed on this page's rows only.
+  // avoid N+1. All keyed on this page's rows only - and all independent of each
+  // other, so fire them concurrently (was 5 sequential D1 round-trips ~= 500ms).
   const agentIds = Array.from(new Set(rows.map((r) => r.agent_id)));
   const bnIds = Array.from(new Set(rows.map((r) => r.business_number_id).filter((x): x is string => !!x)));
   const leadIds = Array.from(new Set(rows.map((r) => r.lead_id).filter((x): x is number => x != null)));
   const callIds = rows.map((r) => r.id);
 
-  const agents = agentIds.length
-    ? await queryAll<{ id: number; name: string | null; email: string | null }>(
-        env.D1DB,
-        `SELECT id, name, email FROM "user" WHERE id IN (${agentIds.map(() => "?").join(",")})`,
-        ...agentIds,
-      )
-    : [];
-  const bns = bnIds.length
-    ? await queryAll<{ id: string; phone_number: string }>(
-        env.D1DB,
-        `SELECT id, phone_number FROM phone_numbers WHERE id IN (${bnIds.map(() => "?").join(",")})`,
-        ...bnIds,
-      )
-    : [];
-  const leads = leadIds.length
-    ? await queryAll<{ id: number; name: string | null }>(
-        env.D1DB,
-        `SELECT id, name FROM lead WHERE id IN (${leadIds.map(() => "?").join(",")})`,
-        ...leadIds,
-      )
-    : [];
-  const insights = callIds.length
-    ? await queryAll<{ call_id: string; sentiment: string | null; summary: string | null }>(
-        env.D1DB,
-        `SELECT call_id, sentiment, summary FROM call_ai_insights WHERE call_id IN (${callIds.map(() => "?").join(",")})`,
-        ...callIds,
-      )
-    : [];
-  const taskCalls = callIds.length
-    ? await queryAll<{ call_id: string }>(
-        env.D1DB,
-        `SELECT DISTINCT call_id FROM call_tasks WHERE call_id IN (${callIds.map(() => "?").join(",")})`,
-        ...callIds,
-      )
-    : [];
+  const [agents, bns, leads, insights, taskCalls] = await Promise.all([
+    agentIds.length
+      ? queryAll<{ id: number; name: string | null; email: string | null }>(
+          env.D1DB,
+          `SELECT id, name, email FROM "user" WHERE id IN (${agentIds.map(() => "?").join(",")})`,
+          ...agentIds,
+        )
+      : Promise.resolve([] as { id: number; name: string | null; email: string | null }[]),
+    bnIds.length
+      ? queryAll<{ id: string; phone_number: string }>(
+          env.D1DB,
+          `SELECT id, phone_number FROM phone_numbers WHERE id IN (${bnIds.map(() => "?").join(",")})`,
+          ...bnIds,
+        )
+      : Promise.resolve([] as { id: string; phone_number: string }[]),
+    leadIds.length
+      ? queryAll<{ id: number; name: string | null }>(
+          env.D1DB,
+          `SELECT id, name FROM lead WHERE id IN (${leadIds.map(() => "?").join(",")})`,
+          ...leadIds,
+        )
+      : Promise.resolve([] as { id: number; name: string | null }[]),
+    callIds.length
+      ? queryAll<{ call_id: string; sentiment: string | null; summary: string | null }>(
+          env.D1DB,
+          `SELECT call_id, sentiment, summary FROM call_ai_insights WHERE call_id IN (${callIds.map(() => "?").join(",")})`,
+          ...callIds,
+        )
+      : Promise.resolve([] as { call_id: string; sentiment: string | null; summary: string | null }[]),
+    callIds.length
+      ? queryAll<{ call_id: string }>(
+          env.D1DB,
+          `SELECT DISTINCT call_id FROM call_tasks WHERE call_id IN (${callIds.map(() => "?").join(",")})`,
+          ...callIds,
+        )
+      : Promise.resolve([] as { call_id: string }[]),
+  ]);
 
   const agentMap = new Map(agents.map((a) => [a.id, a]));
   const bnMap = new Map(bns.map((b) => [b.id, b]));
