@@ -31,8 +31,8 @@ invocation_logs = true
 # webhook_logs / write usage_records without a cross-service round-trip.
 [[d1_databases]]
 binding = "D1DB"
-database_name = "warmchats-db"
-database_id = "7882957a-7723-4bdb-a3f3-178cf089163a"
+database_name = "warmchats-prod-us"
+database_id = "9b16915e-4b67-4884-81be-a696d70790ee"
 
 # R2 bucket for call-recording / voicemail storage (same bucket as the Pages
 # project's ATTACHMENTS). The processCallInsights cron job downloads recordings
