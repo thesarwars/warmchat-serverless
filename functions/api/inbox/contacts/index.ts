@@ -170,22 +170,26 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     lead_type: string | null; intent: string | null; ai_status: string | null; timezone: string | null;
     sms_opt_out: number | null; email_opt_out: number | null;
   };
-  type ThreadAgg = {
-    thread_id: number; subject: string | null; updated_at: string | null;
-    last_inbound_email: string | null;
-    last_outbound_email: string | null;
+  // Per-lead email aggregate: ONE windowed scan grouped by the new lead_id column
+  // (replaces the old 6-correlated-subqueries-per-thread + per-recipient workaround
+  // that scanned every thread). lead_id is exact, so each lead gets its OWN latest
+  // message + unread - no email-string matching, and the shared-campaign-thread
+  // attribution fix is inherent.
+  type EmailByLead = {
+    lead_id: number;
     last_body: string | null;
     last_ts: string | null;
     last_direction: string | null;
+    last_thread_id: number | null;
+    last_subject: string | null;
     unread_count: number;
   };
-  type PerRecip = { email: string; thread_id: number; body: string | null; ts: string | null };
   type SmsAgg = {
     conversation_id: number; phone_e164: string; last_message_at: string | null;
     last_body: string | null; last_direction: string | null; unread_count: number;
   };
 
-  const [leads, threadAggs, perRecipient, smsAggs] = await Promise.all([
+  const [leads, emailByLead, smsAggs] = await Promise.all([
     // All leads in the org - the search corpus AND the source of the
     // byId/byEmail/byPhone maps the enrichment results are applied to.
     queryAll<LeadRow>(
@@ -198,47 +202,33 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
        FROM lead WHERE org_id = ?`,
       orgId,
     ),
-    // Email threads: latest in/out address, last body/ts/direction, unread.
-    queryAll<ThreadAgg>(
+    // Per-lead email aggregate via ONE windowed pass over inbox_messages, grouped
+    // by lead_id (the new direct linkage). Each lead's own latest message
+    // (body/ts/direction/thread/subject) + total unread. Replaces the old
+    // 6-subqueries-per-thread + per-recipient-by-address pair. Uses
+    // ix_inbox_messages_lead_date.
+    queryAll<EmailByLead>(
       env.D1DB,
-      `SELECT t.id AS thread_id, t.subject, t.updated_at,
-            (SELECT LOWER(im.sender_email) FROM inbox_messages im
-               WHERE im.thread_id=t.id AND im.direction='inbound'
-               ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_inbound_email,
-            (SELECT LOWER(im.to_email) FROM inbox_messages im
-               WHERE im.thread_id=t.id AND im.direction='outbound'
-               ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_outbound_email,
-            (SELECT im.body FROM inbox_messages im
-               WHERE im.thread_id=t.id
-               ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_body,
-            (SELECT COALESCE(im.message_date, im.created_at) FROM inbox_messages im
-               WHERE im.thread_id=t.id
-               ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_ts,
-            (SELECT im.direction FROM inbox_messages im
-               WHERE im.thread_id=t.id
-               ORDER BY COALESCE(im.message_date, im.created_at) DESC LIMIT 1) AS last_direction,
-            (SELECT COUNT(*) FROM inbox_messages im
-               WHERE im.thread_id=t.id AND im.is_read=0) AS unread_count
-       FROM thread t JOIN inbox i ON t.inbox_id=i.id
-      WHERE i.org_id = ?`,
-      orgId,
-    ),
-    // Per-recipient email recency (shared-thread fix). Campaign emails are filed
-    // into ONE shared thread, so the thread-level match above only credits that
-    // thread to its single most-recent recipient - every other lead would show a
-    // STALE time. This derives each lead's OWN latest outbound email by recipient
-    // address. ONE cheap GROUP BY scan; SQLite returns thread_id/body from the row
-    // holding MAX(ts) (bare-column-with-aggregate).
-    queryAll<PerRecip>(
-      env.D1DB,
-      `SELECT LOWER(im.to_email) AS email, im.thread_id, im.body,
-              MAX(COALESCE(im.message_date, im.created_at)) AS ts
-         FROM inbox_messages im
-         JOIN thread t ON im.thread_id = t.id
-         JOIN inbox i ON t.inbox_id = i.id
-        WHERE i.org_id = ? AND im.direction = 'outbound'
-          AND im.to_email IS NOT NULL AND im.to_email != ''
-        GROUP BY LOWER(im.to_email)`,
+      `WITH ranked AS (
+         SELECT im.lead_id, im.thread_id, im.body, im.direction, im.subject, im.is_read,
+                COALESCE(im.message_date, im.created_at) AS ts,
+                ROW_NUMBER() OVER (
+                  PARTITION BY im.lead_id
+                  ORDER BY COALESCE(im.message_date, im.created_at) DESC, im.id DESC
+                ) AS rn
+           FROM inbox_messages im
+           JOIN lead l ON l.id = im.lead_id
+          WHERE l.org_id = ? AND im.lead_id IS NOT NULL
+       )
+       SELECT lead_id,
+              MAX(CASE WHEN rn = 1 THEN body END)      AS last_body,
+              MAX(CASE WHEN rn = 1 THEN ts END)        AS last_ts,
+              MAX(CASE WHEN rn = 1 THEN direction END) AS last_direction,
+              MAX(CASE WHEN rn = 1 THEN thread_id END) AS last_thread_id,
+              MAX(CASE WHEN rn = 1 THEN subject END)   AS last_subject,
+              SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) AS unread_count
+         FROM ranked
+        GROUP BY lead_id`,
       orgId,
     ),
     // SMS conversations: last body/direction + unread per conversation. Computed
@@ -284,41 +274,21 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
   }
 
-  for (const t of threadAggs) {
-    const candidate = (t.last_inbound_email && byEmail.get(t.last_inbound_email))
-      || (t.last_outbound_email && byEmail.get(t.last_outbound_email));
-    if (!candidate) continue;
-    candidate.has_email_history = true;
-    candidate.email_unread_count += Number(t.unread_count) || 0;
-    if (!candidate.email_thread_ids.includes(t.thread_id)) {
-      candidate.email_thread_ids = [...candidate.email_thread_ids, t.thread_id].sort((a, b) => a - b);
-    }
-    if (t.last_ts && (!candidate.last_activity_at || t.last_ts > candidate.last_activity_at)) {
-      candidate.last_activity_at = t.last_ts;
-      candidate.last_activity_channel = "email";
-      candidate.last_activity_label = fmtLabel("email", t.last_ts);
-      candidate.last_activity_direction = t.last_direction === "inbound" ? "inbound" : "outbound";
-      candidate.preview = t.last_body || "";
-      candidate.latest_email_thread_id = t.thread_id;
-      candidate.latest_email_subject = t.subject || null;
-    }
-  }
-
-  // ---- Per-recipient email recency (shared-thread fix) - applied below ----
-  for (const r of perRecipient) {
-    const candidate = r.email ? byEmail.get(r.email) : undefined;
-    if (!candidate) continue;
-    candidate.has_email_history = true;
-    if (r.thread_id && !candidate.email_thread_ids.includes(r.thread_id)) {
-      candidate.email_thread_ids = [...candidate.email_thread_ids, r.thread_id].sort((a, b) => a - b);
-    }
-    if (r.ts && (!candidate.last_activity_at || r.ts > candidate.last_activity_at)) {
-      candidate.last_activity_at = r.ts;
-      candidate.last_activity_channel = "email";
-      candidate.last_activity_label = fmtLabel("email", r.ts);
-      candidate.last_activity_direction = "outbound";
-      candidate.preview = r.body || candidate.preview;
-      if (r.thread_id) candidate.latest_email_thread_id = r.thread_id;
+  // Per-lead email enrichment keyed directly by lead_id (exact - no email match).
+  for (const a of emailByLead) {
+    const e = byId.get(a.lead_id);
+    if (!e) continue;
+    e.has_email_history = true;
+    e.email_unread_count = Number(a.unread_count) || 0;
+    if (a.last_thread_id) e.email_thread_ids = [a.last_thread_id];
+    if (a.last_ts && (!e.last_activity_at || a.last_ts > e.last_activity_at)) {
+      e.last_activity_at = a.last_ts;
+      e.last_activity_channel = "email";
+      e.last_activity_label = fmtLabel("email", a.last_ts);
+      e.last_activity_direction = a.last_direction === "inbound" ? "inbound" : "outbound";
+      e.preview = a.last_body || "";
+      e.latest_email_thread_id = a.last_thread_id;
+      e.latest_email_subject = a.last_subject || null;
     }
   }
 
