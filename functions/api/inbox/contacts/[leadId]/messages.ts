@@ -80,18 +80,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     leadId, lead.org_id,
   );
 
-  // ---- Email threads for this lead ----
-  const threadRows = await queryAll<{ thread_id: number }>(
-    env.D1DB,
-    `SELECT DISTINCT im.thread_id
-       FROM inbox_messages im JOIN thread t ON im.thread_id=t.id JOIN inbox i ON t.inbox_id=i.id
-      WHERE i.org_id = ? AND (
-        LOWER(im.sender_email) = LOWER(?) OR LOWER(im.to_email) = LOWER(?)
-      )`,
-    lead.org_id, lead.email ?? "", lead.email ?? "",
-  );
-  const threadIds = threadRows.map((r) => r.thread_id);
-
+  // ---- Email + SMS run as two independent chains, in parallel ----
   type EmailMsg = {
     id: number; thread_id: number; direction: string; body: string; subject: string;
     attachments: string | null; sender_name: string | null; sender_email: string | null;
@@ -100,22 +89,38 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     bounced_at: string | null; opened_at: string | null; error_message: string | null;
     sent_by_ai: number | null; campaign_name: string | null;
   };
-  let emailMessages: EmailMsg[] = [];
-  let latestEmailThreadId: number | null = null;
-  let latestEmailSubject: string | null = null;
-  let latestEmailAt: string | null = null;
+  type SmsMsg = {
+    id: number; conversation_id: number; direction: string; body: string;
+    attachments: string | null; created_at: string;
+    status: string | null; sent_at: string | null; delivered_at: string | null;
+    error_code: string | null; sent_by_ai: number | null; campaign_name: string | null;
+  };
+  type SmsConv = { id: number; last_message_at: string | null };
+
   const leadEmail = (lead.email ?? "").trim().toLowerCase();
-  if (threadIds.length && leadEmail) {
+  const digits = (lead.phone ?? "").replace(/\D/g, "");
+
+  // Email-thread chain: this lead's threads -> this lead's messages in them.
+  // (Campaign threads are shared across recipients, so filter to the lead's own
+  // address - selecting the whole thread would leak other leads' emails.)
+  const emailChain = (async () => {
+    const threadRows = await queryAll<{ thread_id: number }>(
+      env.D1DB,
+      `SELECT DISTINCT im.thread_id
+         FROM inbox_messages im JOIN thread t ON im.thread_id=t.id JOIN inbox i ON t.inbox_id=i.id
+        WHERE i.org_id = ? AND (
+          LOWER(im.sender_email) = LOWER(?) OR LOWER(im.to_email) = LOWER(?)
+        )`,
+      lead.org_id, lead.email ?? "", lead.email ?? "",
+    );
+    const threadIds = threadRows.map((r) => r.thread_id);
+    if (!threadIds.length || !leadEmail) {
+      return { threadIds, emailMessages: [] as EmailMsg[], hasMoreEmail: false,
+        oldestEmailId: null as number | null, latestEmailThreadId: null as number | null,
+        latestEmailSubject: null as string | null, latestEmailAt: null as string | null };
+    }
     const placeholders = threadIds.map(() => "?").join(",");
-    // CRITICAL: filter to messages actually TO or FROM this lead's address, not
-    // the whole thread. Campaign emails share one thread across hundreds of
-    // recipients, so selecting the whole thread leaked every other lead's emails
-    // into this lead's conversation. Outbound to the lead -> to_email matches;
-    // the lead's inbound reply -> sender_email matches.
-    // Fetch newest-first (so LIMIT bounds the page), then reverse to chronological
-    // ASC below so the existing render/latest logic is unchanged. limit+1 detects
-    // whether older messages remain.
-    emailMessages = await queryAll<EmailMsg>(
+    let emailMessages = await queryAll<EmailMsg>(
       env.D1DB,
       `SELECT im.id, im.thread_id, im.direction, im.body, im.subject, im.attachments,
               im.sender_name, im.sender_email, im.message_date, im.created_at, im.is_read,
@@ -130,16 +135,11 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         LIMIT ?`,
       ...threadIds, leadEmail, leadEmail, ...(beforeEmailId ? [beforeEmailId] : []), limit + 1,
     );
-    hasMoreEmail = emailMessages.length > limit;
-    if (hasMoreEmail) emailMessages = emailMessages.slice(0, limit);
-    emailMessages.reverse(); // back to chronological ASC for render
-    oldestEmailId = emailMessages.length ? emailMessages[0].id : null;
-
-    // Mark only THIS lead's inbound messages as read - and only on the newest/
-    // initial page, never when paging older history. Run it OFF the response path
-    // (waitUntil) so the read-marking write doesn't add a round-trip to TTFB; the
-    // client zeroes the unread badge optimistically anyway.
+    const more = emailMessages.length > limit;
+    if (more) emailMessages = emailMessages.slice(0, limit);
+    emailMessages.reverse(); // chronological ASC for render
     if (!isOlderPage) {
+      // Read-marking off the response path (client zeroes unread optimistically).
       context.waitUntil(execute(
         env.D1DB,
         `UPDATE inbox_messages SET is_read = 1
@@ -148,49 +148,43 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         ...threadIds, leadEmail, leadEmail,
       ));
     }
+    const last = emailMessages[emailMessages.length - 1];
+    return {
+      threadIds, emailMessages, hasMoreEmail: more,
+      oldestEmailId: emailMessages.length ? emailMessages[0].id : null,
+      latestEmailThreadId: last ? last.thread_id : null,
+      latestEmailSubject: last ? last.subject : null,
+      latestEmailAt: last ? (last.message_date || last.created_at) : null,
+    };
+  })();
 
-    // Latest = this lead's own most recent email (list is ordered ASC).
-    const lastMsg = emailMessages[emailMessages.length - 1];
-    if (lastMsg) {
-      latestEmailThreadId = lastMsg.thread_id;
-      latestEmailSubject = lastMsg.subject;
-      latestEmailAt = lastMsg.message_date || lastMsg.created_at;
-    }
-  }
-
-  // ---- SMS conversation for this lead ----
-  const digits = (lead.phone ?? "").replace(/\D/g, "");
-  let conversation: { id: number; last_message_at: string | null } | null = null;
-  if (lead.phone) {
-    conversation = await queryFirst<{ id: number; last_message_at: string | null }>(
-      env.D1DB,
-      `SELECT c.id, c.last_message_at FROM sms_conversation c
-         JOIN sms_contact sc ON c.contact_id=sc.id
-        WHERE c.org_id=? AND sc.phone_number_e164=? LIMIT 1`,
-      lead.org_id, lead.phone,
-    );
-    if (!conversation && digits.length >= 10) {
-      const suffix = `%${digits.slice(-10)}`;
-      conversation = await queryFirst<{ id: number; last_message_at: string | null }>(
+  // SMS-conversation chain: resolve the conversation (exact phone, then 10-digit
+  // suffix fallback), then its messages.
+  const smsChain = (async () => {
+    let conversation: SmsConv | null = null;
+    if (lead.phone) {
+      conversation = await queryFirst<SmsConv>(
         env.D1DB,
         `SELECT c.id, c.last_message_at FROM sms_conversation c
            JOIN sms_contact sc ON c.contact_id=sc.id
-          WHERE c.org_id=? AND sc.phone_number_e164 LIKE ?
-          ORDER BY c.last_message_at DESC LIMIT 1`,
-        lead.org_id, suffix,
+          WHERE c.org_id=? AND sc.phone_number_e164=? LIMIT 1`,
+        lead.org_id, lead.phone,
       );
+      if (!conversation && digits.length >= 10) {
+        conversation = await queryFirst<SmsConv>(
+          env.D1DB,
+          `SELECT c.id, c.last_message_at FROM sms_conversation c
+             JOIN sms_contact sc ON c.contact_id=sc.id
+            WHERE c.org_id=? AND sc.phone_number_e164 LIKE ?
+            ORDER BY c.last_message_at DESC LIMIT 1`,
+          lead.org_id, `%${digits.slice(-10)}`,
+        );
+      }
     }
-  }
-
-  type SmsMsg = {
-    id: number; conversation_id: number; direction: string; body: string;
-    attachments: string | null; created_at: string;
-    status: string | null; sent_at: string | null; delivered_at: string | null;
-    error_code: string | null; sent_by_ai: number | null; campaign_name: string | null;
-  };
-  let smsMessages: SmsMsg[] = [];
-  if (conversation) {
-    smsMessages = await queryAll<SmsMsg>(
+    if (!conversation) {
+      return { conversation: null as SmsConv | null, smsMessages: [] as SmsMsg[], hasMoreSms: false, oldestSmsId: null as number | null };
+    }
+    let smsMessages = await queryAll<SmsMsg>(
       env.D1DB,
       `SELECT sm.id, sm.conversation_id, sm.direction, sm.body, sm.attachments, sm.created_at,
               sm.status, sm.sent_at, sm.delivered_at, sm.error_code, sm.sent_by_ai,
@@ -203,10 +197,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         LIMIT ?`,
       conversation.id, ...(beforeSmsId ? [beforeSmsId] : []), limit + 1,
     );
-    hasMoreSms = smsMessages.length > limit;
-    if (hasMoreSms) smsMessages = smsMessages.slice(0, limit);
-    smsMessages.reverse(); // back to chronological ASC for render
-    oldestSmsId = smsMessages.length ? smsMessages[0].id : null;
+    const more = smsMessages.length > limit;
+    if (more) smsMessages = smsMessages.slice(0, limit);
+    smsMessages.reverse();
     if (!isOlderPage) {
       context.waitUntil(execute(
         env.D1DB,
@@ -215,10 +208,17 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         conversation.id,
       ));
     }
-  }
+    return { conversation, smsMessages, hasMoreSms: more, oldestSmsId: smsMessages.length ? smsMessages[0].id : null };
+  })();
 
-  // ---- Appointments (fetch was kicked off above, concurrently) ----
-  const appointmentRows = await appointmentsPromise;
+  // Resolve both chains + the (already in-flight) appointments query together.
+  const [emailRes, smsRes, appointmentRows] = await Promise.all([emailChain, smsChain, appointmentsPromise]);
+  const { threadIds, emailMessages, latestEmailThreadId, latestEmailSubject, latestEmailAt } = emailRes;
+  const { conversation, smsMessages } = smsRes;
+  hasMoreEmail = emailRes.hasMoreEmail;
+  oldestEmailId = emailRes.oldestEmailId;
+  hasMoreSms = smsRes.hasMoreSms;
+  oldestSmsId = smsRes.oldestSmsId;
 
   const emailOut = emailMessages.map((m) => ({
     id: `email-${m.id}`,
