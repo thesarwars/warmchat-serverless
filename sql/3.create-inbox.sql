@@ -70,10 +70,16 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
     -- workflow) drip. The inbox shows the automation's name above the bubble
     -- instead of the "AI Agent" marker. NULL for AI-agent + human sends. Plain
     -- INTEGER (no FK) - automation is created in a later sql file.
-    automation_id     INTEGER
+    automation_id     INTEGER,
+    -- Direct message->lead linkage (plain INTEGER, no FK like automation_id).
+    -- Lets the contacts list paginate by recency + the thread view group by lead
+    -- without email-string matching. NULL for inbound from an unknown sender.
+    lead_id           INTEGER
 );
 CREATE INDEX IF NOT EXISTS ix_inbox_messages_tracking_token
     ON inbox_messages (tracking_token);
+CREATE INDEX IF NOT EXISTS ix_inbox_messages_lead_date
+    ON inbox_messages (lead_id, message_date DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_inbox_messages_thread_id ON inbox_messages (thread_id);
 -- Lookups in /api/inbox/contacts/:leadId/messages filter by lead email against
 -- sender_email/to_email (case-insensitive) and join thread->inbox by org. Without
