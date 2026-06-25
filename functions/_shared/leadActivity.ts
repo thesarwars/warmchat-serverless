@@ -15,14 +15,17 @@ export async function bumpLeadActivity(
   db: D1Database,
   leadId: number | null | undefined,
   tsIso: string,
+  direction?: "inbound" | "outbound",
 ): Promise<void> {
   if (!leadId || !tsIso) return;
   try {
+    // Also stamp the latest message's direction (powers the "Needs Reply" chip),
+    // still guarded monotonically on the timestamp so an older write can't win.
     await execute(
       db,
-      `UPDATE lead SET last_activity_at = ?
+      `UPDATE lead SET last_activity_at = ?, last_activity_direction = COALESCE(?, last_activity_direction)
         WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
-      tsIso, leadId, tsIso,
+      tsIso, direction ?? null, leadId, tsIso,
     );
   } catch {
     // Best-effort recency hint - a failure here must never break the send/receive

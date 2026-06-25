@@ -291,7 +291,7 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   );
   // An inbound SMS from a known lead bubbles its contact to the top of the inbox
   // immediately (regardless of AI settings). Cold-inbound new leads bump below.
-  if (existingLead) await bumpLeadActivity(env.D1DB, existingLead.id, nowIso());
+  if (existingLead) await bumpLeadActivity(env.D1DB, existingLead.id, nowIso(), "inbound");
 
   // Deterministic escalation: if the inbound text matches one of the agent's
   // configured escalation keywords, open an escalation to the human (dedup'd by
@@ -380,7 +380,7 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
       fromNumber, u.id, m.org_id, nowIso(), nowIso(),
     );
     const newLeadId = Number(leadIns.meta.last_row_id);
-    await bumpLeadActivity(env.D1DB, newLeadId, nowIso());
+    await bumpLeadActivity(env.D1DB, newLeadId, nowIso(), "inbound");
     const newLeadRow = await queryFirst<Record<string, unknown>>(
       env.D1DB, `SELECT * FROM lead WHERE id = ?`, newLeadId,
     );
@@ -599,7 +599,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
        VALUES (?, ?, ?, ?, ?, 'inbound', 'email', ?, ?, ?)`,
       thread.id, from, to, subject, cleanBody, nowIso(), receivedAt, inboundLeadId,
     );
-    await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt);
+    await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt, "inbound");
   }
 
   // Provider-level audit row (FK requires a connection id, so skip it when the
@@ -718,7 +718,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
                 AND LOWER(sender_email) = LOWER(?)`,
             lead.id, thread.id, from,
           );
-          await bumpLeadActivity(env.D1DB, lead.id, receivedAt);
+          await bumpLeadActivity(env.D1DB, lead.id, receivedAt, "inbound");
         }
         if (lead) {
           await escalateOnKeywordMatch(env, {

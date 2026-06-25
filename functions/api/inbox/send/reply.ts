@@ -213,7 +213,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     attachments.length ? JSON.stringify(attachments) : null, replyLeadId,
   );
   await execute(env.D1DB, `UPDATE thread SET updated_at = ? WHERE id = ?`, nowIso(), threadId);
-  await bumpLeadActivity(env.D1DB, replyLeadId, nowIso());
+  await bumpLeadActivity(env.D1DB, replyLeadId, nowIso(), "outbound");
   await incrementUsage(env, orgId, "email", 1);
 
   return json(

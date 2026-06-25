@@ -116,7 +116,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     await execute(env.D1DB,
       `INSERT INTO thread_lead_assignments (thread_id, lead_id, assigned_at) VALUES (?, ?, ?)`,
       threadId, lead.id, nowIso());
-    await bumpLeadActivity(env.D1DB, lead.id, nowIso());
+    await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
     await incrementUsage(env, m.org_id, "email", 1);
     return json(
       {
