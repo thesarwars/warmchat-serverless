@@ -173,9 +173,11 @@ const DashboardV2: React.FC = () => {
   // immediately whenever the user returns to the tab. Keeps the daily-summary
   // banner / KPIs / Needs Reply live without a manual reload.
   const freshOnMount = {
-    refetchOnMount: "always" as const,
+    // Keep the 30-min background refresh, but don't re-fire all ~7 heavy
+    // dashboard queries on every return to the page or window focus - the
+    // 2-min cache makes returning to the dashboard instant.
     refetchInterval: 30 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   };
 
   const { data, isLoading: dataLoading } = useFetch(["dashboard_data"], () => fetchDashboardData(orgId), {}, freshOnMount);
