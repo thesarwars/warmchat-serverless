@@ -1528,15 +1528,22 @@ export default function Inbox() {
     return () => { cancelled = true; };
   }, [token, API_BASE]);
 
-  // If the loaded contacts don't fill the scroll viewport, keep pulling pages.
+  // Fill the INITIAL viewport so the list is scrollable, then stop. HARD-CAPPED:
+  // this effect re-runs on every `contacts` change, so without the page cap a
+  // container whose height never exceeds its content (scrollHeight stays <=
+  // clientHeight) walks the entire 1000+ contact list 10 rows at a time, firing
+  // ~128 expensive requests. Past the cap, real user scroll (handleContactsScroll)
+  // loads more. 4 pages = 40 contacts fills any realistic viewport.
+  const AUTO_FILL_MAX_PAGE = 4;
   useEffect(() => {
     if (contactsLoading || contactsLoadingMore || !contactsHasMore) return;
+    if (contactsPage >= AUTO_FILL_MAX_PAGE) return;
     const el = contactsScrollRef.current;
     if (el && el.scrollHeight <= el.clientHeight + 40) {
       void loadMoreContacts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contacts, contactsHasMore, contactsLoading, contactsLoadingMore]);
+  }, [contacts, contactsHasMore, contactsLoading, contactsLoadingMore, contactsPage]);
 
   // Keep the latest poll behaviour in a ref so the interval below can mount
   // ONCE. Previously this effect depended on `selectedLeadId`, so every lead
