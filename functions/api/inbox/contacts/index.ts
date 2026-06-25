@@ -261,13 +261,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   ]);
   if (!leads.length) return json({ contacts: [] });
 
+  // byId powers the email enrichment (keyed by lead_id now); byPhoneSuffix the SMS
+  // enrichment (still phone-matched). The old byEmail map is gone - Stage D keys
+  // email enrichment directly off lead_id.
   const byId = new Map<number, ContactEntry>();
-  const byEmail = new Map<string, ContactEntry>();
   const byPhoneSuffix = new Map<string, ContactEntry>();
   for (const l of leads) {
     const e = makeEntry(l);
     byId.set(l.id, e);
-    if (l.email) byEmail.set(l.email.toLowerCase(), e);
     if (l.phone) {
       const digits = l.phone.replace(/\D/g, "");
       if (digits.length >= 10) byPhoneSuffix.set(digits.slice(-10), e);
