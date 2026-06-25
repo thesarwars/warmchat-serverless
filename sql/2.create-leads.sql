@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS lead (
     sms_notifications_enabled   INTEGER NOT NULL DEFAULT 1 CHECK (sms_notifications_enabled IN (0, 1)),
     created_at                  TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TEXT DEFAULT CURRENT_TIMESTAMP,
+    -- Newest message timestamp (email or SMS) for this lead; maintained at message
+    -- insert + reconcile cron. Powers the inbox contacts recency pagination.
+    last_activity_at            TEXT,
     verified                    INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
     sms_opt_out                 INTEGER NOT NULL DEFAULT 0 CHECK (sms_opt_out IN (0, 1)),
     last_opt_out_at             TEXT,
@@ -161,3 +164,6 @@ CREATE INDEX IF NOT EXISTS ix_deal_assignee_user ON deal_assignee (user_id);
 
 -- Leads list ordering: WHERE org_id = ? ORDER BY created_at DESC, id DESC.
 CREATE INDEX IF NOT EXISTS ix_lead_org_created ON lead (org_id, created_at DESC, id DESC);
+
+-- Inbox contacts recency pagination: WHERE org_id = ? ORDER BY last_activity_at DESC.
+CREATE INDEX IF NOT EXISTS ix_lead_org_activity ON lead (org_id, last_activity_at DESC, id DESC);
