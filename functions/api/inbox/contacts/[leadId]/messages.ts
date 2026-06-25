@@ -63,6 +63,23 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return error("Forbidden", 403);
   }
 
+  // Appointments are independent of the email/SMS queries - kick this off now so
+  // it runs concurrently with them instead of as a trailing sequential round-trip.
+  const appointmentsPromise = queryAll<{
+    id: number; appointment_type: string; starts_at: string; status: string;
+    meeting_type: string; notes: string | null; external_meeting_url: string | null;
+    confirmed_at: string | null; created_at: string;
+    sms_confirmation_sent_at: string | null;
+    email_confirmation_sent_at: string | null;
+  }>(
+    env.D1DB,
+    `SELECT id, appointment_type, starts_at, status, meeting_type, notes,
+            external_meeting_url, confirmed_at, created_at,
+            sms_confirmation_sent_at, email_confirmation_sent_at
+       FROM lead_appointment WHERE lead_id = ? AND org_id = ? ORDER BY starts_at ASC`,
+    leadId, lead.org_id,
+  );
+
   // ---- Email threads for this lead ----
   const threadRows = await queryAll<{ thread_id: number }>(
     env.D1DB,
@@ -119,15 +136,17 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     oldestEmailId = emailMessages.length ? emailMessages[0].id : null;
 
     // Mark only THIS lead's inbound messages as read - and only on the newest/
-    // initial page, never when paging older history.
+    // initial page, never when paging older history. Run it OFF the response path
+    // (waitUntil) so the read-marking write doesn't add a round-trip to TTFB; the
+    // client zeroes the unread badge optimistically anyway.
     if (!isOlderPage) {
-      await execute(
+      context.waitUntil(execute(
         env.D1DB,
         `UPDATE inbox_messages SET is_read = 1
           WHERE thread_id IN (${placeholders})
             AND (LOWER(to_email) = ? OR LOWER(sender_email) = ?) AND is_read = 0`,
         ...threadIds, leadEmail, leadEmail,
-      );
+      ));
     }
 
     // Latest = this lead's own most recent email (list is ordered ASC).
@@ -189,30 +208,17 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     smsMessages.reverse(); // back to chronological ASC for render
     oldestSmsId = smsMessages.length ? smsMessages[0].id : null;
     if (!isOlderPage) {
-      await execute(
+      context.waitUntil(execute(
         env.D1DB,
         `UPDATE sms_message SET is_read = 1
           WHERE conversation_id = ? AND direction='inbound' AND is_read = 0`,
         conversation.id,
-      );
+      ));
     }
   }
 
-  // ---- Appointments ----
-  const appointmentRows = await queryAll<{
-    id: number; appointment_type: string; starts_at: string; status: string;
-    meeting_type: string; notes: string | null; external_meeting_url: string | null;
-    confirmed_at: string | null; created_at: string;
-    sms_confirmation_sent_at: string | null;
-    email_confirmation_sent_at: string | null;
-  }>(
-    env.D1DB,
-    `SELECT id, appointment_type, starts_at, status, meeting_type, notes,
-            external_meeting_url, confirmed_at, created_at,
-            sms_confirmation_sent_at, email_confirmation_sent_at
-       FROM lead_appointment WHERE lead_id = ? AND org_id = ? ORDER BY starts_at ASC`,
-    leadId, lead.org_id,
-  );
+  // ---- Appointments (fetch was kicked off above, concurrently) ----
+  const appointmentRows = await appointmentsPromise;
 
   const emailOut = emailMessages.map((m) => ({
     id: `email-${m.id}`,
