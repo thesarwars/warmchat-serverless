@@ -716,7 +716,7 @@ async function persistOutboundEmail(
     // Bump lead recency (monotonic) so this campaign/AI send bubbles the contact
     // up the inbox list. Inlined (cron worker has no shared leadActivity helper).
     await env.D1DB.prepare(
-      `UPDATE lead SET last_activity_at = ? WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
+      `UPDATE lead SET last_activity_at = ?, last_activity_direction = 'outbound' WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
     ).bind(ts, row.contact_id, ts).run();
   }
 }

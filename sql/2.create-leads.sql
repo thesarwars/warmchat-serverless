@@ -21,9 +21,11 @@ CREATE TABLE IF NOT EXISTS lead (
     sms_notifications_enabled   INTEGER NOT NULL DEFAULT 1 CHECK (sms_notifications_enabled IN (0, 1)),
     created_at                  TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TEXT DEFAULT CURRENT_TIMESTAMP,
-    -- Newest message timestamp (email or SMS) for this lead; maintained at message
-    -- insert + reconcile cron. Powers the inbox contacts recency pagination.
+    -- Newest message timestamp (email or SMS) for this lead + that message's
+    -- direction; maintained at message insert. Powers the inbox contacts recency
+    -- pagination + the "Needs Reply" chip count (direction = 'inbound').
     last_activity_at            TEXT,
+    last_activity_direction     TEXT,
     verified                    INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
     sms_opt_out                 INTEGER NOT NULL DEFAULT 0 CHECK (sms_opt_out IN (0, 1)),
     last_opt_out_at             TEXT,

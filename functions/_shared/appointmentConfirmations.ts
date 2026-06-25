@@ -231,7 +231,7 @@ async function persistOutboundEmail(
     leadId,
     nowIso(),
   );
-  await bumpLeadActivity(env.D1DB, leadId, nowIso());
+  await bumpLeadActivity(env.D1DB, leadId, nowIso(), "outbound");
 }
 
 export async function sendAppointmentConfirmations(

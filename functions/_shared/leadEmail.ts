@@ -138,6 +138,6 @@ export async function sendLeadEmail(
     nowIso(), dispatch.trackingToken, lead.id,
   );
   await execute(env.D1DB, `UPDATE thread SET updated_at = ? WHERE id = ?`, nowIso(), threadId);
-  await bumpLeadActivity(env.D1DB, lead.id, nowIso());
+  await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
   return { sent: true, queued: false };
 }

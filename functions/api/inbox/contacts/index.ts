@@ -140,6 +140,13 @@ function contactMatchesSearch(c: ContactEntry, term: string): boolean {
   return haystack.includes(term);
 }
 
+// SQL approximation of isHotContact (normalised stage score > 45) for the chip
+// COUNT in the paginated path - covers the hot canonical stages + the common
+// free-form aliases normalizeStageLabel maps into them.
+const HOT_STATUS_SQL = `(LOWER(TRIM(COALESCE(status,''))) IN
+  ('qualified','appointment set','active client','under contract','closed','closed won','won','pending','pending confirmation')
+  OR LOWER(COALESCE(status,'')) LIKE '%hot%' OR LOWER(COALESCE(status,'')) LIKE '%appointment%')`;
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
   const user = await requireUser(env, request);
@@ -188,6 +195,159 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     conversation_id: number; phone_e164: string; last_message_at: string | null;
     last_body: string | null; last_direction: string | null; unread_count: number;
   };
+
+  // ---- FAST PATH: default browse (no search, "all" chip) ----------------------
+  // Paginate leads by recency at the SQL level + enrich ONLY the page, instead of
+  // fetching/enriching every org lead. Chip counts come from cheap aggregates.
+  // Search / a specific filter-chip fall through to the full-scan path below
+  // (search must find never-messaged leads; chips need the per-contact predicate).
+  if (!searchQuery && (url.searchParams.get("filter") || "all").trim().toLowerCase() === "all") {
+    const offset = (pageRaw - 1) * pageSizeRaw;
+    const pageLeads = await queryAll<{
+      id: number; name: string | null; first_name: string | null; last_name: string | null;
+      email: string | null; phone: string | null; status: string | null; company: string | null;
+      property_address: string | null; price_range: string | null; notes: string | null;
+      email_notifications_enabled: number; sms_notifications_enabled: number;
+      lead_type: string | null; intent: string | null; ai_status: string | null; timezone: string | null;
+      sms_opt_out: number | null; email_opt_out: number | null;
+    }>(
+      env.D1DB,
+      `SELECT id, name, first_name, last_name, email, phone, status, company,
+              property_address, price_range, notes,
+              email_notifications_enabled, sms_notifications_enabled,
+              lead_type, intent, ai_status, timezone, sms_opt_out, email_opt_out
+         FROM lead
+        WHERE org_id = ? AND last_activity_at IS NOT NULL
+        ORDER BY last_activity_at DESC, id DESC
+        LIMIT ? OFFSET ?`,
+      orgId, pageSizeRaw, offset,
+    );
+    const pageIds = pageLeads.map((l) => l.id);
+    const idPh = pageIds.map(() => "?").join(",");
+
+    const [counts, emailRows, smsRows] = await Promise.all([
+      queryFirst<{ all_c: number; needs_reply_c: number; hot_c: number; buyers_c: number; sellers_c: number }>(
+        env.D1DB,
+        `SELECT COUNT(*) AS all_c,
+                SUM(CASE WHEN last_activity_direction = 'inbound' THEN 1 ELSE 0 END) AS needs_reply_c,
+                SUM(CASE WHEN ${HOT_STATUS_SQL} THEN 1 ELSE 0 END) AS hot_c,
+                SUM(CASE WHEN LOWER(COALESCE(lead_type,'')) IN ('buyer','both') THEN 1 ELSE 0 END) AS buyers_c,
+                SUM(CASE WHEN LOWER(COALESCE(lead_type,'')) IN ('seller','both') THEN 1 ELSE 0 END) AS sellers_c
+           FROM lead WHERE org_id = ? AND last_activity_at IS NOT NULL`,
+        orgId,
+      ),
+      pageIds.length
+        ? queryAll<{
+            lead_id: number; last_body: string | null; last_ts: string | null;
+            last_direction: string | null; last_thread_id: number | null;
+            last_subject: string | null; unread_count: number;
+          }>(
+            env.D1DB,
+            `WITH ranked AS (
+               SELECT im.lead_id, im.thread_id, im.body, im.direction, im.subject, im.is_read,
+                      COALESCE(im.message_date, im.created_at) AS ts,
+                      ROW_NUMBER() OVER (PARTITION BY im.lead_id ORDER BY COALESCE(im.message_date, im.created_at) DESC, im.id DESC) AS rn
+                 FROM inbox_messages im WHERE im.lead_id IN (${idPh})
+             )
+             SELECT lead_id,
+                    MAX(CASE WHEN rn=1 THEN body END)      AS last_body,
+                    MAX(CASE WHEN rn=1 THEN ts END)        AS last_ts,
+                    MAX(CASE WHEN rn=1 THEN direction END) AS last_direction,
+                    MAX(CASE WHEN rn=1 THEN thread_id END) AS last_thread_id,
+                    MAX(CASE WHEN rn=1 THEN subject END)   AS last_subject,
+                    SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END) AS unread_count
+               FROM ranked GROUP BY lead_id`,
+            ...pageIds,
+          )
+        : Promise.resolve([] as { lead_id: number; last_body: string | null; last_ts: string | null; last_direction: string | null; last_thread_id: number | null; last_subject: string | null; unread_count: number }[]),
+      queryAll<SmsAgg>(
+        env.D1DB,
+        `SELECT c.id AS conversation_id, sc.phone_number_e164 AS phone_e164,
+                c.last_message_at, lm.body AS last_body, lm.direction AS last_direction,
+                COALESCE(ur.unread, 0) AS unread_count
+           FROM sms_conversation c
+           JOIN sms_contact sc ON c.contact_id = sc.id
+           JOIN (SELECT conversation_id, body, direction, MAX(created_at) AS mx
+                   FROM sms_message WHERE org_id = ? GROUP BY conversation_id) lm
+             ON lm.conversation_id = c.id
+           LEFT JOIN (SELECT conversation_id, COUNT(*) AS unread
+                        FROM sms_message WHERE org_id = ? AND direction='inbound' AND is_read=0
+                        GROUP BY conversation_id) ur
+             ON ur.conversation_id = c.id
+          WHERE c.org_id = ?`,
+        orgId, orgId, orgId,
+      ),
+    ]);
+
+    const byId = new Map<number, ContactEntry>();
+    const byPhoneSuffix = new Map<string, ContactEntry>();
+    for (const l of pageLeads) {
+      const e = makeEntry(l);
+      byId.set(l.id, e);
+      if (l.phone) {
+        const digits = l.phone.replace(/\D/g, "");
+        if (digits.length >= 10) byPhoneSuffix.set(digits.slice(-10), e);
+      }
+    }
+    for (const a of emailRows) {
+      const e = byId.get(a.lead_id);
+      if (!e) continue;
+      e.has_email_history = true;
+      e.email_unread_count = Number(a.unread_count) || 0;
+      if (a.last_thread_id) e.email_thread_ids = [a.last_thread_id];
+      if (a.last_ts && (!e.last_activity_at || a.last_ts > e.last_activity_at)) {
+        e.last_activity_at = a.last_ts;
+        e.last_activity_channel = "email";
+        e.last_activity_label = fmtLabel("email", a.last_ts);
+        e.last_activity_direction = a.last_direction === "inbound" ? "inbound" : "outbound";
+        e.preview = a.last_body || "";
+        e.latest_email_thread_id = a.last_thread_id;
+        e.latest_email_subject = a.last_subject || null;
+      }
+    }
+    for (const s of smsRows) {
+      const digits = (s.phone_e164 || "").replace(/\D/g, "");
+      if (digits.length < 10) continue;
+      const e = byPhoneSuffix.get(digits.slice(-10));
+      if (!e) continue;
+      e.has_sms_history = true;
+      e.sms_conversation_id = s.conversation_id;
+      e.sms_unread_count = Number(s.unread_count) || 0;
+      const ts = s.last_message_at;
+      if (ts && (!e.last_activity_at || ts > e.last_activity_at)) {
+        e.last_activity_at = ts;
+        e.last_activity_channel = "sms";
+        e.last_activity_label = fmtLabel("sms", ts);
+        e.last_activity_direction = s.last_direction === "inbound" ? "inbound" : "outbound";
+        e.preview = s.last_body || "";
+      }
+    }
+    const pageContacts = pageLeads.map((l) => byId.get(l.id)!);
+    for (const e of pageContacts) {
+      e.total_unread_count = e.email_unread_count + e.sms_unread_count;
+      e.needs_reply = e.last_activity_direction === "inbound";
+    }
+    pageContacts.sort((a, b) => (b.last_activity_at || "").localeCompare(a.last_activity_at || ""));
+
+    const allC = counts?.all_c ?? 0;
+    const totalPagesFast = allC ? Math.max(1, Math.ceil(allC / pageSizeRaw)) : 1;
+    return json({
+      contacts: pageContacts,
+      count: pageContacts.length,
+      filter_counts: {
+        all: allC,
+        needs_reply: counts?.needs_reply_c ?? 0,
+        hot: counts?.hot_c ?? 0,
+        buyers: counts?.buyers_c ?? 0,
+        sellers: counts?.sellers_c ?? 0,
+      },
+      pagination: {
+        page: pageRaw, page_size: pageSizeRaw, total: allC, total_pages: totalPagesFast,
+        has_next: offset + pageLeads.length < allC, has_prev: pageRaw > 1,
+      },
+      applied_filters: { q: null, page: pageRaw, page_size: pageSizeRaw },
+    });
+  }
 
   const [leads, emailByLead, smsAggs] = await Promise.all([
     // All leads in the org - the search corpus AND the source of the
