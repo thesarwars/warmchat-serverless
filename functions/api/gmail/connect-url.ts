@@ -24,9 +24,21 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   ].join(" ");
   const state = `${user.id}.${crypto.randomUUID()}`;
 
+  // Build the callback on the SAME origin the user is currently on. The app is
+  // served on BOTH the apex (warmchats.com) and www, which are separate
+  // localStorage origins; if the OAuth round-trip returns to a different origin
+  // than the one the user started on, their session token isn't there and they
+  // get bounced to /login. Both callback URLs (apex + www) must be registered as
+  // Authorized redirect URIs on the Google OAuth client. Falls back to the
+  // configured URI for any non-app host (e.g. *.pages.dev).
+  const reqHost = new URL(request.url).hostname;
+  const redirectUri = /(^|\.)warmchats\.com$/.test(reqHost)
+    ? `${new URL(request.url).origin}/api/gmail/oauth/callback`
+    : env.GMAIL_OAUTH_REDIRECT_URI;
+
   const params = new URLSearchParams({
     client_id: env.GMAIL_OAUTH_CLIENT_ID,
-    redirect_uri: env.GMAIL_OAUTH_REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: "code",
     access_type: "offline",
     prompt: "consent",
