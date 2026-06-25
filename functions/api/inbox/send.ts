@@ -3,6 +3,7 @@ import type { Env } from "../../_shared/env.ts";
 import { json, error, readJson } from "../../_shared/http.ts";
 import { queryFirst, execute, nowIso } from "../../_shared/db.ts";
 import { requireUser } from "../../_shared/auth.ts";
+import { bumpLeadActivity } from "../../_shared/leadActivity.ts";
 import { dispatchOutboundEmail } from "../../_shared/outboundEmail.ts";
 import { mockTelnyxSendSms } from "../../_shared/mockSendApi.ts";
 import { smsBlockReason } from "../../_shared/smsCompliance.ts";
@@ -106,15 +107,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       `INSERT INTO inbox_messages
          (thread_id, sender_id, sender_name, sender_email, subject, body, direction, channel,
           to_email, message_id, created_at, message_date, is_read,
-          delivery_status, sent_at, tracking_token)
-       VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?)`,
+          delivery_status, sent_at, tracking_token, lead_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?, ?)`,
       threadId, user.id, user.name || null, dispatch.fromEmail || null, dispatch.subject,
       dispatch.body, lead.email, dispatch.providerMessageId ?? null, nowIso(), nowIso(),
-      nowIso(), dispatch.trackingToken,
+      nowIso(), dispatch.trackingToken, lead.id,
     );
     await execute(env.D1DB,
       `INSERT INTO thread_lead_assignments (thread_id, lead_id, assigned_at) VALUES (?, ?, ?)`,
       threadId, lead.id, nowIso());
+    await bumpLeadActivity(env.D1DB, lead.id, nowIso());
     await incrementUsage(env, m.org_id, "email", 1);
     return json(
       {
