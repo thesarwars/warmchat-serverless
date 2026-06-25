@@ -1143,8 +1143,16 @@ export default function Inbox() {
   // user's scroll position. `force` skips the React-Query cache.
   const fetchContacts = async (force = false, opts?: { guardEmpty?: boolean }) => {
     if (!token) return;
+    // Background polls (guardEmpty) only refresh the FIRST page: newly-active
+    // contacts bubble to the top by recency, so page 1 catches them, and we merge
+    // rather than re-enriching up to 300 contacts every 20s (the per-row inbox
+    // enrichment is the expensive part). Explicit refreshes/loads keep the full
+    // loaded range.
+    const isPoll = Boolean(opts?.guardEmpty);
     try {
-      const size = Math.min(Math.max(contactsPage, 1) * CONTACTS_PAGE_SIZE, 300);
+      const size = isPoll
+        ? CONTACTS_PAGE_SIZE
+        : Math.min(Math.max(contactsPage, 1) * CONTACTS_PAGE_SIZE, 300);
       const res = await fetch(buildContactsUrl(1, size, contactsQuery), {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -1160,7 +1168,16 @@ export default function Inbox() {
       // refreshes (after a delete/send) skip this so a genuinely-empty result
       // (e.g. the last contact was just deleted) clears the list immediately.
       if (opts?.guardEmpty && nextContacts.length === 0 && contacts.length > 0 && !contactsQuery.trim()) return;
-      setContacts(nextContacts);
+      if (isPoll) {
+        // Merge the fresh page 1 (server recency order) above the rest of the
+        // already-loaded list (deduped), preserving the user's scrolled-in pages.
+        setContacts((current) => {
+          const page1Ids = new Set(nextContacts.map((c) => c.id));
+          return [...nextContacts, ...current.filter((c) => !page1Ids.has(c.id))];
+        });
+      } else {
+        setContacts(nextContacts);
+      }
       if (data.filter_counts) setServerFilterCounts(data.filter_counts);
       setContactsHasMore(computeContactsHasMore(data, nextContacts.length, nextContacts.length));
       if (force) {
