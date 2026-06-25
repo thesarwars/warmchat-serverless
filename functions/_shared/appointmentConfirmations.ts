@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { Env } from "./env.ts";
 import { queryFirst, execute, nowIso } from "./db.ts";
+import { bumpLeadActivity } from "./leadActivity.ts";
 import { mockTelnyxSendSms } from "./mockSendApi.ts";
 import { smsBlockReason, appendComplianceFooter } from "./smsCompliance.ts";
 import { dispatchOutboundEmail } from "./outboundEmail.ts";
@@ -207,8 +208,8 @@ async function persistOutboundEmail(
     `INSERT INTO inbox_messages
        (thread_id, sender_id, sender_name, sender_email, subject, body, direction, channel,
         to_email, message_id, created_at, message_date, is_read,
-        delivery_status, sent_at, tracking_token)
-     VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?)`,
+        delivery_status, sent_at, tracking_token, lead_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?, ?)`,
     threadId,
     userId,
     userName,
@@ -221,6 +222,7 @@ async function persistOutboundEmail(
     nowIso(),
     nowIso(),
     trackingToken,
+    leadId,
   );
   await execute(
     env.D1DB,
@@ -229,6 +231,7 @@ async function persistOutboundEmail(
     leadId,
     nowIso(),
   );
+  await bumpLeadActivity(env.D1DB, leadId, nowIso());
 }
 
 export async function sendAppointmentConfirmations(

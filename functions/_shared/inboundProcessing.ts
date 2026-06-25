@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { Env } from "./env.ts";
 import { execute, queryFirst, nowIso } from "./db.ts";
+import { bumpLeadActivity } from "./leadActivity.ts";
 import {
   cancelPendingFollowups,
   activateAiOnReply,
@@ -288,6 +289,9 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
     `SELECT id, lead_type, ai_status FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
     m.org_id, fromNumber,
   );
+  // An inbound SMS from a known lead bubbles its contact to the top of the inbox
+  // immediately (regardless of AI settings). Cold-inbound new leads bump below.
+  if (existingLead) await bumpLeadActivity(env.D1DB, existingLead.id, nowIso());
 
   // Deterministic escalation: if the inbound text matches one of the agent's
   // configured escalation keywords, open an escalation to the human (dedup'd by
@@ -376,6 +380,7 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
       fromNumber, u.id, m.org_id, nowIso(), nowIso(),
     );
     const newLeadId = Number(leadIns.meta.last_row_id);
+    await bumpLeadActivity(env.D1DB, newLeadId, nowIso());
     const newLeadRow = await queryFirst<Record<string, unknown>>(
       env.D1DB, `SELECT * FROM lead WHERE id = ?`, newLeadId,
     );
@@ -563,14 +568,38 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
     }
   }
 
+  // Resolve the lead this inbound email belongs to BEFORE the insert so we can
+  // stamp lead_id + bump recency immediately - the contact must jump to the top
+  // of the inbox the moment the reply lands. NULL for a cold/unknown sender (the
+  // lead may be auto-created below, which then backfills this row's lead_id).
+  let inboundLeadId: number | null = input.leadId ?? null;
+  if (inboundLeadId == null && thread) {
+    const tla = await queryFirst<{ lead_id: number }>(
+      env.D1DB,
+      `SELECT lead_id FROM thread_lead_assignments WHERE thread_id = ?
+        GROUP BY thread_id HAVING COUNT(DISTINCT lead_id) = 1`,
+      thread.id,
+    );
+    inboundLeadId = tla?.lead_id ?? null;
+  }
+  if (inboundLeadId == null && orgId != null && from) {
+    const l = await queryFirst<{ id: number | null }>(
+      env.D1DB,
+      `SELECT MIN(id) AS id FROM lead WHERE org_id = ? AND LOWER(email) = LOWER(?)`,
+      orgId, from,
+    );
+    inboundLeadId = l?.id ?? null;
+  }
+
   if (thread) {
     await execute(
       env.D1DB,
       `INSERT INTO inbox_messages
-         (thread_id, sender_email, to_email, subject, body, direction, channel, created_at, message_date)
-       VALUES (?, ?, ?, ?, ?, 'inbound', 'email', ?, ?)`,
-      thread.id, from, to, subject, cleanBody, nowIso(), receivedAt,
+         (thread_id, sender_email, to_email, subject, body, direction, channel, created_at, message_date, lead_id)
+       VALUES (?, ?, ?, ?, ?, 'inbound', 'email', ?, ?, ?)`,
+      thread.id, from, to, subject, cleanBody, nowIso(), receivedAt, inboundLeadId,
     );
+    await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt);
   }
 
   // Provider-level audit row (FK requires a connection id, so skip it when the
@@ -679,6 +708,17 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
             `INSERT INTO thread_lead_assignments (thread_id, lead_id, assigned_at) VALUES (?, ?, ?)`,
             thread.id, lead.id, nowIso(),
           );
+          // The inbound row above was written with lead_id = NULL (the lead didn't
+          // exist yet). Link it now + bump recency so the new contact surfaces at
+          // the top of the inbox immediately.
+          await execute(
+            env.D1DB,
+            `UPDATE inbox_messages SET lead_id = ?
+              WHERE thread_id = ? AND direction = 'inbound' AND lead_id IS NULL
+                AND LOWER(sender_email) = LOWER(?)`,
+            lead.id, thread.id, from,
+          );
+          await bumpLeadActivity(env.D1DB, lead.id, receivedAt);
         }
         if (lead) {
           await escalateOnKeywordMatch(env, {

@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { Env } from "./env.ts";
 import { queryFirst, execute, nowIso } from "./db.ts";
+import { bumpLeadActivity } from "./leadActivity.ts";
 import { checkQuietHours } from "./quietHours.ts";
 import { dispatchOutboundEmail } from "./outboundEmail.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
@@ -130,12 +131,13 @@ export async function sendLeadEmail(
     env.D1DB,
     `INSERT INTO inbox_messages
        (thread_id, sender_id, sender_name, sender_email, subject, body, direction, channel,
-        to_email, message_id, created_at, message_date, is_read, delivery_status, sent_at, tracking_token, sent_by_ai)
-     VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?, 1)`,
+        to_email, message_id, created_at, message_date, is_read, delivery_status, sent_at, tracking_token, sent_by_ai, lead_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, ?, 1, 'sent', ?, ?, 1, ?)`,
     threadId, lead.owner_id ?? null, owner?.name ?? null, dispatch.fromEmail || null, dispatch.subject,
     dispatch.body, lead.email, dispatch.providerMessageId ?? null, nowIso(), nowIso(),
-    nowIso(), dispatch.trackingToken,
+    nowIso(), dispatch.trackingToken, lead.id,
   );
   await execute(env.D1DB, `UPDATE thread SET updated_at = ? WHERE id = ?`, nowIso(), threadId);
+  await bumpLeadActivity(env.D1DB, lead.id, nowIso());
   return { sent: true, queued: false };
 }

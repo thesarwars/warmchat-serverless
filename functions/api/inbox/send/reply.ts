@@ -3,6 +3,7 @@ import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
 import { queryFirst, execute, nowIso } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
+import { bumpLeadActivity } from "../../../_shared/leadActivity.ts";
 import { isOrgMember } from "../../../_shared/orgAccess.ts";
 import { dispatchOutboundEmail } from "../../../_shared/outboundEmail.ts";
 import { checkUsageLimit, incrementUsage, getOrgPlan } from "../../../_shared/usageCounter.ts";
@@ -177,19 +178,42 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     threadId = Number(threadIns.meta.last_row_id);
   }
 
+  // Resolve the lead to stamp: explicit lead_ids first, else the existing thread
+  // (only when it maps to a single lead), else the recipient address (MIN(id)
+  // deterministic tie-break). May be NULL (reply to a non-lead address).
+  let replyLeadId: number | null = Number(payload.lead_ids?.[0]) || null;
+  if (!replyLeadId && existingThread) {
+    const tla = await queryFirst<{ lead_id: number }>(
+      env.D1DB,
+      `SELECT lead_id FROM thread_lead_assignments WHERE thread_id = ?
+        GROUP BY thread_id HAVING COUNT(DISTINCT lead_id) = 1`,
+      existingThread.id,
+    );
+    replyLeadId = tla?.lead_id ?? null;
+  }
+  if (!replyLeadId && toEmail) {
+    const l = await queryFirst<{ id: number | null }>(
+      env.D1DB,
+      `SELECT MIN(id) AS id FROM lead WHERE org_id = ? AND LOWER(email) = LOWER(?)`,
+      orgId, toEmail,
+    );
+    replyLeadId = l?.id ?? null;
+  }
+
   const ins = await execute(
     env.D1DB,
     `INSERT INTO inbox_messages
        (thread_id, sender_id, sender_name, sender_email, to_email, subject, body,
         direction, channel, message_id, created_at, message_date, is_read,
-        delivery_status, sent_at, tracking_token, attachments)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, 1, 'sent', ?, ?, ?)`,
+        delivery_status, sent_at, tracking_token, attachments, lead_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, 1, 'sent', ?, ?, ?, ?)`,
     threadId, user.id, senderName || null, fromEmail || null, toEmail,
     subject, message, providerMessageId ?? null, nowIso(), nowIso(),
     nowIso(), dispatch.trackingToken,
-    attachments.length ? JSON.stringify(attachments) : null,
+    attachments.length ? JSON.stringify(attachments) : null, replyLeadId,
   );
   await execute(env.D1DB, `UPDATE thread SET updated_at = ? WHERE id = ?`, nowIso(), threadId);
+  await bumpLeadActivity(env.D1DB, replyLeadId, nowIso());
   await incrementUsage(env, orgId, "email", 1);
 
   return json(

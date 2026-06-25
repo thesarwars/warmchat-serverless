@@ -700,16 +700,23 @@ async function persistOutboundEmail(
   if (!threadId) return;
   await env.D1DB.prepare(
     `INSERT INTO inbox_messages
-       (thread_id, sender_id, subject, body, direction, channel, to_email, created_at, message_date, is_read, delivery_status, sent_at, message_id, sent_by_ai, automation_id)
-     VALUES (?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, 1, 'sent', ?, ?, ?, ?)`,
+       (thread_id, sender_id, subject, body, direction, channel, to_email, created_at, message_date, is_read, delivery_status, sent_at, message_id, sent_by_ai, automation_id, lead_id)
+     VALUES (?, ?, ?, ?, 'outbound', 'email', ?, ?, ?, 1, 'sent', ?, ?, ?, ?, ?)`,
   ).bind(
     threadId, row.user_id, row.subject || "(no subject)", row.body || "",
     row.to_address, new Date().toISOString(), new Date().toISOString(),
     new Date().toISOString(), providerMessageId, row.sent_by_ai ? 1 : 0, row.automation_id ?? null,
+    row.contact_id ?? null,
   ).run();
   if (row.contact_id) {
+    const ts = new Date().toISOString();
     await env.D1DB.prepare(
       `INSERT INTO thread_lead_assignments (thread_id, lead_id, assigned_at) VALUES (?, ?, ?)`,
-    ).bind(threadId, row.contact_id, new Date().toISOString()).run();
+    ).bind(threadId, row.contact_id, ts).run();
+    // Bump lead recency (monotonic) so this campaign/AI send bubbles the contact
+    // up the inbox list. Inlined (cron worker has no shared leadActivity helper).
+    await env.D1DB.prepare(
+      `UPDATE lead SET last_activity_at = ? WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
+    ).bind(ts, row.contact_id, ts).run();
   }
 }
