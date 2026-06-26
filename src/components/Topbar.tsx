@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { NotificationCenter } from "./notifications/NotificationCenter";
 import { useFetch } from "@/helpers/hooks";
 import { fetchMeBootstrap, type MeBootstrap } from "@/helpers/backend";
+import { hasActivePaidPlan, type BillingLike } from "@/utils/entitlements";
 
 interface TopbarProps {
   onUpgradeClick?: () => void;
@@ -87,8 +88,9 @@ const Topbar: React.FC<TopbarProps> = ({
     (meBootstrap?.channels?.email as { connected?: boolean } | undefined)?.connected,
   );
   const smsConnected = Boolean(meBootstrap?.phone_number?.phone_number);
-  const plan = (meBootstrap?.billing as { plan?: string } | null | undefined)?.plan ?? null;
-  const hasSmsAccess = Boolean(plan) && plan !== "free_channel";
+  // SMS access keys off ACTIVE PAID access (paid plan that is active/trialing/
+  // comp), not the plan name alone - so a promo/trial user isn't sent to billing.
+  const hasSmsAccess = hasActivePaidPlan(meBootstrap?.billing as BillingLike);
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 h-16 border-b border-[#EAEAEA] bg-white">

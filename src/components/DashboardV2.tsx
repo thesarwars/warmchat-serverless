@@ -36,6 +36,7 @@ import {
   type OrgKpiGoals,
 } from "@/helpers/backend";
 import { isHotStage } from "@/components/leads/utils/leadDisplay";
+import { hasActivePaidPlan, type BillingLike } from "@/utils/entitlements";
 import toast from "react-hot-toast";
 
 const formatYmd = (date: Date) => {
@@ -124,14 +125,16 @@ const DashboardV2: React.FC = () => {
       { enabled: hasToken, staleTime: 1000 * 60 * 2 },
     );
 
-  const plan = (meBootstrap?.billing as { plan?: string } | null)?.plan ?? null;
+  const billing = meBootstrap?.billing as BillingLike;
   const connectedNumber = meBootstrap?.phone_number?.phone_number ?? null;
   const channelsEmail = meBootstrap?.channels?.email as
     | { connected?: boolean; address?: string | null; provider?: string | null }
     | undefined;
   const connectedEmail = channelsEmail?.connected ? channelsEmail.address ?? null : null;
   const emailProvider = channelsEmail?.connected ? channelsEmail.provider ?? null : null;
-  const hasSmsAccess = Boolean(plan) && plan !== "free_channel";
+  // SMS access keys off ACTIVE PAID access (paid plan that is active/trialing/
+  // comp), not the plan name alone - so a promo/trial user isn't sent to billing.
+  const hasSmsAccess = hasActivePaidPlan(billing);
 
   const smsState: "loading" | "connected" | "available" | "locked" =
     meBootstrapLoading
