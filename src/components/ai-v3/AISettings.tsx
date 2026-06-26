@@ -435,11 +435,11 @@ export function AISettings() {
 
         <SetCard title="Knowledge Base" desc="Information AI uses to answer questions">
           <div className="wc-set-kbs">
-            <KbRow icon="user" label="Agent Bio" onEdit={() => navigate("/settings?tab=workspace")} />
-            <KbRow icon="pin" label="Service Areas" onEdit={() => navigate("/settings?tab=workspace")} />
-            <KbRow icon="building" label="Office Information" onEdit={() => navigate("/settings?tab=organization")} />
-            <KbRow icon="file" label="FAQ" onEdit={() => navigate("/ai/agent?tab=inbound")} />
-            <KbRow icon="clipboard" label="Custom Documents" onEdit={() => navigate("/ai/agent?tab=inbound")} />
+            <KbRow icon="user" label="Agent Bio" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
+            <KbRow icon="pin" label="Service Areas" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
+            <KbRow icon="building" label="Office Information" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
+            <KbRow icon="file" label="FAQ" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=faqs")} />
+            <KbRow icon="clipboard" label="Custom Documents" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=faqs")} />
           </div>
         </SetCard>
       </div>
