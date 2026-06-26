@@ -4,6 +4,12 @@ import { json, error, readJson } from "../../../_shared/http.ts";
 import { queryFirst, execute, nowIso } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { validateBusinessAddress } from "../../../_shared/addressValidator.ts";
+import { getChannelsSnapshot } from "../../me/channels.ts";
+
+// onboarding_progress.step >= this value means "onboarding complete". Mirrors
+// the client (Onboarding.tsx posts step:5) and postAuthRoute (step < 5 = in
+// the funnel).
+const ONBOARDING_COMPLETE_STEP = 5;
 
 interface StepBody {
   step?: number;
@@ -93,6 +99,19 @@ async function handle(context: EventContext<Env, "userId", Record<string, unknow
     const reason = validateBusinessAddress(addr);
     if (reason) return error(reason, 400, { code: "INVALID_BUSINESS_ADDRESS" });
     await execute(env.D1DB, `UPDATE "user" SET business_address = ? WHERE id = ?`, addr, targetId);
+  }
+
+  // Server-side defense for the Step 3 rule: onboarding can only be marked
+  // complete once at least one channel (Email OR SMS) is properly connected.
+  // The wizard already gates this, but a tampered/replayed client must not be
+  // able to finish with zero channels.
+  if (step >= ONBOARDING_COMPLETE_STEP) {
+    const channels = await getChannelsSnapshot(env, targetId);
+    if (!channels.email.connected && !channels.sms.connected) {
+      return error("Please connect Email or SMS to continue.", 400, {
+        code: "NO_CHANNEL_CONNECTED",
+      });
+    }
   }
 
   await setStep(env, targetId, step);

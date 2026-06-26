@@ -373,6 +373,65 @@ export async function refreshAuthSession(
   return refreshPromise;
 }
 
+/**
+ * Re-hydrate the localStorage session from the still-valid HttpOnly auth
+ * cookies. Used by the route guard when the UI flags (auth_active/role_name)
+ * are missing but the cookie session may still be alive - e.g. after an OAuth
+ * full-page round-trip returns to a sibling origin (apex vs www) whose
+ * localStorage is a separate, empty store. Without this, an authenticated user
+ * gets bounced to /login even though their session never expired.
+ *
+ * Resolves true when identity was recovered (role written back to storage),
+ * false when there is genuinely no live session (caller should send to /login).
+ */
+export async function recoverSessionFromCookies(
+  apiBase: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  const fetchProfile = () =>
+    fetchImpl(`${apiBase}/profile/me`, { credentials: "include" });
+
+  try {
+    let res = await fetchProfile();
+    // Access token expired but the refresh cookie may still be good. Rotate it
+    // directly (the endpoint reads the cookie, not localStorage) and retry once.
+    if (res.status === 401) {
+      const refreshed = await fetchImpl(`${apiBase}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!refreshed.ok) return false;
+      res = await fetchProfile();
+    }
+    if (!res.ok) return false;
+
+    const data = (await res.json()) as {
+      id?: number | string;
+      name?: string;
+      email?: string;
+      role?: string;
+      org?: { id?: number | string; name?: string; plan?: string } | null;
+    };
+    const userId = data?.id;
+    const roleName = data?.role;
+    if (!userId || !roleName) return false;
+
+    storeAuthSession({
+      user_id: userId,
+      name: data.name,
+      email: data.email,
+      role_name: roleName,
+      org_id: data.org?.id,
+      org_name: data.org?.name,
+      plan: data.org?.plan,
+    });
+    return true;
+  } catch (err) {
+    console.error("Session recovery failed:", err);
+    return false;
+  }
+}
+
 export async function logoutCurrentSession(apiBase: string) {
   try {
     await fetch(`${apiBase}/auth/logout`, {
