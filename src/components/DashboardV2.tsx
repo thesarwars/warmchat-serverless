@@ -262,17 +262,12 @@ const DashboardV2: React.FC = () => {
       : (inbox_contacts as { contacts?: unknown[] } | undefined)?.contacts) as
       | Array<{ needs_reply?: boolean | null; total_unread_count?: number | string | null; unread_count?: number | string | null }>
       | undefined ?? [];
-  // Prefer the authoritative org-wide count the contacts endpoint returns
-  // (filter_counts.needs_reply) over filtering the first page of contacts, which
-  // is capped at the page size and undercounts.
-  const fcNeedsReply = toNumber(
-    (inbox_contacts as { filter_counts?: { needs_reply?: number } } | undefined)?.filter_counts?.needs_reply,
-  );
-  const needsReplyCount = fcNeedsReply > 0
-    ? fcNeedsReply
-    : inboxContactList.filter(
-        (c) => Boolean(c.needs_reply) || toNumber(c.total_unread_count ?? c.unread_count) > 0,
-      ).length;
+  // Count from the live per-contact needs_reply (latest message is from the lead,
+  // across email + SMS) so this matches the Inbox "Needs Reply" filter exactly. We
+  // deliberately do NOT read filter_counts.needs_reply (the denormalized
+  // last_activity_direction column, which lags until an outbound reply flips it),
+  // and do NOT count unread (reading a message doesn't mean a reply is owed).
+  const needsReplyCount = inboxContactList.filter((c) => Boolean(c.needs_reply)).length;
 
   // One-line overnight AI-activity summary, built from real dashboard counts.
   const dashSummary = (data as { summary?: Record<string, unknown> } | undefined)?.summary ?? {};

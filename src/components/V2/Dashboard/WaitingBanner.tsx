@@ -74,11 +74,12 @@ const WaitingBanner: React.FC<WaitingBannerProps> = ({ contacts, isLoading }) =>
   }
 
   const list = Array.isArray(contacts) ? contacts : contacts?.contacts ?? [];
-  // A lead is "waiting" when it still owes a human reply (needs_reply), or has
-  // unread inbound messages as a fallback when needs_reply isn't populated.
-  const waiting = list.filter(
-    (c) => Boolean(c.needs_reply) || Number(c.total_unread_count ?? c.unread_count) > 0,
-  );
+  // "Waiting" == the conversation's latest message is from the lead (needs_reply).
+  // Having merely an unread earlier message does NOT mean a reply is owed (the AI
+  // may have already responded), so we no longer OR in unread - that was inflating
+  // the count vs the Inbox's "Needs Reply" filter. needs_reply here is computed
+  // live per-contact (latest inbound across email+SMS), matching the Inbox.
+  const waiting = list.filter((c) => Boolean(c.needs_reply));
 
   // All caught up: nothing to nudge about, hide the strip entirely.
   if (waiting.length === 0) return null;
