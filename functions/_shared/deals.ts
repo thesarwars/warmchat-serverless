@@ -241,6 +241,60 @@ export async function ensureDealForLead(
 }
 
 /**
+ * Deterministic deal-stage tracking from real activity (not LLM discretion).
+ * Call this on any lead state change (an inbound reply, an appointment). It
+ * derives the correct EARLY/SAFE stage from concrete signals and applies it via
+ * applyAiDealUpdate, which creates the deal if missing, only ever moves FORWARD
+ * (a backward target becomes a suggestion, so a manual agent advance is never
+ * regressed), and routes the major money/legal milestones (offer submitted /
+ * under contract / escrow / closed / agreement signed / lease) to an
+ * ai_suggested_stage for the agent to confirm. Acts ONLY on an engaged (replied)
+ * Buyer/Seller/Renter lead - cold/untyped leads stay in Leads, off the board.
+ */
+export async function reconcileDealStage(env: Env, orgId: number, leadId: number): Promise<void> {
+  const lead = await queryFirst<{
+    lead_type: string | null; qualification_status: string | null; area: string | null;
+    timeline: string | null; motivation: string | null; property_address: string | null;
+    last_reply_at: string | null;
+  }>(
+    env.D1DB,
+    `SELECT lead_type, qualification_status, area, timeline, motivation, property_address, last_reply_at
+       FROM lead WHERE id = ? AND org_id = ?`,
+    leadId, orgId,
+  );
+  if (!lead) return;
+  const type = (lead.lead_type || "").toLowerCase() === "both" ? "buyer" : (lead.lead_type || "").toLowerCase();
+  if (!DEAL_PIPELINES[type]) return;   // need a Buyer / Seller / Renter type
+  if (!lead.last_reply_at) return;     // need engagement - the lead has actually replied
+
+  // In conversation -> Consultation by default.
+  let stage = "consult";
+  // Captured search criteria / motivation -> Home Search / Property Search.
+  // Sellers have no "search" stage (their next stage, "signed", is a major
+  // milestone), so they hold at Consultation until the agent confirms it.
+  const qualified =
+    ["qualified", "booking-ready", "booking ready"].includes((lead.qualification_status || "").toLowerCase()) ||
+    Boolean(lead.area && lead.timeline) || Boolean(lead.motivation) || Boolean(lead.property_address);
+  if (qualified && (type === "buyer" || type === "renter")) stage = "search";
+
+  // A scheduled tour/showing -> Property Tours (buyer) / Showings (renter).
+  const appt = await queryFirst<{ t: string | null }>(
+    env.D1DB,
+    `SELECT LOWER(appointment_type) AS t FROM lead_appointment
+      WHERE lead_id = ? AND COALESCE(status,'') != 'cancelled'
+      ORDER BY datetime(created_at) DESC LIMIT 1`,
+    leadId,
+  );
+  const at = appt?.t || "";
+  if (at.includes("showing") || at.includes("tour") || at.includes("viewing")) {
+    if (type === "buyer") stage = "tours";
+    else if (type === "renter") stage = "showings";
+  }
+
+  await applyAiDealUpdate(env, orgId, leadId, { dealType: type, stage, reason: "Auto-staged from lead activity" });
+}
+
+/**
  * Replace a deal's assigned team members. The creator is always kept; brokers
  * (Owner/Manager) may pass additional userIds. Existing rows are cleared first.
  */
