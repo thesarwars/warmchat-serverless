@@ -98,7 +98,17 @@ const TodaySchedule: React.FC<TodayScheduleProps> = ({ data, isLoading }) => {
   const raw: ApiAppointment[] = data?.upcoming_appointments ?? data?.schedule_today ?? [];
 
   const today = new Date();
+  const nowMs = today.getTime();
+  const TERMINAL = new Set(["cancelled", "canceled", "completed", "done", "no_show", "no-show"]);
   const items = raw
+    // Upcoming only: drop anything whose start time has already passed, plus any
+    // cancelled/completed/no-show appointment. The card shows only what the user
+    // still needs to attend or prepare for; it re-evaluates on every 30s refetch.
+    .filter((a) => {
+      const t = a.starts_at ? new Date(a.starts_at).getTime() : NaN;
+      if (!Number.isFinite(t) || t < nowMs) return false;
+      return !TERMINAL.has(String(a.status ?? "").toLowerCase());
+    })
     .map((a) => {
       const startsAt = a.starts_at ? new Date(a.starts_at) : null;
       const isToday = startsAt && Number.isFinite(startsAt.getTime()) && isSameDay(startsAt, today);
