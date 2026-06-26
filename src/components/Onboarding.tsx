@@ -704,14 +704,19 @@ const Onboarding: React.FC = () => {
   // SMS plan gate - any paid plan gets SMS
   const hasSmsAccess = orgPlan && orgPlan !== "free_channel";
   const smsApproved = smsTelnyxStatus === "approved";
+  // SMS counts as "properly connected" once a number is assigned and approved
+  // (or the server-side sms_connected flag is set). Mirrors emailSetupReady.
+  const smsSetupReady = connected.sms || Boolean(smsPhone && smsApproved);
+  // Onboarding can finish once AT LEAST ONE channel is connected - Email OR SMS.
+  const channelReady = emailSetupReady || smsSetupReady;
   const canContinue = (currentStep: Step) => {
     // Step 1 business profile: brokerage + market + a valid commission % + a
     // valid business mailing address (required for CAN-SPAM marketing footers).
     if (currentStep === 1 && !(brokerage.trim() && market.trim() && Number(avgCommission) > 0 && businessAddress.trim() && !validateBusinessAddress(businessAddress))) return false;
     // Step 2 lead & pipeline: both goals set.
     if (currentStep === 2 && !(Number(goalDeals) > 0 && Number(goalAppts) > 0)) return false;
-    // Step 3 connect tools: a connected email is required.
-    if (currentStep === 3 && !emailSetupReady) return false;
+    // Step 3 connect tools: at least one channel (Email OR SMS) must be ready.
+    if (currentStep === 3 && !channelReady) return false;
     return true;
   };
 
@@ -1566,6 +1571,15 @@ const Onboarding: React.FC = () => {
               >
                 Continue →
               </button>
+            )}
+
+            {step === 3 && !channelReady && (
+              <p
+                role="alert"
+                className="w-full text-sm font-medium text-red-600 sm:w-auto"
+              >
+                Please connect Email or SMS to continue.
+              </p>
             )}
 
             {step === 3 && (
