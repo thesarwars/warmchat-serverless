@@ -509,6 +509,24 @@ function OutboundBody() {
   // "Add workflow" opens the in-page wizard; on launch we persist a real
   // automation. Leads enter outbound one at a time as they opt in (the filters
   // become auto-enrollment sources), so creating it just sets up the sequence.
+  // Convert a follow-up's absolute date (YYYY-MM-DD from the wizard's date
+  // picker) into the relative "days after enrollment" the backend stores:
+  // today -> 0 (same day), tomorrow -> 1, etc. A lead enrolled today then gets
+  // exactly the date the user picked (previously this ignored the date and used
+  // the step index, so two follow-ups both dated "today" saved as Day 1 / Day 2).
+  // Falls back to delayDays (templates) or the step index only when no date is set.
+  const fuDelayDays = (f: { date?: string; delayDays?: number }, i: number): number => {
+    if (f.date) {
+      const [y, m, d] = f.date.split("-").map(Number);
+      if (y && m && d) {
+        const picked = new Date(y, m - 1, d).getTime();
+        const n = new Date();
+        const today = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+        return Math.max(0, Math.round((picked - today) / 86_400_000));
+      }
+    }
+    return f.delayDays ?? (i + 1);
+  };
   const createAuto = useMutation({
     mutationFn: (d: WizardLaunch) => createAutomation({
       name: d.name,
@@ -523,7 +541,7 @@ function OutboundBody() {
       sources: [...d.audType, ...d.audStage, ...d.audFilter],
       leads: d.leads,
       timing: d.leads.length > 0 ? "now" : undefined,
-      followups: d.followups.map((f, i) => ({ delay_days: f.delayDays ?? (i + 1), message: f.message, send_time: f.time, channel: f.channel, ...(f.subject ? { subject: f.subject } : {}) })),
+      followups: d.followups.map((f, i) => ({ delay_days: fuDelayDays(f, i), message: f.message, send_time: f.time, channel: f.channel, ...(f.subject ? { subject: f.subject } : {}) })),
     }),
     onSuccess: () => { refresh(); setWizard(false); },
     // Reset the re-entrancy lock whether the create succeeded or failed so a
