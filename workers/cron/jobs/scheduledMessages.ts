@@ -432,24 +432,34 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         } catch (e) { console.warn("[cron:scheduledMessages] ai_reply_sent notify failed", e); }
       }
 
-      // AI Follow-Up status transition: when the last queued follow-up for a
-      // lead finishes without ever getting a reply, mark them Not Engaged so
-      // the agent knows automation has paused.
+      // AI Status lifecycle (background sweep): when the last queued follow-up
+      // for a lead finishes without ever getting a reply, flip AI Status to
+      // "Awaiting Reply" so the agent knows the AI is waiting on the lead. This
+      // is the deterministic, no-LLM background transition. It (a) respects a
+      // manual ai_status edit (json_extract provenance source='manual'), and
+      // (b) never overrides a terminal/handoff state (Off/Paused/Human
+      // Takeover/Appointment Booked/AI Complete). Stage is left untouched - the
+      // old code wrote an invalid 'Not Engaged' stage, which is not a real Stage.
       if (ok && row.contact_id) {
         const pending = await env.D1DB.prepare(
           `SELECT COUNT(1) AS c FROM scheduled_message
             WHERE contact_id = ? AND status = 'scheduled'`,
         ).bind(row.contact_id).first<{ c: number }>();
         const lead = await env.D1DB.prepare(
-          `SELECT last_reply_at, status, qualification_status FROM lead WHERE id = ?`,
-        ).bind(row.contact_id).first<{ last_reply_at: string | null; status: string | null; qualification_status: string | null }>();
+          `SELECT last_reply_at FROM lead WHERE id = ?`,
+        ).bind(row.contact_id).first<{ last_reply_at: string | null }>();
         if ((pending?.c ?? 0) === 0 && lead && !lead.last_reply_at) {
           await env.D1DB.prepare(
-            `UPDATE lead SET status = 'Not Engaged',
-                             qualification_status = 'Not Engaged',
-                             intent = COALESCE(intent, 'cold'),
-                             updated_at = CURRENT_TIMESTAMP
-              WHERE id = ?`,
+            `UPDATE lead
+                SET ai_status = 'awaiting reply',
+                    qualification_status = COALESCE(qualification_status, 'Awaiting Reply'),
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+                AND (ai_field_provenance IS NULL
+                     OR json_extract(ai_field_provenance, '$.ai_status.source') IS NULL
+                     OR json_extract(ai_field_provenance, '$.ai_status.source') <> 'manual')
+                AND LOWER(IFNULL(ai_status, '')) NOT IN
+                    ('off', 'paused', 'human takeover', 'appointment booked', 'ai complete')`,
           ).bind(row.contact_id).run();
         }
       }

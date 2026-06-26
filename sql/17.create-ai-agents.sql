@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS ai_activity_log (
     lead_label TEXT,                       -- denormalized display name (lead may be a webhook source, not a row)
     detail     TEXT,
     status     TEXT NOT NULL DEFAULT 'ok', -- ok | warn | error
+    -- AI field-update provenance (populated for event='lead.field_updated'):
+    -- which field changed, old/new value, classifier confidence (0-1) and the
+    -- triggering message quote. Powers "AI updated Lead Type from Unknown to
+    -- Buyer based on: '...' (confidence 0.92)" in the activity feed.
+    field      TEXT,
+    old_value  TEXT,
+    new_value  TEXT,
+    confidence REAL,
+    evidence   TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ix_ai_activity_log_feed ON ai_activity_log (org_id, agent_key, created_at DESC);
