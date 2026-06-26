@@ -954,10 +954,12 @@ const ConnectPhoneNumber = ({ onDone, embeddedInOnboarding }: ConnectPhoneNumber
             body: JSON.stringify({ channel: "sms" }),
           }).catch(() => { });
         }
+        // Auto-leave the "Register SMS Number" page 5 seconds after texting is
+        // switched on (the user can also leave immediately via the X top-right).
         setTimeout(() => {
           if (onDone) onDone();
           else navigate(returnTo || "/onboarding");
-        }, 2000);
+        }, 5000);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
