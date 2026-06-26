@@ -9,6 +9,9 @@ export interface BillingSnapshot {
   subscription_status: string;
   plan_started_at: string | null;
   is_active: boolean;
+  // When the active access comes from a 100%-off promo ('comp'), this is when it
+  // lapses (null = never). Lets the UI show "no card required until <date>".
+  comp_expires_at: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   org_id: number;
@@ -22,13 +25,13 @@ export interface BillingSnapshot {
 export async function getBillingSnapshot(env: Env, userId: number): Promise<BillingSnapshot | null> {
   const row = await queryFirst<{
     plan: string | null; subscription_status: string | null;
-    plan_started_at: string | null;
+    plan_started_at: string | null; comp_expires_at: string | null;
     stripe_customer_id: string | null; stripe_subscription_id: string | null;
     org_id: number;
   }>(
     env.D1DB,
-    `SELECT o.plan, o.subscription_status, o.plan_started_at, o.stripe_customer_id,
-            o.stripe_subscription_id, o.id AS org_id
+    `SELECT o.plan, o.subscription_status, o.plan_started_at, o.comp_expires_at,
+            o.stripe_customer_id, o.stripe_subscription_id, o.id AS org_id
        FROM membership m JOIN organization o ON o.id = m.org_id
       WHERE m.user_id = ? LIMIT 1`,
     userId,
@@ -43,6 +46,7 @@ export async function getBillingSnapshot(env: Env, userId: number): Promise<Bill
     subscription_status: status,
     plan_started_at: row.plan_started_at,
     is_active: isActive,
+    comp_expires_at: status === "comp" ? row.comp_expires_at : null,
     stripe_customer_id: row.stripe_customer_id,
     stripe_subscription_id: row.stripe_subscription_id,
     org_id: row.org_id,

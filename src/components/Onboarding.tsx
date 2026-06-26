@@ -558,7 +558,12 @@ const Onboarding: React.FC = () => {
     // one hosted flow - the inline form was causing users to enter their card
     // twice (once for SetupIntent, then again on Stripe Checkout).
     setSelectedUpgradePlan(planId);
-    await createCheckoutAndRedirect(planId);
+    // This upgrade modal only ever opens from "Upgrade to Enable SMS", so after
+    // the plan is confirmed (real checkout OR an instant comp) route the user
+    // forward to SMS number setup - NOT back to /onboarding, which would dump
+    // them on Step 3 again. /connect-phone is onboarding-exempt so the route
+    // guard won't bounce them back into the funnel.
+    await createCheckoutAndRedirect(planId, "/connect-phone");
   };
 
   const startGmailOAuth = async () => {

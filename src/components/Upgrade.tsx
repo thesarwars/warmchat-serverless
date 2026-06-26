@@ -5,6 +5,7 @@ import { Rocket } from "lucide-react";
 import StripeWrapper from "./StripeWrapper";
 import PlanSelection from "./PlanSelection";
 import MainLayout from "./MainLayout";
+import { hasActivePaidPlan, promoNotice, type BillingLike } from "@/utils/entitlements";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 
@@ -23,6 +24,19 @@ const Upgrade: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [cardAdded, setCardAdded] = useState<boolean>(false);
   const [currentPlan, setCurrentPlan] = useState<string | null>(selectedPlan);
   const [step, setStep] = useState<1 | 2>(1);
+  const [billing, setBilling] = useState<BillingLike>(null);
+
+  // Where to send the user once they already have (or just gained) access. The
+  // Connect SMS flow lands here when it thinks SMS is locked; if the user is in
+  // fact entitled we forward them straight to SMS setup instead of a card wall.
+  const returnParam = searchParams.get("return");
+  const smsSetupDest = returnParam && returnParam.startsWith("/") ? returnParam : "/connect-phone";
+
+  // Active paid access already in hand: a paid plan that is active, on trial, or
+  // granted by a 100%-off promo ('comp'). These users must NOT be forced to add
+  // a card to use SMS.
+  const alreadyEntitled = hasActivePaidPlan(billing);
+  const notice = promoNotice(billing);
 
   useEffect(() => {
     if (!token) navigate("/login");
@@ -38,10 +52,19 @@ const Upgrade: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
         if (!res.ok) return;
 
         const data = await res.json();
+        setBilling(data);
         if (data.plan) setCurrentPlan(data.plan);
-        setCardAdded(data.card_added || false);
 
-        if (data.card_added) setStep(2);
+        // Already entitled (active/trialing/comp paid plan): a card is NOT
+        // required. Skip the "Add Payment Method" gate entirely - showing it to
+        // a promo/trial user is the billing-bypass bug.
+        if (hasActivePaidPlan(data)) {
+          setCardAdded(true);
+          setStep(2);
+        } else {
+          setCardAdded(data.card_added || false);
+          if (data.card_added) setStep(2);
+        }
 
         if (data.plan) localStorage.setItem("selectedPlan", data.plan);
       } catch (err) {
@@ -77,8 +100,26 @@ const Upgrade: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             </div>
           </div>
 
-          {/* STEP 1 - Add Payment Method */}
-          {step === 1 && !cardAdded && (
+          {/* Already entitled: no card required - reassure + send to SMS setup. */}
+          {alreadyEntitled && (
+            <div className="w-full max-w-4xl mb-6 rounded-xl border border-green-200 bg-green-50 p-5">
+              <p className="text-sm font-semibold text-green-800">
+                {notice || "You're on an active paid plan — no card required."}
+              </p>
+              <p className="mt-1 text-sm text-green-700">
+                SMS is already unlocked on your account. You can set up your number now.
+              </p>
+              <button
+                onClick={() => navigate(smsSetupDest)}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700"
+              >
+                Continue to SMS setup →
+              </button>
+            </div>
+          )}
+
+          {/* STEP 1 - Add Payment Method (only when no active paid access yet) */}
+          {step === 1 && !cardAdded && !alreadyEntitled && (
             <div className="w-full max-w-4xl">
               <StripeWrapper
                 onSuccess={() => {
