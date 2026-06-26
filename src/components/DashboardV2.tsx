@@ -416,7 +416,7 @@ const DashboardV2: React.FC = () => {
                 }
                 className={`${connectionChipBase} ${emailState === "connected"
                     ? "cursor-default border-green-200 bg-green-50 text-green-700"
-                    : "border-[#EAEAEA] bg-white text-[#463b31] hover:bg-[#faf7f2]"
+                    : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
                   }`}
               >
                 {emailState === "connected" ? (
@@ -425,10 +425,10 @@ const DashboardV2: React.FC = () => {
                   </svg>
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M18 6 6 18M6 6l12 12" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 )}
-                {emailState === "connected" ? "Email Connected" : "Add Email Connection"}
+                {emailState === "connected" ? "Email Connected" : "Connect Email"}
               </button>
             )}
             {smsState !== "loading" && (
@@ -445,29 +445,19 @@ const DashboardV2: React.FC = () => {
                 }
                 className={`${connectionChipBase} ${smsState === "connected"
                     ? "cursor-default border-green-200 bg-green-50 text-green-700"
-                    : smsState === "available"
-                      ? "border-[#EAEAEA] bg-white text-[#463b31] hover:bg-[#faf7f2]"
-                      : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                    : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
                   }`}
               >
                 {smsState === "connected" ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                     <path d="M20 6 9 17l-5-5" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                ) : smsState === "available" ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M6 10V8a6 6 0 1 1 12 0v2m-9 0h6a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Z" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M18 6 6 18M6 6l12 12" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 )}
-                {smsState === "connected"
-                  ? "SMS Connected"
-                  : smsState === "available"
-                    ? "Add SMS Connection"
-                    : "SMS not connected - Upgrade"}
+                {smsState === "connected" ? "SMS Connected" : "Connect SMS"}
               </button>
             )}
           </div>
