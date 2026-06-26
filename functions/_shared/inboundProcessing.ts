@@ -15,6 +15,7 @@ import { openEscalation } from "./escalation.ts";
 import { createTask } from "./tasks.ts";
 import { reconcileDealStage } from "./deals.ts";
 import { notify } from "./notify.ts";
+import { isReactionOnly } from "./reactions.ts";
 import { suppressPhone, unsuppressPhone } from "./suppression.ts";
 import { mockTelnyxSendSms } from "./mockSendApi.ts";
 import { dispatchZapierEvent } from "./zapierDispatch.ts";
@@ -50,7 +51,8 @@ export interface InboundSmsResult {
   deduped?: boolean;
   dispatched?: string;
   opted_out?: boolean;
-  lead_id?: number;
+  reaction?: boolean;
+  lead_id?: number | null;
   conversation_id?: number;
 }
 
@@ -156,6 +158,10 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   const fromNumber = input.fromNumber || "";
   const toNumber = input.toNumber || "";
   const messageText = input.text || "";
+  // Emoji-only / SMS Tapback ("Liked ...") -> log it, but no AI reply, no task,
+  // no "Needs Reply". Recorded with status='reaction' so the inbox needs-reply
+  // aggregate excludes it (see api/inbox/contacts).
+  const isReaction = isReactionOnly(messageText);
   if (!fromNumber || !toNumber) return { ok: true, ignored: "missing from/to" };
 
   const u = await queryFirst<{ id: number; name: string | null }>(
@@ -208,8 +214,9 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   await execute(
     env.D1DB,
     `INSERT INTO sms_message (org_id, conversation_id, direction, body, status, provider_message_sid, created_at)
-     VALUES (?, ?, 'inbound', ?, 'received', ?, ?)`,
-    m.org_id, conv.id, messageText, input.providerMessageId ?? null, input.receivedAt || nowIso(),
+     VALUES (?, ?, 'inbound', ?, ?, ?, ?)`,
+    m.org_id, conv.id, messageText, isReaction ? "reaction" : "received",
+    input.providerMessageId ?? null, input.receivedAt || nowIso(),
   );
   await execute(env.D1DB,
     `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`, nowIso(), conv.id);
@@ -217,7 +224,8 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   // Notification fan-out: live in-app toast/sound + persistent bell-list row
   // + web-push when the user isn't actively connected. Best-effort; failure
   // here must not break the webhook reply (Telnyx will retry on non-2xx).
-  try {
+  // Reactions are silent - no "new message" alert for a thumbs-up/Tapback.
+  if (!isReaction) try {
     const leadRow = await queryFirst<{ id: number; name: string | null }>(
       env.D1DB,
       `SELECT id, name FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
@@ -355,6 +363,15 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
     `SELECT id, lead_type, ai_status FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
     m.org_id, fromNumber,
   );
+  // Reaction-only (emoji/Tapback): it's already logged in history above. Stop
+  // here - no AI reply, no escalation/task, no stop-on-reply. Bump recency
+  // WITHOUT flipping direction to 'inbound', so the thread is NOT marked "Needs
+  // Reply" (and the needs-reply count keys off last_activity_direction).
+  if (isReaction) {
+    if (existingLead) await bumpLeadActivity(env.D1DB, existingLead.id, nowIso());
+    return { ok: true, reaction: true, lead_id: existingLead?.id ?? null, conversation_id: conv.id };
+  }
+
   // An inbound SMS from a known lead bubbles its contact to the top of the inbox
   // immediately (regardless of AI settings). Cold-inbound new leads bump below.
   if (existingLead) await bumpLeadActivity(env.D1DB, existingLead.id, nowIso(), "inbound");
@@ -561,6 +578,9 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   // notification snippet, AI context) uses the quote-stripped version.
   const body = input.body || "";
   const cleanBody = stripQuotedReply(body);
+  // Emoji-only / reaction email -> log it, but no AI reply, no task, and don't
+  // mark the thread "Needs Reply". (Email reactions are rare vs SMS Tapbacks.)
+  const isReaction = isReactionOnly(cleanBody);
   // Normalize the provider's Date header to ISO 8601. It often arrives RFC-2822
   // ("Sat, 20 Jun 2026 13:06:07 GMT"); message_date is compared as a STRING all
   // over the app, and an RFC-2822 value sorts ABOVE every ISO date ("S" > "2"),
@@ -680,7 +700,8 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
        VALUES (?, ?, ?, ?, ?, 'inbound', 'email', ?, ?, ?)`,
       thread.id, from, to, subject, cleanBody, nowIso(), receivedAt, inboundLeadId,
     );
-    await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt, "inbound");
+    // Reactions bump recency but do NOT flip direction to 'inbound' (no Needs Reply).
+    await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt, isReaction ? undefined : "inbound");
   }
 
   // Provider-level audit row (FK requires a connection id, so skip it when the
@@ -761,7 +782,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
   // toggle (inbound_email_enabled) + the 3-level lead gate (runInboundAgent
   // re-checks master/per-lead). Best-effort - a failure must not break the
   // webhook reply (the email is already recorded above).
-  if (thread && orgId != null && cleanBody.trim()) {
+  if (thread && orgId != null && cleanBody.trim() && !isReaction) {
     try {
       let lead = input.leadId != null
         ? await queryFirst<{ id: number; owner_id: number | null; ai_status: string | null }>(
