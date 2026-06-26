@@ -13,6 +13,7 @@ import { extractInboundData } from "./qualificationFlow.ts";
 import { runInboundAgent } from "./aiOrchestrator.ts";
 import { openEscalation } from "./escalation.ts";
 import { createTask } from "./tasks.ts";
+import { reconcileDealStage } from "./deals.ts";
 import { notify } from "./notify.ts";
 import { suppressPhone, unsuppressPhone } from "./suppression.ts";
 import { mockTelnyxSendSms } from "./mockSendApi.ts";
@@ -397,6 +398,10 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
       message: messageText,
       lead: toLeadView(repliedRow),
     });
+    // Deterministic deal tracking: an engaged, typed lead gets a deal that
+    // auto-advances to the right early stage from real signals (qualification,
+    // appointments); major milestones still route to an agent suggestion.
+    await reconcileDealStage(env, m.org_id, existingLead.id).catch(() => {});
   }
 
   // Built-in human-takeover: a personal/callback request, negative sentiment, or
@@ -811,6 +816,7 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
           } else if (await aiSendAllowedForLead(env, { org_id: orgId, ai_status: lead.ai_status })) {
             await runInboundAgent(env, lead.id, cleanBody, { channel: "email", subject });
           }
+          await reconcileDealStage(env, orgId, lead.id).catch(() => {});
         }
       }
     } catch (err) {
