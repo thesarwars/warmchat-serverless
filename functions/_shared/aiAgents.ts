@@ -70,7 +70,6 @@ export const WORKFLOW_DEFS: Record<"inbound" | "outbound", WorkflowDef[]> = {
     { key: "w1", name: "New lead -> instant reply", trigger_type: "New lead", trigger_source: "Zillow, FB, Site", action: "AI replies within 60s, asks 3 qualifying questions", outcome: "Routes to inbox or books showing", position: 0, defaultEnabled: true, engineField: "inbound_sms_enabled" },
     { key: "w2", name: "Lead replies -> qualify", trigger_type: "Lead reply", trigger_source: "SMS / Email", action: "Detects intent, scores 1-100, updates pipeline stage", outcome: "Hot -> owner, Warm -> nurture, Cold -> drip", position: 1, defaultEnabled: true, engineField: "qualification_enabled" },
     { key: "w3", name: "Missed call -> auto text", trigger_type: "Missed call", trigger_source: "Business line", action: "Sends apology + offer to text back", outcome: "Conversation opened in inbox", position: 2, defaultEnabled: true, engineField: "missed_call_enabled" },
-    { key: "w4", name: "Website form -> create lead + respond", trigger_type: "Form submit", trigger_source: "Website", action: "Creates contact, replies with personalized note", outcome: "New lead - Pre-qualified", position: 3, defaultEnabled: true, engineField: "inbound_new_send_reply" },
     // w5 is the booking master control. Its on/off state is NOT a column on
     // auto_response_settings - it IS agent_availability.enabled (the same flag the
     // Availability editor's master switch drives), so the card and the editor are
