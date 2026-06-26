@@ -73,7 +73,14 @@ CREATE TABLE IF NOT EXISTS lead (
     -- upsert from /api/integrations/v1/leads; platform is the capture channel
     -- (Instagram | Facebook | Website | ...).
     external_id                 TEXT,
-    platform                    TEXT
+    platform                    TEXT,
+    -- Per-field provenance for the AI auto-update engine. JSON object keyed by
+    -- field (status | lead_type | ai_status | source | price_range | area) ->
+    -- { source: 'ai' | 'manual', confidence, updated_at }. Lets the AI avoid
+    -- clobbering a value an agent set by hand unless new high-confidence
+    -- conversation evidence shows the lead's intent changed. NULL = never
+    -- stamped (AI-owned). See functions/_shared/leadFieldEngine.ts.
+    ai_field_provenance         TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_lead_org_id ON lead (org_id);
 CREATE INDEX IF NOT EXISTS ix_lead_owner_id ON lead (owner_id);

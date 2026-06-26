@@ -16,6 +16,7 @@ import { dispatchZapierEvent } from "./zapierDispatch.ts";
 import { toLeadView } from "./integrationApi.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { logAgentActivity } from "./aiAgents.ts";
+import { applyAiLeadFields, setAiStatus, type LeadFieldProposal } from "./leadFieldEngine.ts";
 import { openEscalation } from "./escalation.ts";
 import { ensureDealForLead } from "./deals.ts";
 
@@ -101,10 +102,22 @@ const NOT_INTERESTED_ACK =
  * any field the classifier left null so we never overwrite real data with
  * empty results.
  */
-async function applyExtractions(env: Env, leadId: number, extracted: ClassifyResult["extracted"]): Promise<void> {
+async function applyExtractions(
+  env: Env, leadId: number, extracted: ClassifyResult["extracted"],
+  ctx?: { evidence?: string | null; confidence?: number | undefined },
+): Promise<void> {
+  // Governed "smart filter" fields go through the engine: Budget is bucketed to
+  // the 5 canonical ranges, Area is normalized, both stamped with provenance +
+  // an audit row (and never clobber a manual edit).
+  const governed: LeadFieldProposal[] = [];
+  if (extracted.budget) governed.push({ field: "price_range", value: extracted.budget, confidence: ctx?.confidence ?? 0.7 });
+  if (extracted.area) governed.push({ field: "area", value: extracted.area, confidence: ctx?.confidence ?? 0.7 });
+  if (governed.length) {
+    await applyAiLeadFields(env, leadId, governed, { agentKey: "inbound", evidence: ctx?.evidence ?? null });
+  }
+
   const sets: string[] = [];
   const args: unknown[] = [];
-  if (extracted.budget) { sets.push("price_range = ?"); args.push(extracted.budget); }
   if (extracted.timeline) { sets.push("timeline = ?"); args.push(extracted.timeline); }
   if (typeof extracted.pre_approved === "boolean") {
     sets.push("pre_approved = ?"); args.push(extracted.pre_approved ? 1 : 0);
@@ -115,7 +128,6 @@ async function applyExtractions(env: Env, leadId: number, extracted: ClassifyRes
   if (extracted.motivation) { sets.push("motivation = ?"); args.push(extracted.motivation); }
   if (extracted.financing_status) { sets.push("financing_status = ?"); args.push(extracted.financing_status); }
   if (extracted.interest_level) { sets.push("interest_level = ?"); args.push(extracted.interest_level); }
-  if (extracted.area) { sets.push("area = ?"); args.push(extracted.area); }
   if (typeof extracted.bedrooms === "number") { sets.push("bedrooms = ?"); args.push(extracted.bedrooms); }
   if (typeof extracted.bathrooms === "number") { sets.push("bathrooms = ?"); args.push(extracted.bathrooms); }
   if (extracted.property_type) { sets.push("property_type = ?"); args.push(extracted.property_type); }
@@ -203,11 +215,16 @@ export async function extractInboundData(env: Env, leadId: number, replyText: st
     env.D1DB, `SELECT lead_type FROM lead WHERE id = ?`, leadId);
   if (!lead) return;
   const classified = await classifyReplyText(env, replyText, lead.lead_type);
-  await applyExtractions(env, leadId, classified.extracted);
+  await applyExtractions(env, leadId, classified.extracted, { evidence: replyText, confidence: classified.confidence });
   if (classified.intent === "booking") {
-    await execute(env.D1DB, `UPDATE lead SET status = 'Qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, leadId);
+    await applyAiLeadFields(env, leadId, [{ field: "status", value: "Qualified", confidence: 0.8 }],
+      { agentKey: "inbound", evidence: replyText });
   } else if (classified.intent === "cold" || classified.intent === "not_interested") {
-    await execute(env.D1DB, `UPDATE lead SET status = 'Lost', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, leadId);
+    // Clear negative signal: Lost is allowed from any stage (intentChange) and the
+    // AI is done with this lead.
+    await applyAiLeadFields(env, leadId, [{ field: "status", value: "Lost", confidence: 0.85, intentChange: true }],
+      { agentKey: "inbound", evidence: replyText });
+    await setAiStatus(env, leadId, "ai complete", { agentKey: "inbound", evidence: replyText });
   }
   await refreshLeadIntelligence(env, leadId);
 }
@@ -259,15 +276,17 @@ async function runQualification(
   }
 
   const classified = await classifyReplyText(env, replyText, lead.lead_type);
-  await applyExtractions(env, leadId, classified.extracted);
+  await applyExtractions(env, leadId, classified.extracted, { evidence: replyText, confidence: classified.confidence });
 
   // Booking intent short-circuit: skip qualification, SEND the booking message,
   // tag hot_seller (sellers), notify the agent.
   if (classified.intent === "booking") {
     const result = await dispatchQuestion(env, lead, settings, BOOKING_MESSAGE);
+    await applyAiLeadFields(env, leadId, [{ field: "status", value: "Qualified", confidence: 0.85 }],
+      { agentKey: "inbound", evidence: replyText });
     await execute(
       env.D1DB,
-      `UPDATE lead SET status = 'Qualified', qualification_status = 'Booking-ready', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      `UPDATE lead SET qualification_status = 'Booking-ready', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       leadId,
     );
     if (lead.lead_type === "seller") await attachTag(env, lead.org_id, leadId, "hot_seller");
@@ -290,11 +309,14 @@ async function runQualification(
   // Not-interested short-circuit: acknowledge once, stop, tag Lost / Not Engaged.
   if (classified.intent === "cold" || classified.intent === "not_interested") {
     const result = await dispatchQuestion(env, lead, settings, NOT_INTERESTED_ACK);
+    await applyAiLeadFields(env, leadId, [{ field: "status", value: "Lost", confidence: 0.85, intentChange: true }],
+      { agentKey: "inbound", evidence: replyText });
     await execute(
       env.D1DB,
-      `UPDATE lead SET status = 'Lost', qualification_status = 'Not Engaged', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      `UPDATE lead SET qualification_status = 'Not Engaged', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       leadId,
     );
+    await setAiStatus(env, leadId, "ai complete", { agentKey: "inbound", evidence: replyText });
     return { status: "not_interested", ...result };
   }
 

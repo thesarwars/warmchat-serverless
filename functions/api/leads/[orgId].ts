@@ -13,6 +13,7 @@ import {
 import { resolveLeadEscalations } from "../../_shared/escalation.ts";
 import { hotStatusSql } from "../../_shared/leadStage.ts";
 import { capLeadField, LEAD_TEXT_LIMITS, type LeadTextField } from "../../_shared/leadLimits.ts";
+import { stampManualProvenance, isProvenanceField } from "../../_shared/leadFieldEngine.ts";
 
 // The `[orgId]` param does double duty:
 //   GET    /api/leads/:org_id    -> list leads in org (bare array)
@@ -336,8 +337,8 @@ const UPDATABLE = [
 type UpdField = (typeof UPDATABLE)[number];
 
 async function updateLead(env: Env, userId: number, leadId: number, body: Record<string, unknown>): Promise<Response> {
-  const lead = await queryFirst<{ org_id: number | null; ai_status: string | null }>(
-    env.D1DB, `SELECT org_id, ai_status FROM lead WHERE id = ?`, leadId);
+  const lead = await queryFirst<{ org_id: number | null; ai_status: string | null; ai_field_provenance: string | null }>(
+    env.D1DB, `SELECT org_id, ai_status, ai_field_provenance FROM lead WHERE id = ?`, leadId);
   if (!lead) return error("Lead not found", 404);
   if (lead.org_id && !(await isOrgMember(env, userId, lead.org_id))) return error("Forbidden", 403);
 
@@ -388,6 +389,16 @@ async function updateLead(env: Env, userId: number, leadId: number, body: Record
     }
   }
   if (!sets.length) return json({ message: "Nothing to update" });
+
+  // Mark any governed "smart filter" field the agent edited by hand as
+  // source='manual' so the background AI engine won't overwrite it unless new
+  // high-confidence conversation evidence shows the lead's intent changed.
+  const manualFields = Object.keys(body).filter(isProvenanceField);
+  if (manualFields.length) {
+    sets.push("ai_field_provenance = ?");
+    args.push(stampManualProvenance(lead.ai_field_provenance, manualFields));
+  }
+
   await execute(env.D1DB, `UPDATE lead SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...args, leadId);
 
   // The inline AI-Status pill is the per-lead control for the REACTIVE AI

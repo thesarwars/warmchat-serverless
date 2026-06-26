@@ -455,15 +455,23 @@ export async function logAgentActivity(
     orgId: number; userId: number; agentKey: AgentKey; event: string;
     leadId?: number | null; leadLabel?: string | null; detail?: string | null;
     status?: "ok" | "warn" | "error";
+    // Structured field-change provenance (event='lead.field_updated'); lets the
+    // UI render "AI updated <field> from <old> to <new> based on '<evidence>'".
+    field?: string | null; oldValue?: string | null; newValue?: string | null;
+    confidence?: number | null; evidence?: string | null;
   },
 ): Promise<void> {
   try {
     await execute(
       env.D1DB,
-      `INSERT INTO ai_activity_log (org_id, user_id, agent_key, event, lead_id, lead_label, detail, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ai_activity_log
+         (org_id, user_id, agent_key, event, lead_id, lead_label, detail, status,
+          field, old_value, new_value, confidence, evidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       opts.orgId, opts.userId, opts.agentKey, opts.event,
       opts.leadId ?? null, opts.leadLabel ?? null, opts.detail ?? null, opts.status ?? "ok",
+      opts.field ?? null, opts.oldValue ?? null, opts.newValue ?? null,
+      opts.confidence ?? null, opts.evidence ?? null,
     );
   } catch {
     // Logging must never break the request path.

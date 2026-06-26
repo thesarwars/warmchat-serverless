@@ -22,6 +22,10 @@ import { advanceQualification } from "./qualificationFlow.ts";
 import { classifyReplyText } from "./intentClassifier.ts";
 import { notify } from "./notify.ts";
 import { STAGE_OPTIONS, normalizeStage } from "./leadStage.ts";
+import {
+  applyAiLeadFields, setAiStatus, normalizeLeadType, isProvenanceField,
+  type LeadFieldProposal,
+} from "./leadFieldEngine.ts";
 
 /**
  * The inbound AI brain - a real LLM tool-calling agent (NOT a keyword/template
@@ -280,18 +284,48 @@ const LEAD_UPDATE_FIELDS: Record<string, (v: unknown) => unknown> = {
   seller_price_expectations: (v) => String(v),
 };
 
-async function applyLeadUpdates(env: Env, leadId: number, fields: Record<string, unknown>): Promise<{ message: string; applied: string[] }> {
+async function applyLeadUpdates(
+  env: Env, leadId: number, fields: Record<string, unknown>,
+  ctx?: { orgId?: number | null; userId?: number | null; label?: string | null; evidence?: string | null },
+): Promise<{ message: string; applied: string[] }> {
+  const applied: string[] = [];
+
+  // Governed "smart filter" fields (lead_type/status/area/price_range) go through
+  // the override-guarded engine so they (a) respect a manual agent edit, (b) get
+  // normalized to the canonical options (e.g. Budget bucketed), and (c) emit an
+  // auditable provenance row. The model's tool call carries no intent-change
+  // signal, so it never overrides a hand-set value - exactly the "only on clear
+  // new intent" policy.
+  const proposals: LeadFieldProposal[] = [];
+  for (const k of Object.keys(fields)) {
+    if (!isProvenanceField(k) || k === "ai_status" || k === "source") continue;
+    const v = fields[k];
+    if (v === null || v === undefined || v === "") continue;
+    proposals.push({ field: k, value: v, confidence: 0.85 });
+  }
+  if (proposals.length) {
+    const eng = await applyAiLeadFields(env, leadId, proposals, {
+      orgId: ctx?.orgId ?? null, userId: ctx?.userId ?? null, agentKey: "inbound",
+      evidence: ctx?.evidence ?? null, label: ctx?.label ?? null,
+    });
+    applied.push(...eng);
+  }
+
+  // The remaining (non-governed) extracted fields keep their direct write.
   const sets: string[] = [];
   const args: unknown[] = [];
-  const applied: string[] = [];
   for (const [k, fn] of Object.entries(LEAD_UPDATE_FIELDS)) {
+    if (isProvenanceField(k) && k !== "ai_status" && k !== "source") continue; // handled above
     if (k in fields && fields[k] !== null && fields[k] !== undefined && fields[k] !== "") {
       sets.push(`${k} = ?`); args.push(fn(fields[k])); applied.push(k);
     }
   }
-  if (!sets.length) return { message: "No fields to update.", applied };
-  args.push(leadId);
-  await execute(env.D1DB, `UPDATE lead SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...args);
+  if (sets.length) {
+    args.push(leadId);
+    await execute(env.D1DB, `UPDATE lead SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...args);
+  }
+
+  if (!applied.length) return { message: "No fields to update.", applied };
   return { message: `Saved: ${applied.join(", ")}.`, applied };
 }
 
@@ -356,7 +390,7 @@ async function notifyAgent(env: Env, lead: LeadFull, title: string, body: string
   } catch { /* non-fatal */ }
 }
 
-interface LoopState { sent: boolean; booked: boolean; escalated: boolean; deliveredText?: string }
+interface LoopState { sent: boolean; booked: boolean; escalated: boolean; deliveredText?: string; evidence?: string }
 
 async function executeTool(
   env: Env, orgId: number, userId: number, lead: LeadFull, settings: AutoResponseRow,
@@ -394,13 +428,16 @@ async function executeTool(
       const prevStatus = wantsStatus
         ? (await queryFirst<{ status: string | null }>(env.D1DB, `SELECT status FROM lead WHERE id = ?`, lead.id))?.status ?? null
         : null;
-      const { message: msg, applied } = await applyLeadUpdates(env, lead.id, args);
+      const { message: msg, applied } = await applyLeadUpdates(env, lead.id, args, {
+        orgId, userId, label, evidence: state.evidence ?? null,
+      });
       // Compare both sides NORMALIZED (the stored value may be a legacy/imported
       // label that maps onto the same canonical stage) so only a genuine pipeline
-      // move is logged + counted - not a casing/legacy difference.
+      // move is logged + counted - not a casing/legacy difference. Gate on the
+      // engine actually writing `status` (it may skip a manual-lock or downgrade).
       const newStatus = wantsStatus ? normalizeStage(String(args.status)) : null;
       const prevNorm = prevStatus != null ? normalizeStage(prevStatus) : null;
-      const movedStage = newStatus != null && newStatus !== prevNorm;
+      const movedStage = applied.includes("status") && newStatus != null && newStatus !== prevNorm;
       const editedFields = applied.some((k) => k !== "status");
       if (movedStage) {
         await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "lead.stage_changed", leadId: lead.id, leadLabel: label, detail: `${prevNorm ?? "-"} -> ${newStatus}`, status: "ok" });
@@ -461,6 +498,8 @@ async function executeTool(
       // the previous stage first so a genuine move is counted once.
       const prevApptStatus = (await queryFirst<{ status: string | null }>(env.D1DB, `SELECT status FROM lead WHERE id = ?`, lead.id))?.status ?? null;
       await execute(env.D1DB, `UPDATE lead SET status = 'Appointment Set', appointment_booked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, lead.id);
+      // AI Status lifecycle: a held appointment -> "Appointment Booked" (audited).
+      await setAiStatus(env, lead.id, "appointment booked", { orgId, userId, label, evidence: state.evidence ?? null });
       // Deal birth: a booked consultation is the start of a real transaction -
       // make sure the lead has a deal at its pipeline's first stage.
       const bornDealId = await ensureDealForLead(env, orgId, lead.id, lead.lead_type).catch(() => null);
@@ -498,6 +537,8 @@ async function executeTool(
     case "escalate_to_agent": {
       const reason = String(args.reason || "Lead needs the agent");
       await openEscalation(env, { orgId, leadId: lead.id, ownerId: lead.owner_id, reason, detail: reason });
+      // AI Status lifecycle: the AI is handing off -> "Human Takeover" (audited).
+      await setAiStatus(env, lead.id, "human takeover", { orgId, userId, label, evidence: state.evidence ?? null });
       // Tag hot_seller when escalating a seller (spec: seller booking trigger -> hot_seller + notify).
       if (lead.lead_type === "seller") await attachTag(env, orgId, lead.id, "hot_seller").catch(() => {});
       await notifyAgent(env, lead, "AI escalated a lead", `${label}: ${reason}`);
@@ -524,7 +565,8 @@ async function executeTool(
           recommendation: isCall
             ? "Call the lead - they asked to speak with the agent."
             : "Reach out to the lead to move this forward.",
-          scoreLabel: "Needs response", priority: "high", source: "ai",
+          // Human Takeover means the AI needs the agent now - make it urgent.
+          scoreLabel: "Needs response", priority: "urgent", source: "ai",
         }).catch(() => {});
         await logAgentActivity(env, { orgId, userId, agentKey: "inbound", event: "task.created", leadId: lead.id, leadLabel: label, detail: taskTitle, status: "ok" });
       }
@@ -637,7 +679,7 @@ async function executeTool(
 
 async function runAgentLoop(
   env: Env, orgId: number, userId: number, lead: LeadFull, settings: AutoResponseRow,
-  channel: Channel, replySubject: string,
+  channel: Channel, replySubject: string, replyText: string,
 ): Promise<{ status: string; sent: boolean }> {
   const profileRow = await queryFirst<LeadProfileRow>(
     env.D1DB,
@@ -700,7 +742,7 @@ async function runAgentLoop(
     ? await loadEmailHistory(env, lead.id)
     : (lead.phone ? await loadHistory(env, orgId, lead.phone) : []);
   const messages: ChatMessage[] = [{ role: "system", content: system }, ...history];
-  const state: LoopState = { sent: false, booked: false, escalated: false };
+  const state: LoopState = { sent: false, booked: false, escalated: false, evidence: replyText };
   // Response-timing pause (persona). Natural delay -> queue the reply for the
   // cron instead of sending instantly.
   const replyDelayMs = await resolveReplyDelayMs(env, orgId, lead.owner_id ?? userId);
@@ -817,9 +859,17 @@ export async function runInboundAgent(
   if (!lead.lead_type || lead.lead_type === "unknown") {
     try {
       const c = await classifyReplyText(env, replyText, lead.lead_type);
-      if (c.lead_type_signal) {
-        await execute(env.D1DB, `UPDATE lead SET lead_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, c.lead_type_signal, leadId);
-        lead.lead_type = c.lead_type_signal;
+      const conf = c.confidence ?? 0.7;
+      const proposals: LeadFieldProposal[] = [];
+      if (c.lead_type_signal) proposals.push({ field: "lead_type", value: c.lead_type_signal, confidence: conf });
+      if (c.extracted.budget) proposals.push({ field: "price_range", value: c.extracted.budget, confidence: conf });
+      if (c.extracted.area) proposals.push({ field: "area", value: c.extracted.area, confidence: conf });
+      if (proposals.length) {
+        const eng = await applyAiLeadFields(env, leadId, proposals, {
+          orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",
+          evidence: replyText, label: lead.name || lead.first_name || "Lead",
+        });
+        if (eng.includes("lead_type")) lead.lead_type = normalizeLeadType(c.lead_type_signal) ?? lead.lead_type;
       }
     } catch { /* non-fatal - the agent can still set it via update_lead */ }
   }
@@ -827,7 +877,7 @@ export async function runInboundAgent(
   const replySubject = channel === "email" ? buildReplySubject(opts.subject) : "";
 
   try {
-    const result = await runAgentLoop(env, lead.org_id, lead.owner_id ?? settings.user_id, lead, settings, channel, replySubject);
+    const result = await runAgentLoop(env, lead.org_id, lead.owner_id ?? settings.user_id, lead, settings, channel, replySubject, replyText);
     await refreshLeadIntelligence(env, leadId).catch(() => {});
     return result;
   } catch (e) {

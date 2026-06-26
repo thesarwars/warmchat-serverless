@@ -16,11 +16,15 @@ import { generateWithOpenAI } from "./openai.ts";
 
 export type LeadIntent = "warm" | "cold" | "not_interested" | "booking" | "unknown";
 
-export type LeadTypeSignal = "buyer" | "seller" | "both" | null;
+export type LeadTypeSignal =
+  | "buyer" | "seller" | "both" | "investor" | "renter" | "agent_referral" | null;
 
 export interface ClassifyResult {
   intent: LeadIntent;
   lead_type_signal: LeadTypeSignal;
+  // 0-1 confidence in the classification (drives the AI field-update audit +
+  // the manual-override threshold). Keyword hits ~0.7; LLM uses its own estimate.
+  confidence?: number;
   extracted: {
     budget?: string;
     timeline?: string;
@@ -56,6 +60,17 @@ const NOT_INTERESTED_WORDS = [
 const BUYER_WORDS = ["buy", "buying", "looking to buy", "purchase", "homes", "house hunting"];
 const SELLER_WORDS = ["sell", "selling", "list", "list my home", "my home", "listing"];
 const BOTH_WORDS = ["both", "sell then buy", "upgrade", "sell and buy", "buy and sell"];
+// Investor signals win over plain buyer/seller; "rental property"/"rental income"
+// is investing, NOT a renter (those are checked first to disambiguate).
+const INVESTOR_WORDS = [
+  "invest", "investor", "investment", "rental property", "rental income",
+  "cash flow", "cap rate", "roi", "flip", "fix and flip", "portfolio", "1031",
+];
+const RENTER_WORDS = ["looking to rent", "want to rent", "for rent", "renting", "lease", "apartment", "rental unit"];
+const AGENT_REFERRAL_WORDS = [
+  "referred by", "agent referral", "realtor referral", "i'm an agent", "i am an agent",
+  "fellow agent", "referring a client", "another agent", "my agent referred",
+];
 
 const OCCUPANCY_RX: Record<"owner-occupied" | "rented" | "vacant", RegExp> = {
   "owner-occupied": /(owner\s*occupied|i\s*live\s*(here|there)|currently\s*live)/i,
@@ -83,9 +98,15 @@ function extractKeyword(text: string): ClassifyResult {
   }
 
   // Lead-type signal is independent of intent (e.g. "want to buy, call me tomorrow").
-  if (containsAny(lowered, BOTH_WORDS)) result.lead_type_signal = "both";
+  // Most-specific types first so "rental property" reads as investor and
+  // "referred by my agent" as agent_referral rather than buyer/seller.
+  if (containsAny(lowered, AGENT_REFERRAL_WORDS)) result.lead_type_signal = "agent_referral";
+  else if (containsAny(lowered, INVESTOR_WORDS)) result.lead_type_signal = "investor";
+  else if (containsAny(lowered, RENTER_WORDS)) result.lead_type_signal = "renter";
+  else if (containsAny(lowered, BOTH_WORDS)) result.lead_type_signal = "both";
   else if (containsAny(lowered, SELLER_WORDS)) result.lead_type_signal = "seller";
   else if (containsAny(lowered, BUYER_WORDS)) result.lead_type_signal = "buyer";
+  if (result.lead_type_signal) result.confidence = 0.7;
 
   // Cheap budget heuristics: "$650k", "650,000", "around 700", "under 500k".
   const budget = lowered.match(/\$?\s*(\d{2,3})\s*(k|,?\d{3})|\$?\s*(\d{2,3}),(\d{3})/);
@@ -141,7 +162,8 @@ const LLM_SYSTEM = `You classify inbound real-estate lead replies. Always respon
 Output schema (strict):
 {
   "intent": "warm" | "not_interested" | "booking" | "unknown",
-  "lead_type_signal": "buyer" | "seller" | "both" | null,
+  "lead_type_signal": "buyer" | "seller" | "both" | "investor" | "renter" | "agent_referral" | null,
+  "confidence": number,  // 0-1, how sure you are of intent + lead_type_signal
   "extracted": {
     "budget": string | null,
     "timeline": string | null,
@@ -164,6 +186,8 @@ Rules:
 - intent "not_interested" ONLY when genuinely not interested ("not interested", "stop", "leave me alone", "no thanks").
 - intent "unknown" for vague/exploring replies ("just browsing", "just looking", "maybe", "not sure") - we will ask a clarifying question, not drop them.
 - intent "warm" for positive engagement.
+- lead_type_signal "investor" for rental-property/cash-flow/ROI/flip intent; "renter" for someone wanting to rent/lease; "agent_referral" when the sender is (or was referred by) an agent.
+- confidence: 0.9+ only when the reply is explicit; lower it for inferred/ambiguous signals.
 - Only fill an extracted field when the reply states it explicitly.
 - Never invent values. Use null if unsure.`;
 
@@ -178,13 +202,17 @@ async function callLLM(env: Env, replyText: string, leadType: string | null): Pr
     const intent = (parsed.intent === "warm" || parsed.intent === "cold" ||
       parsed.intent === "not_interested" || parsed.intent === "booking" ||
       parsed.intent === "unknown") ? parsed.intent : "unknown";
-    const signal: LeadTypeSignal = (parsed.lead_type_signal === "buyer" ||
-      parsed.lead_type_signal === "seller" || parsed.lead_type_signal === "both")
-      ? parsed.lead_type_signal : null;
+    const VALID_SIGNALS = ["buyer", "seller", "both", "investor", "renter", "agent_referral"];
+    const signal: LeadTypeSignal = VALID_SIGNALS.includes(parsed.lead_type_signal as string)
+      ? (parsed.lead_type_signal as LeadTypeSignal) : null;
+    const rawConf = (parsed as { confidence?: unknown }).confidence;
+    const confidence = typeof rawConf === "number" && rawConf >= 0 && rawConf <= 1
+      ? rawConf : (signal || intent !== "unknown" ? 0.75 : undefined);
     const ex = parsed.extracted ?? {};
     const out2: ClassifyResult = {
       intent,
       lead_type_signal: signal,
+      ...(confidence !== undefined ? { confidence } : {}),
       extracted: {
         ...(typeof ex.budget === "string" ? { budget: ex.budget } : {}),
         ...(typeof ex.timeline === "string" ? { timeline: ex.timeline } : {}),
@@ -223,9 +251,11 @@ export async function classifyReplyText(
   if (!llm) return base;
   // Merge: prefer LLM intent + signal when keyword pass came back empty;
   // union the extracted fields.
+  const mergedConfidence = llm.confidence ?? base.confidence;
   return {
     intent: llm.intent !== "unknown" ? llm.intent : base.intent,
     lead_type_signal: llm.lead_type_signal ?? base.lead_type_signal,
+    ...(mergedConfidence !== undefined ? { confidence: mergedConfidence } : {}),
     extracted: { ...base.extracted, ...llm.extracted },
   };
 }
