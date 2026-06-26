@@ -24,7 +24,7 @@ export async function bumpLeadActivity(
     await execute(
       db,
       `UPDATE lead SET last_activity_at = ?, last_activity_direction = COALESCE(?, last_activity_direction)
-        WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
+        WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at <= ?)`,
       tsIso, direction ?? null, leadId, tsIso,
     );
   } catch {

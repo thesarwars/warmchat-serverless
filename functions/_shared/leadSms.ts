@@ -7,6 +7,7 @@ import { isPhoneSuppressed } from "./suppression.ts";
 import { appendComplianceFooter, type ComplianceFooterKind } from "./smsCompliance.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
 import { checkAiSmsPace } from "./aiSendPace.ts";
+import { bumpLeadActivity } from "./leadActivity.ts";
 
 /**
  * The single compliant outbound-SMS path for AI-initiated lead messages
@@ -154,6 +155,10 @@ export async function sendLeadSms(
     lead.org_id, conv.id, body, sent.data.id, nowIso(),
   );
   await execute(env.D1DB, `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`, nowIso(), conv.id);
+  // The latest message is now ours - flip last_activity_direction to 'outbound'
+  // so this lead drops out of "Needs Reply" (was missing, leaving the column
+  // stuck on 'inbound' after every AI SMS reply).
+  await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
   return { sent: true, queued: false };
 }
 
@@ -212,5 +217,6 @@ export async function sendLeadMms(
     lead.org_id, conv.id, threadBody, res.data.id, nowIso(),
   );
   await execute(env.D1DB, `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`, nowIso(), conv.id);
+  await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
   return { sent: true };
 }
