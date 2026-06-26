@@ -160,7 +160,6 @@ const AGENTS: Record<string, AgentDef> = {
       { id: "w1", name: "New lead -> instant reply", trigger: { type: "New lead", source: "Zillow, FB, Site" }, action: "AI replies within 60s, asks 3 qualifying questions", outcome: "Routes to inbox or books showing", live: true, runs: 34 },
       { id: "w2", name: "Lead replies -> qualify", trigger: { type: "Lead reply", source: "SMS / Email" }, action: "Detects intent, scores 1-5, updates pipeline stage", outcome: "Hot → owner, Warm → nurture, Cold → drip", live: true, runs: 22 },
       { id: "w3", name: "Missed call -> auto text", trigger: { type: "Missed call", source: "Business line" }, action: "Sends apology + offer to text back", outcome: "Conversation opened in inbox", live: true, runs: 6 },
-      { id: "w4", name: "Website form -> create lead + respond", trigger: { type: "Form submit", source: "acmerealty.com" }, action: "Creates contact, replies with personalized note", outcome: "New lead · Pre-qualified", live: true, runs: 9 },
       { id: "w5", name: "Booking intent -> push appointment", trigger: { type: "Intent detected", source: "Any channel" }, action: "Offers calendar slots, confirms the time, notifies the agent", outcome: "Appointment proposed for the agent to confirm", live: true, runs: 0 },
     ],
     activity: [
