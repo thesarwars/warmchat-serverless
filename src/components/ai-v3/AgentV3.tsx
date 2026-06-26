@@ -368,7 +368,9 @@ function automationToCampaign(a: OrgAutomation): Campaign {
     id: a.id, name: a.name || "Untitled workflow", icon: "send", live, completed, status: a.status || "Draft",
     channel: chanLabel, steps, updated: relTime(a.created_at),
     leads: String(a.contacts_sent ?? (Array.isArray(a.leads) ? a.leads.length : 0)),
-    reply: `${Math.round(a.reply_rate ?? 0)}%`,
+    // reply_rate from /api/automations/org/:orgId is a 0..1 fraction
+    // (repliedLeadCount/contactsSent); scale to a percent for display.
+    reply: `${Math.round((a.reply_rate ?? 0) * 100)}%`,
     appts: String(a.converted_count ?? 0),
     trigger: { title: "Lead opts in", sub: "Enrolled into this sequence" },
     outcomes: ["Reply → Stop", "Appt intent → Notify", "No reply → End"],

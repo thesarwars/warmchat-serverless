@@ -546,7 +546,7 @@ function OutboundWorkflowList() {
                 <Icon name="chevronRight" size={15} className="wc-wf-caret" style={isOpen ? { transform: "rotate(90deg)" } : {}} />
                 <span className="wc-wf-name" style={{ overflowWrap: "anywhere", minWidth: 0 }}>{a.name || "Untitled workflow"}</span>
                 {running ? <span className="wc-pill-live"><PulseDot on />Live</span> : <span className="wc-pill-draft">{a.status || "Draft"}</span>}
-                <span className="wc-wf-runs">&middot; {a.messages_sent ?? 0} sent &middot; {Math.round(a.reply_rate ?? 0)}% reply &middot; {steps.length} step{steps.length === 1 ? "" : "s"}</span>
+                <span className="wc-wf-runs">&middot; {a.messages_sent ?? 0} sent &middot; {Math.round((a.reply_rate ?? 0) * 100)}% reply &middot; {steps.length} step{steps.length === 1 ? "" : "s"}</span>
                 <span className="wc-wf-view">{isOpen ? "Hide steps" : "View steps"}</span>
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
