@@ -599,18 +599,18 @@ export default function Leads() {
   };
 
   const handleSaveLeadFromAddModal = async (): Promise<{ ok: boolean; error?: string }> => {
-    // New lead: create now (validation + duplicate check), then open step 2.
+    // New lead: create it and finish. No "Start AI follow-up?" prompt on a
+    // single add - the lead is created with auto_followup_action='dont_send' +
+    // ai_status='off' (leadIntake.ts), so it lands with NO automated outreach.
+    // The agent enrols it into a workflow later from the Leads list when they
+    // want it (that path still shows the choice for bulk/import).
     if (editingLeadId == null) {
       const r = await createNewLeadFromForm();
       if (r.ok) {
         setShowAddLeadModal(false);
-        // Skip the automation/AI-follow-up prompt when the agent chose
-        // "Do not SMS" - enrolling them would just queue messages that the
-        // suppression layer then refuses. The lead lands with ai_status='off'
-        // (set in leadIntake.ts) so this is consistent end-to-end.
-        if (leadSmsConsent !== "no_sms") {
-          setShowAiFollowUpGate(true);
-        }
+        setPendingEnrollLeadId(null);
+        setLeadSmsConsent("opted_in");
+        setNewLead({ ...DEFAULT_NEW_LEAD });
       }
       return r;
     }
