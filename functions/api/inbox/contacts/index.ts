@@ -268,10 +268,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
            FROM sms_conversation c
            JOIN sms_contact sc ON c.contact_id = sc.id
            JOIN (SELECT conversation_id, body, direction, MAX(created_at) AS mx
-                   FROM sms_message WHERE org_id = ? GROUP BY conversation_id) lm
+                   FROM sms_message WHERE org_id = ? AND status <> 'reaction'
+                  GROUP BY conversation_id) lm
              ON lm.conversation_id = c.id
            LEFT JOIN (SELECT conversation_id, COUNT(*) AS unread
                         FROM sms_message WHERE org_id = ? AND direction='inbound' AND is_read=0
+                          AND status <> 'reaction'
                         GROUP BY conversation_id) ur
              ON ur.conversation_id = c.id
           WHERE c.org_id = ?`,
