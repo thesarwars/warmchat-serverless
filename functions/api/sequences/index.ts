@@ -3,6 +3,7 @@ import type { Env } from "../../_shared/env.ts";
 import { json, error, readJson } from "../../_shared/http.ts";
 import { requireUser } from "../../_shared/auth.ts";
 import { queryFirst } from "../../_shared/db.ts";
+import { isOrgMember } from "../../_shared/orgAccess.ts";
 import { buildFollowupSteps, createSequence } from "../../_shared/sequenceService.ts";
 
 /** POST /api/sequences - create a sequence definition. */
@@ -20,6 +21,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   );
   const orgId = body.org_id ?? m?.org_id;
   if (!orgId) return error("User not in any organization", 403);
+  // Tenant isolation: a caller can only create a sequence in an org they belong
+  // to (body.org_id was previously trusted, allowing a cross-org write).
+  if (!(await isOrgMember(env, user.id, orgId))) return error("Forbidden", 403);
 
   const steps = buildFollowupSteps(body.steps, body.channel || "email");
   if (steps.length === 0) return error("steps cannot be empty", 400);

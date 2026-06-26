@@ -3,6 +3,7 @@ import type { Env } from "../../_shared/env.ts";
 import { json, error, readJson } from "../../_shared/http.ts";
 import { queryFirst } from "../../_shared/db.ts";
 import { requireUser } from "../../_shared/auth.ts";
+import { isOrgMember } from "../../_shared/orgAccess.ts";
 
 /**
  * POST /api/inbox/preview - render a template with personalization tokens
@@ -21,8 +22,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let lead: { first_name: string | null; last_name: string | null; name: string | null; email: string | null; phone: string | null } | null = null;
   if (Number.isInteger(leadId)) {
-    lead = await queryFirst(env.D1DB,
-      `SELECT first_name, last_name, name, email, phone FROM lead WHERE id = ?`, leadId);
+    // Tenant isolation: only fill tokens from a lead in the caller's OWN org -
+    // never leak another org's lead PII by guessing an id.
+    const row = await queryFirst<{ org_id: number; first_name: string | null; last_name: string | null; name: string | null; email: string | null; phone: string | null }>(
+      env.D1DB, `SELECT org_id, first_name, last_name, name, email, phone FROM lead WHERE id = ?`, leadId);
+    if (row && (await isOrgMember(env, user.id, row.org_id))) lead = row;
   }
 
   const replacements: Record<string, string> = {

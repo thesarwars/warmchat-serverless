@@ -28,15 +28,15 @@ interface SeedTpl {
 const LIBRARY: SeedTpl[] = [
   // ── Inbound ──────────────────────────────────────────────────────────────
   { agent: "inbound", title: "New Zillow lead - instant reply", channel: "sms", category: "Reply", sent: 142, minsAgo: 2,
-    body: "Hey {{first_name}}! This is Joseph w/ JOV Realty - saw you were checking out {{property}}. Are you still looking in {{area}}, or just browsing? Happy to send a few that match what you want." },
+    body: "Hey {{first_name}}! This is {{agent_name}} - saw you were checking out {{property}}. Are you still looking in {{area}}, or just browsing? Happy to send a few that match what you want." },
   { agent: "inbound", title: "Qualifying - timeline", channel: "sms", category: "Qualify", sent: 96, minsAgo: 8,
     body: "Great! When are you hoping to move? Just trying to figure out if we should look this week or play the long game." },
   { agent: "inbound", title: "Qualifying - budget & pre-approval", channel: "sms", category: "Qualify", sent: 88, minsAgo: 12,
     body: "Got it. What's your comfortable price range? And are you already pre-approved? No worries either way - I can connect you with someone if not." },
   { agent: "inbound", title: "Missed call -> auto text", channel: "sms", category: "Reply", sent: 54, minsAgo: 32,
-    body: "Hey {{first_name}}, sorry I missed your call! Text me here whenever - I'm usually faster on text anyway. - Joseph" },
+    body: "Hey {{first_name}}, sorry I missed your call! Text me here whenever - I'm usually faster on text anyway. - {{agent_name}}" },
   { agent: "inbound", title: "Website form confirmation", channel: "email", category: "Reply", sent: 38, minsAgo: 60,
-    body: "Hi {{first_name}},\n\nThanks for reaching out about {{property}}. I'll have a couple of options for you within the next 10 minutes.\n\nQuick Q so I can tailor what I send: are you looking to be in by a certain date?\n\n- Joseph Velasquez\nJOV Realty" },
+    body: "Hi {{first_name}},\n\nThanks for reaching out about {{property}}. I'll have a couple of options for you within the next 10 minutes.\n\nQuick Q so I can tailor what I send: are you looking to be in by a certain date?\n\n- {{agent_name}}" },
   { agent: "inbound", title: "Booking offer - 3 slots", channel: "sms", category: "Booking", sent: 31, minsAgo: 17,
     body: "Want to walk through it this week? I've got {{slot_1}}, {{slot_2}}, or {{slot_3}} open. Reply with one and I'll lock it in." },
 
@@ -50,9 +50,9 @@ const LIBRARY: SeedTpl[] = [
   { agent: "outbound", title: "Re-engagement - 90 day check-in", channel: "sms", category: "Re-engage", sent: 184, minsAgo: 180,
     body: "Hey {{first_name}}, been a minute. Quick {{area}} market update: prices are {{trend}}. Still on the fence, or has life moved on? Either's a fine answer." },
   { agent: "outbound", title: "Buyer match - weekly digest", channel: "email", category: "Nurture", sent: 128, minsAgo: 1440,
-    body: "Hi {{first_name}},\n\n3 new listings hit this week that match what you're after in {{area}}:\n\n{{listing_block}}\n\nWant me to schedule any?\n\n- Joseph" },
+    body: "Hi {{first_name}},\n\n3 new listings hit this week that match what you're after in {{area}}:\n\n{{listing_block}}\n\nWant me to schedule any?\n\n- {{agent_name}}" },
   { agent: "outbound", title: "Seller - quarterly home value", channel: "email", category: "Nurture", sent: 42, minsAgo: 360,
-    body: "Hi {{first_name}},\n\nYour Q{{quarter}} home value report for {{address}} is ready. Estimated: {{value}} (that's {{change}} since last quarter).\n\nNot selling yet? Totally fine - I'll keep these coming so you've got the data when you need it.\n\n- Joseph" },
+    body: "Hi {{first_name}},\n\nYour Q{{quarter}} home value report for {{address}} is ready. Estimated: {{value}} (that's {{change}} since last quarter).\n\nNot selling yet? Totally fine - I'll keep these coming so you've got the data when you need it.\n\n- {{agent_name}}" },
 
   // ── Assistant (style / tone guides) ────────────────────────────────────────
   { agent: "assistant", title: "Reply tone - friendly & casual", channel: "style", category: "Tone", sent: 0, minsAgo: 5,
@@ -101,24 +101,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     orgId, ...categories,
   );
   const catId = new Map(catRows.map((r) => [r.name, r.id]));
-  const now = Date.now();
-
   // 3) Upsert templates (idempotent on the unique (org,cat,channel,title) index).
+  // New rows start with NO usage history (sent_count 0, last_used_at NULL) - the
+  // library previously shipped fabricated "pre-used" counts. On conflict we
+  // refresh the copy but leave sent_count/last_used_at untouched so a re-seed
+  // never wipes the org's real usage.
   await env.D1DB.batch(rows.flatMap((t) => {
     const cid = catId.get(t.category);
     if (cid === undefined) return [];
-    const lastUsed = new Date(now - t.minsAgo * 60_000).toISOString();
     return [env.D1DB.prepare(
       `INSERT INTO message_templates
          (title, content, channel, agent, sent_count, last_used_at, category_id, org_id, is_active, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+       VALUES (?, ?, ?, ?, 0, NULL, ?, ?, 1, ?)
        ON CONFLICT (org_id, category_id, channel, title) DO UPDATE SET
          content = excluded.content,
          agent = excluded.agent,
-         sent_count = excluded.sent_count,
-         last_used_at = excluded.last_used_at,
          is_active = 1`,
-    ).bind(t.title, t.body, t.channel, t.agent, t.sent, lastUsed, cid, orgId, createdBy)];
+    ).bind(t.title, t.body, t.channel, t.agent, cid, orgId, createdBy)];
   }));
 
   return json({ ok: true, count: rows.length });
