@@ -84,5 +84,5 @@ export function isHotStage(raw: string | null | undefined): boolean {
  */
 export function hotStatusSql(col = "status"): string {
   const c = `LOWER(IFNULL(${col}, ''))`;
-  return `(${c} IN ('qualified','appointment set','active client','under contract','closed') OR ${c} LIKE '%hot%')`;
+  return `(${c} IN ('qualified','appointment set','appointment booked','active client','under contract','closed') OR ${c} LIKE '%hot%' OR ${c} LIKE '%appointment%')`;
 }

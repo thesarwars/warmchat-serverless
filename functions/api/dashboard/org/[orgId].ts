@@ -4,6 +4,7 @@ import { json, error } from "../../../_shared/http.ts";
 import { queryAll, queryFirst } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { isOrgMember } from "../../../_shared/orgAccess.ts";
+import { hotStatusSql } from "../../../_shared/leadStage.ts";
 
 const HIGH_INTENT = new Set(["high", "hot", "ready", "high_intent"]);
 
@@ -180,13 +181,44 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     avgPrice, orgId,
   );
 
+  // ---- Live current-state KPIs (replace the stale automation-JSON counts) ----
+  const hotRow = await queryFirst<{ n: number }>(
+    env.D1DB, `SELECT COUNT(id) AS n FROM lead WHERE org_id = ? AND ${hotStatusSql("status")}`, orgId);
+  // Appointments + deals closed are monthly counts (the "This month's goals" strip).
+  const apptMonthRow = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(id) AS n FROM lead_appointment
+      WHERE org_id = ? AND COALESCE(status,'') != 'cancelled'
+        AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')`, orgId);
+  const dealsClosedRow = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(id) AS n FROM deal
+      WHERE org_id = ? AND status = 'won'
+        AND strftime('%Y-%m', COALESCE(closed_at, created_at)) = strftime('%Y-%m','now')`, orgId);
+  // What the AI did TODAY -> the "AI Wins Today" tiles, from ai_activity_log.
+  const aiToday = await queryFirst<{ replies: number; followups: number; qualified: number }>(
+    env.D1DB,
+    `SELECT
+       SUM(CASE WHEN event = 'reply.sent' THEN 1 ELSE 0 END) AS replies,
+       SUM(CASE WHEN event = 'message.sent' THEN 1 ELSE 0 END) AS followups,
+       COUNT(DISTINCT CASE WHEN event IN ('lead.qualified','lead.stage_changed') THEN lead_id END) AS qualified
+     FROM ai_activity_log WHERE org_id = ? AND date(created_at) = date('now')`, orgId);
+  const aiApptTodayRow = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(id) AS n FROM lead_appointment
+      WHERE org_id = ? AND COALESCE(status,'') != 'cancelled' AND date(created_at) = date('now')`, orgId);
+
   return json({
     summary: {
       new_conversations: newConversations,
-      hot_leads: totalHot,
-      appointments: totalAppts,
+      hot_leads: hotRow?.n ?? 0,
+      appointments: apptMonthRow?.n ?? 0,
+      deals_closed: dealsClosedRow?.n ?? 0,
       est_commission: Math.round(totalCommission * 100) / 100,
-      total_replies: totalReplies,
+      total_replies: Number(aiToday?.replies ?? 0),
+      leads_qualified: Number(aiToday?.qualified ?? 0),
+      ai_followups_sent: Number(aiToday?.followups ?? 0),
+      ai_appointments: aiApptTodayRow?.n ?? 0,
       estimated_pipeline_value: Math.round((pipe?.total ?? 0) * 100) / 100,
       deals_in_progress: deals?.count ?? 0,
       deals_in_progress_value: Math.round((deals?.value ?? 0) * 100) / 100,

@@ -32,24 +32,44 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const inRange = (col: string) =>
     `${lo ? ` AND datetime(${col}) >= datetime('${lo}')` : ""}${hi ? ` AND datetime(${col}) <= datetime('${hi}')` : ""}`;
 
+  // Stages MUST line up with the dashboard ConversionFunnel UI, which maps rows
+  // by label: New Leads / Engaged Leads / Appointments / Active Clients / Closed
+  // Deals. Each is sourced from a real, channel-agnostic lead signal (not just
+  // email threads) so a lead the user actually conversed with counts as Engaged.
   const leads = await queryFirst<{ n: number }>(
     env.D1DB, `SELECT COUNT(id) AS n FROM lead WHERE org_id = ?${inRange("created_at")}`, orgId);
-  const replies = await queryFirst<{ n: number }>(
+  // Engaged = the lead has actually replied / had inbound activity on any channel
+  // (SMS or email), or sits in the Engaged stage. This is why the old "0 engaged"
+  // happened: the funnel only counted email-thread replies under a label the UI
+  // never matched.
+  const engaged = await queryFirst<{ n: number }>(
     env.D1DB,
-    `SELECT COUNT(im.id) AS n FROM inbox_messages im JOIN thread t ON im.thread_id=t.id JOIN inbox i ON t.inbox_id=i.id
-      WHERE i.org_id=? AND im.direction='inbound'${inRange("COALESCE(im.message_date, im.created_at)")}`,
+    `SELECT COUNT(id) AS n FROM lead
+      WHERE org_id = ?
+        AND (last_reply_at IS NOT NULL
+             OR LOWER(COALESCE(last_activity_direction,'')) = 'inbound'
+             OR LOWER(COALESCE(status,'')) = 'engaged')${inRange("COALESCE(last_activity_at, created_at)")}`,
     orgId);
   const appointments = await queryFirst<{ n: number }>(
-    env.D1DB, `SELECT COUNT(id) AS n FROM lead_appointment WHERE org_id=? AND status != 'cancelled'${inRange("created_at")}`, orgId);
-  const closings = await queryFirst<{ n: number }>(
-    env.D1DB, `SELECT COUNT(id) AS n FROM deal WHERE org_id=? AND status='won'${inRange("closed_at")}`, orgId);
+    env.D1DB, `SELECT COUNT(id) AS n FROM lead_appointment WHERE org_id=? AND COALESCE(status,'') != 'cancelled'${inRange("created_at")}`, orgId);
+  const activeClients = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(id) AS n FROM lead
+      WHERE org_id=? AND LOWER(COALESCE(status,'')) IN ('active client','under contract')${inRange("COALESCE(last_activity_at, created_at)")}`,
+    orgId);
+  // Closed = won leads (the reliable signal today) or any won deal.
+  const closed = await queryFirst<{ n: number }>(
+    env.D1DB,
+    `SELECT COUNT(id) AS n FROM lead
+      WHERE org_id=? AND LOWER(COALESCE(status,'')) IN ('closed','won','closed won','closed/won')${inRange("COALESCE(last_activity_at, created_at)")}`,
+    orgId);
 
   const funnel = [
-    { step: "leads", label: "Leads", count: leads?.n ?? 0 },
-    { step: "replies", label: "Replies", count: replies?.n ?? 0 },
-    { step: "conversations", label: "Conversations", count: replies?.n ?? 0 },
+    { step: "new_leads", label: "New Leads", count: leads?.n ?? 0 },
+    { step: "engaged", label: "Engaged Leads", count: engaged?.n ?? 0 },
     { step: "appointments", label: "Appointments", count: appointments?.n ?? 0 },
-    { step: "closings", label: "Closings", count: closings?.n ?? 0 },
+    { step: "active_clients", label: "Active Clients", count: activeClients?.n ?? 0 },
+    { step: "closed", label: "Closed Deals", count: closed?.n ?? 0 },
   ];
 
   return json({
