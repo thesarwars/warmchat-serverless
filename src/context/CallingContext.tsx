@@ -748,7 +748,10 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
         origin: "web",
         remotePhoneNumber: args.phoneNumber,
         remoteName: args.name ?? null,
-        status: "RINGING",
+        // Honest state: show "Connecting..." until the SDK reports the leg is
+        // actually ringing (telephony.update state='ringing' -> RINGING below),
+        // not the instant the button was clicked.
+        status: "INITIATED",
         startedAt: Date.now(),
       });
     },
@@ -920,6 +923,11 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
 
   const dismissMissedBanner = useCallback(() => setMissedBanner(null), []);
 
+  // Eager WebRTC warm-up. initTelnyx already no-ops if a client exists or a
+  // connect is in flight, so calling this on a calling surface's mount just
+  // ensures the SIP registration is ready before the user clicks Call.
+  const prewarm = useCallback(() => { void initTelnyx(); }, [initTelnyx]);
+
   const value = useMemo<CallingContextValue>(
     () => ({
       ready,
@@ -929,6 +937,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       activeCall,
       missedBanner,
       isMuted,
+      prewarm,
       startWebCall,
       startPhoneCall,
       acceptIncoming,
@@ -945,6 +954,7 @@ export function CallingProvider({ children }: { children: React.ReactNode }) {
       activeCall,
       missedBanner,
       isMuted,
+      prewarm,
       startWebCall,
       startPhoneCall,
       acceptIncoming,

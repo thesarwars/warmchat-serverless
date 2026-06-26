@@ -50,6 +50,10 @@ export interface CallingContextValue {
     name?: string;
     leadId?: string;
   }) => Promise<void>;
+  // Eagerly register the WebRTC client (token fetch + SIP register) so the FIRST
+  // outbound web call doesn't pay that ~several-second handshake on click. Safe
+  // to call repeatedly - it no-ops once a client exists / is connecting.
+  prewarm: () => void;
   acceptIncoming: () => void;
   rejectIncoming: () => void;
   hangup: () => void;

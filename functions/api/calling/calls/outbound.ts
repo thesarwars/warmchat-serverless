@@ -36,42 +36,66 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     phoneNumber?: string; leadId?: string; name?: string; origin?: "phone" | "web";
   }>(request)) || {};
   const origin = body.origin === "web" ? "web" : "phone";
+  // Latency instrumentation: how long the server spends before contacting the
+  // provider, and the provider call itself. Surfaces whether a slow ring is our
+  // preamble (D1) or Telnyx-side. Visible in `wrangler pages deployment tail`.
+  const t0 = Date.now();
 
-  // Agent must have a business number assigned.
-  const agentNumber = await queryFirst<{ id: string; phone_number: string }>(
-    env.D1DB,
-    `SELECT id, phone_number FROM phone_numbers
-      WHERE assigned_to_user_id = ? AND status = 'ACTIVE' LIMIT 1`,
-    user.id,
-  );
+  const leadIdNum = body.leadId != null && body.leadId !== "" ? Number(body.leadId) : null;
+  if (leadIdNum != null && !Number.isInteger(leadIdNum)) return error("leadId must be numeric", 400);
+
+  // PERF: fire the independent reads concurrently. Each only depends on
+  // user.id / orgId, so running them in parallel collapses ~5 sequential D1
+  // round-trips - the bulk of the click-to-dial latency, made worse by the
+  // cross-region D1 - into a single one, so we reach the Telnyx dial (and the
+  // phone starts ringing) as fast as possible.
+  const [agentNumber, agent, cfg, cycle, leadById] = await Promise.all([
+    // Agent's assigned business number.
+    queryFirst<{ id: string; phone_number: string }>(
+      env.D1DB,
+      `SELECT id, phone_number FROM phone_numbers
+        WHERE assigned_to_user_id = ? AND status = 'ACTIVE' LIMIT 1`,
+      user.id,
+    ),
+    // Agent identity (real cell + SIP).
+    queryFirst<{
+      id: number; name: string | null; email: string;
+      agent_phone_number: string | null; telnyx_sip_uri: string | null;
+    }>(
+      env.D1DB,
+      `SELECT id, name, email, agent_phone_number, telnyx_sip_uri FROM "user" WHERE id = ?`,
+      user.id,
+    ),
+    // Calling config (enabled + overage policy).
+    queryFirst<{ calling_enabled: number; auto_charge_overage: number }>(
+      env.D1DB,
+      `SELECT calling_enabled, auto_charge_overage FROM calling_configurations WHERE org_id = ?`,
+      orgId,
+    ),
+    // Active billing cycle (used by the over-limit guard).
+    ensureBillingCycle(env, orgId),
+    // Lead by id (the common path). The phoneNumber path is resolved below.
+    leadIdNum != null
+      ? queryFirst<{ id: number; phone: string | null; org_id: number }>(
+          env.D1DB, `SELECT id, phone, org_id FROM lead WHERE id = ?`, leadIdNum,
+        )
+      : Promise.resolve(null),
+  ]);
+
   if (!agentNumber) return error("You don't have a business number assigned. Contact your admin.", 403);
-
-  // Agent identity (real cell + SIP) - needed depending on origin.
-  const agent = await queryFirst<{
-    id: number; name: string | null; email: string;
-    agent_phone_number: string | null; telnyx_sip_uri: string | null;
-  }>(
-    env.D1DB,
-    `SELECT id, name, email, agent_phone_number, telnyx_sip_uri FROM "user" WHERE id = ?`,
-    user.id,
-  );
   if (!agent) return error("User not found", 404);
   if (origin === "phone" && !agent.agent_phone_number) {
     return error("Configure your personal cell number first (required for phone-origin calls).", 400);
   }
+  if (cfg && cfg.calling_enabled !== 1) return error("Calling is disabled for your workspace", 403);
 
   // Resolve / upsert lead.
   let leadId: number | null;
   let leadPhone: string | null;
-  if (body.leadId) {
-    const id = Number(body.leadId);
-    if (!Number.isInteger(id)) return error("leadId must be numeric", 400);
-    const lead = await queryFirst<{ id: number; phone: string | null; org_id: number }>(
-      env.D1DB, `SELECT id, phone, org_id FROM lead WHERE id = ?`, id,
-    );
-    if (!lead || lead.org_id !== orgId) return error("Lead not found", 404);
-    leadId = lead.id;
-    leadPhone = lead.phone;
+  if (leadIdNum != null) {
+    if (!leadById || leadById.org_id !== orgId) return error("Lead not found", 404);
+    leadId = leadById.id;
+    leadPhone = leadById.phone;
   } else if (body.phoneNumber) {
     const existing = await queryFirst<{ id: number; phone: string | null }>(
       env.D1DB,
@@ -104,15 +128,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   if (!leadPhone) return error("Lead has no phone number to dial", 400);
 
-  // Calling config + over-limit guard.
-  const cfg = await queryFirst<{ calling_enabled: number; auto_charge_overage: number }>(
-    env.D1DB,
-    `SELECT calling_enabled, auto_charge_overage FROM calling_configurations WHERE org_id = ?`,
-    orgId,
-  );
-  if (cfg && cfg.calling_enabled !== 1) return error("Calling is disabled for your workspace", 403);
-
-  const cycle = await ensureBillingCycle(env, orgId);
+  // Over-limit guard (needs the billing cycle id resolved in the batch above).
   if (cfg && cfg.auto_charge_overage !== 1) {
     const used = await queryFirst<{ total: number }>(
       env.D1DB,
@@ -149,6 +165,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     await emitCallState(env, user.id, {
       callId, status: "INITIATED", direction: "OUTBOUND", origin: "web", destination: leadPhone,
     });
+    console.log(`[outbound] web callId=${callId} preamble=${Date.now() - t0}ms`);
     // Return the agent's assigned DID so the browser SDK can stamp it as the
     // caller-id on the WebRTC INVITE (otherwise Telnyx falls back to the SIP
     // Connection's default and every tenant shows the same number).
@@ -171,6 +188,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   );
 
   const origin_url = new URL(request.url).origin;
+  const tDial = Date.now();
   const dialed = await dial(env, {
     from: agentNumber.phone_number,
     to: agent.agent_phone_number!,
@@ -179,6 +197,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     webhookUrl: `${origin_url}/api/webhooks/calling/telnyx/status`,
     customHeaders: [{ name: "X-WC-Call-Id", value: callId }],
   });
+  console.log(
+    `[outbound] phone callId=${callId} preamble=${tDial - t0}ms dial=${Date.now() - tDial}ms ok=${dialed.ok}`,
+  );
   if (!dialed.ok) {
     await execute(
       env.D1DB,

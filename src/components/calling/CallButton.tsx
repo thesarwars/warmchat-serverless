@@ -32,7 +32,7 @@ export function CallButton({
   iconOnly = false,
 }: Props) {
   const { canCall, reasons, loading } = useCanCall();
-  const { startWebCall, startPhoneCall, activeCall, telnyxReady } =
+  const { startWebCall, startPhoneCall, activeCall, telnyxReady, prewarm } =
     useCalling();
   const [busy, setBusy] = useState(false);
 
@@ -90,6 +90,11 @@ export function CallButton({
     <div
       className={`inline-flex items-stretch overflow-hidden rounded-md border border-orange-500 ${className}`}
       title={tooltip}
+      // Warm the WebRTC client on intent (hover/focus) so it's registered before
+      // the click - the web Call button is gated on telnyxReady, so this also
+      // enables it sooner. No-ops once the client is connected.
+      onPointerEnter={prewarm}
+      onFocus={prewarm}
     >
       <button
         type="button"
