@@ -12,6 +12,7 @@ import {
 import { extractInboundData } from "./qualificationFlow.ts";
 import { runInboundAgent } from "./aiOrchestrator.ts";
 import { openEscalation } from "./escalation.ts";
+import { createTask } from "./tasks.ts";
 import { notify } from "./notify.ts";
 import { suppressPhone, unsuppressPhone } from "./suppression.ts";
 import { mockTelnyxSendSms } from "./mockSendApi.ts";
@@ -80,6 +81,70 @@ async function escalateOnKeywordMatch(
   });
 }
 
+/** Truncate inbound text for an escalation/task detail line. */
+function truncMsg(s: string, n = 160): string {
+  const t = (s || "").trim().replace(/\s+/g, " ");
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+/**
+ * Built-in human-takeover detection - DETERMINISTIC and independent of the
+ * per-agent escalation_keywords (which ship inert). When an inbound message hits
+ * one of these categories the AI must NOT guess a reply; the caller opens an
+ * urgent escalation + task instead so the agent steps in. Categories:
+ *   - negative sentiment / frustration
+ *   - personal / callback request (wants the agent directly)
+ *   - a question only the agent should answer (commission / legal / negotiation)
+ */
+function detectHumanTakeover(text: string, agentName?: string | null): { reason: string; detail: string; taskTitle: string } | null {
+  const t = (text || "").toLowerCase();
+  if (!t.trim()) return null;
+  const has = (...ps: string[]) => ps.some((p) => t.includes(p));
+  if (has("unacceptable", "ridiculous", "this is a scam", "harass", "furious", "so angry",
+          "i am angry", "i'm angry", "nobody responded", "no one responded", "no one has responded",
+          "worst", "terrible", "stop texting", "stop messaging", "leave me alone")) {
+    return { reason: "Negative sentiment", detail: `Lead sounds upset: "${truncMsg(text)}"`, taskTitle: "Upset lead - reach out personally" };
+  }
+  // Personal / callback - the lead wants the human agent directly. Name-aware so
+  // "Is Joseph available?" / "Tell Joseph I said hi" trigger for any agent name.
+  const name = (agentName || "").trim().toLowerCase();
+  const nameHit = name.length >= 2 && t.includes(name) && (
+    t.includes("available") || t.includes("said hi") || t.includes("say hi") || t.includes("call me") ||
+    t.includes(`tell ${name}`) || t.includes(`ask ${name}`) || t.includes(`have ${name}`) ||
+    t.includes(`speak to ${name}`) || t.includes(`talk to ${name}`) || t.includes(`reach ${name}`)
+  );
+  if (nameHit || has("call me", "call back", "callback", "give me a call", "have him call", "have her call",
+          "speak to a", "speak with a", "talk to a", "speak to someone", "talk to someone",
+          "real person", "real agent", "a human", "speak directly", "talk directly",
+          "tell him", "tell her", "said hi", "say hi", "let him know", "let her know")) {
+    return { reason: "Personal / callback request", detail: `Lead wants to speak with the agent directly: "${truncMsg(text)}"`, taskTitle: "Call back requested" };
+  }
+  if (has("commission", "will they accept", "will the seller accept", "accept this offer",
+          "accept my offer", "counter offer", "counteroffer", "negotiat", "attorney", "lawyer",
+          "legal advice", "lawsuit", "contract terms")) {
+    return { reason: "Question needs the agent (commission / legal / negotiation)", detail: `Lead asked something the AI should not answer: "${truncMsg(text)}"`, taskTitle: "Lead asked a question only you can answer" };
+  }
+  return null;
+}
+
+/** Open an URGENT escalation + task for a built-in human-takeover trigger. */
+async function escalateHumanTakeover(
+  env: Env,
+  opts: { orgId: number; leadId: number; ownerId: number | null; takeover: { reason: string; detail: string; taskTitle: string } },
+): Promise<void> {
+  await openEscalation(env, {
+    orgId: opts.orgId, leadId: opts.leadId, ownerId: opts.ownerId,
+    reason: opts.takeover.reason, detail: opts.takeover.detail,
+  });
+  if (opts.ownerId) {
+    await createTask(env, {
+      orgId: opts.orgId, userId: opts.ownerId, leadId: opts.leadId,
+      title: opts.takeover.taskTitle, description: opts.takeover.detail,
+      type: "human_takeover", priority: "urgent", source: "ai",
+    });
+  }
+}
+
 /**
  * Record an inbound SMS and drive the AI Follow-Up flow exactly as the Telnyx
  * `message.received` webhook does: resolve recipient -> org, upsert the
@@ -92,8 +157,8 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
   const messageText = input.text || "";
   if (!fromNumber || !toNumber) return { ok: true, ignored: "missing from/to" };
 
-  const u = await queryFirst<{ id: number }>(
-    env.D1DB, `SELECT id FROM "user" WHERE telnyx_phone_number = ? LIMIT 1`, toNumber,
+  const u = await queryFirst<{ id: number; name: string | null }>(
+    env.D1DB, `SELECT id, name FROM "user" WHERE telnyx_phone_number = ? LIMIT 1`, toNumber,
   );
   if (!u) return { ok: true, ignored: "unknown recipient" };
   const m = await queryFirst<{ org_id: number }>(
@@ -332,6 +397,17 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
       message: messageText,
       lead: toLeadView(repliedRow),
     });
+  }
+
+  // Built-in human-takeover: a personal/callback request, negative sentiment, or
+  // a question the AI shouldn't answer -> open an URGENT escalation + task and do
+  // NOT let the AI guess. The lead stays in "Needs Reply" until the agent steps in.
+  if (existingLead && settings && settings.enabled) {
+    const takeover = detectHumanTakeover(messageText, (u.name || "").trim().split(/\s+/)[0]);
+    if (takeover) {
+      await escalateHumanTakeover(env, { orgId: m.org_id, leadId: existingLead.id, ownerId: u.id, takeover });
+      return { ok: true, dispatched: "human_takeover", lead_id: existingLead.id, conversation_id: conv.id };
+    }
   }
 
   if (settings && settings.enabled && existingLead) {
@@ -729,7 +805,10 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
           // Campaign -> reply -> AI handoff: flip an outbound-campaign lead to
           // 'active' so the email reply hands off to the AI (same as SMS).
           lead.ai_status = await activateAiOnReply(env, lead.id, lead.ai_status);
-          if (await aiSendAllowedForLead(env, { org_id: orgId, ai_status: lead.ai_status })) {
+          const emTakeover = detectHumanTakeover(cleanBody);
+          if (emTakeover) {
+            await escalateHumanTakeover(env, { orgId, leadId: lead.id, ownerId, takeover: emTakeover });
+          } else if (await aiSendAllowedForLead(env, { org_id: orgId, ai_status: lead.ai_status })) {
             await runInboundAgent(env, lead.id, cleanBody, { channel: "email", subject });
           }
         }
