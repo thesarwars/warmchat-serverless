@@ -45,6 +45,12 @@ const FILTER_GROUPS: { heading: string; items: Filter[] }[] = [
 
 export default function CallsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
+  // Warm up the WebRTC client the moment the Calls page opens so the first
+  // "Call back" doesn't pay the token-fetch + SIP-register handshake on click
+  // (the main source of the click-to-ring delay for web-origin calls).
+  const { prewarm } = useCalling();
+  useEffect(() => { prewarm(); }, [prewarm]);
+
   const [filterKey, setFilterKey] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
