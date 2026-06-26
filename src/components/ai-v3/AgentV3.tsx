@@ -20,9 +20,6 @@ import {
   pauseAutomation,
   resumeAutomation,
   archiveAutomation,
-  createAiTemplate,
-  updateAiTemplate,
-  deleteAiTemplate,
   type AgentKey,
 } from "../../helpers/backend";
 
