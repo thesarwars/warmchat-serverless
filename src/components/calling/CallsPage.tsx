@@ -55,7 +55,15 @@ export default function CallsPage({ embedded = false }: { embedded?: boolean } =
     [filterKey],
   );
 
-  const { data: stats } = useQuery({ queryKey: ["call-stats"], queryFn: () => callingApi.getStats() });
+  // Counter cards + list. The socket effect below invalidates these instantly on
+  // every call event; the focus refetch + slow poll are a self-heal in case a
+  // fire-and-forget call_state push is dropped (the gateway emit is best-effort).
+  const { data: stats } = useQuery({
+    queryKey: ["call-stats"],
+    queryFn: () => callingApi.getStats(),
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
+  });
 
   const { data: list, isLoading } = useQuery({
     queryKey: ["calls", filter.type, filter.direction, search],
@@ -66,6 +74,8 @@ export default function CallsPage({ embedded = false }: { embedded?: boolean } =
         search: search || undefined,
         limit: 50,
       }),
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
   });
 
   const calls = useMemo(() => list?.calls ?? [], [list]);
@@ -81,19 +91,49 @@ export default function CallsPage({ embedded = false }: { embedded?: boolean } =
     }
   }, [calls, selectedId]);
 
-  // Live refresh: the AI pipeline emits `call_insights_ready` when a call's
-  // transcript/summary lands. Shares the one underlying socket via ref-counting.
+  // Live refresh: bridge call lifecycle socket events to React Query so the list
+  // + counter cards update instantly, the same way the inbox mirrors
+  // `notification` -> invalidate(['inbox_contacts']). Shares the one underlying
+  // socket via ref-counting.
   useEffect(() => {
     const url = buildWsUrl();
     if (!url) return;
     const socket = createWcSocket(url);
+
+    // One call fires several transitions (INITIATED -> RINGING -> IN_PROGRESS ->
+    // terminal); coalesce the burst into a single refetch of the list + stats.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refreshSoon = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        queryClient.invalidateQueries({ queryKey: ["calls"] });
+        queryClient.invalidateQueries({ queryKey: ["call-stats"] });
+      }, 400);
+    };
+
+    // call_state: outbound start/ringing/in-progress/terminal + voicemail/failed.
+    // incoming_call: a new inbound ringing row. ring/taken: missed/elsewhere.
+    socket.on("call_state", refreshSoon);
+    socket.on("incoming_call", refreshSoon);
+    socket.on("call_ring_ended", refreshSoon);
+    socket.on("call_taken_elsewhere", refreshSoon);
+
+    // The AI pipeline emits `call_insights_ready` when a call's transcript/
+    // summary lands - refresh the list, the counters (outcome-derived), and the
+    // open detail panel's insights.
     const onReady = (data: unknown) => {
       const callId = (data as { callId?: string })?.callId;
       queryClient.invalidateQueries({ queryKey: ["calls"] });
+      queryClient.invalidateQueries({ queryKey: ["call-stats"] });
       if (callId) queryClient.invalidateQueries({ queryKey: ["call-insights", callId] });
     };
     socket.on("call_insights_ready", onReady);
-    return () => socket.disconnect();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      socket.disconnect();
+    };
   }, [queryClient]);
 
   const content = (

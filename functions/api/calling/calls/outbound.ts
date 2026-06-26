@@ -185,6 +185,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       `UPDATE calls SET status = 'FAILED', error_message = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       dialed.error.message, now, callId,
     );
+    // Push the terminal state so the Calls page drops the live row / updates the
+    // counters instead of leaving a stale "ringing" entry until a manual reload.
+    await emitCallState(env, user.id, {
+      callId, status: "FAILED", direction: "OUTBOUND", origin: "phone", terminal: true,
+    });
     return error(`Failed to initiate call: ${dialed.error.message}`, 502);
   }
 

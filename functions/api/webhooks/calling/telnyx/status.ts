@@ -293,6 +293,11 @@ async function handleRecordingSaved(env: Env, payload: TelnyxPayload, callContro
     `INSERT OR IGNORE INTO call_ai_insights (call_id, recording_source_url, status) VALUES (?, ?, 'PENDING')`,
     call.id, sourceUrl,
   );
+
+  // Push a call_state so the Calls page refreshes live - a saved voicemail
+  // otherwise emits nothing, leaving the "Voicemails Pending" counter + the
+  // voicemail row stale until a manual reload.
+  await emitState(env, call.id, { recordingReady: true, isVoicemail });
 }
 
 /**
