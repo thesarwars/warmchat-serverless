@@ -4,10 +4,9 @@ import {
   ChevronDown,
   ChevronRight,
   Home,
-  Mail,
   Menu,
-  MessageSquare,
   Search,
+  X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { NotificationCenter } from "./notifications/NotificationCenter";
@@ -29,14 +28,14 @@ const ROLE_ID_MAP: Record<string, string> = {
   "4": "Manager",
 };
 
-// A connection status pill: green "X Connected" with a check when connected,
-// otherwise a clickable amber "Connect X" that routes to the setup flow.
+// A connection status pill: green check + "X Connected" when connected,
+// otherwise a clickable red X + "Connect X" that routes to the setup flow, so
+// the user always sees at a glance what is and isn't connected.
 const ConnPill: React.FC<{
   label: string;
   connected: boolean;
-  icon: React.ReactNode;
   onConnect: () => void;
-}> = ({ label, connected, icon, onConnect }) =>
+}> = ({ label, connected, onConnect }) =>
   connected ? (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-[#C7E0CE] bg-[#E8F1EA] px-3 py-1 text-xs font-semibold text-[#1F7A52]">
       <Check className="h-3.5 w-3.5" />
@@ -46,9 +45,9 @@ const ConnPill: React.FC<{
     <button
       type="button"
       onClick={onConnect}
-      className="inline-flex items-center gap-1.5 rounded-full border border-[#FBD9BE] bg-[#FFF3EA] px-3 py-1 text-xs font-semibold text-[#B9450A] transition hover:bg-[#FDE0C9]"
+      className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-100"
     >
-      {icon}
+      <X className="h-3.5 w-3.5" />
       Connect {label}
     </button>
   );
@@ -163,13 +162,11 @@ const Topbar: React.FC<TopbarProps> = ({
               <ConnPill
                 label="Email"
                 connected={emailConnected}
-                icon={<Mail className="h-3.5 w-3.5" />}
                 onConnect={() => navigate("/connect-email")}
               />
               <ConnPill
                 label="SMS"
                 connected={smsConnected}
-                icon={<MessageSquare className="h-3.5 w-3.5" />}
                 onConnect={() => navigate(hasSmsAccess ? "/connect-phone" : "/upgrade")}
               />
             </div>
