@@ -5,6 +5,7 @@ type NumLike = number | string | null | undefined;
 interface DashboardSummary {
   total_replies?: NumLike;
   hot_leads?: NumLike;
+  leads_qualified?: NumLike;
   ai_followups_sent?: NumLike;
   ai_appointments?: NumLike;
   appointments?: NumLike;
@@ -78,7 +79,7 @@ const AIWinsToday: React.FC<AIWinsTodayProps> = ({ data, isLoading }) => {
 
   const summary = data?.summary ?? {};
   const replies = toNumber(summary.total_replies ?? data?.total_replies);
-  const qualified = toNumber(summary.hot_leads ?? data?.hot_leads);
+  const qualified = toNumber(summary.leads_qualified ?? data?.leads_qualified);
   const followUps = toNumber(summary.ai_followups_sent ?? data?.ai_followups_sent ?? data?.new_conversations);
   const booked = toNumber(summary.ai_appointments ?? data?.ai_appointments ?? summary.appointments ?? data?.appointments);
   const hours = Number(summary.time_saved_hours ?? data?.time_saved_hours ?? 0);

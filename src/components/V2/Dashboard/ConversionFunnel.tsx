@@ -4,7 +4,7 @@ type NumLike = number | string | null | undefined;
 
 interface ConversionFunnelProps {
   /** fetchDashboardPerformance payload: { funnel: [{ label, count }] }. */
-  data?: { funnel?: Array<{ label?: string | null; count?: NumLike }> };
+  data?: { funnel?: Array<{ step?: string | null; label?: string | null; count?: NumLike }> };
   /** Called when the user switches the 30/60/90-day range so the parent can refetch. */
   onRangeChange?: (days: 30 | 60 | 90) => void;
   isLoading?: boolean;
@@ -25,9 +25,14 @@ const COLORS = ["#fff5ed", "#ffe6d0", "#ffc89a", "#fb8d3a", "#e25a09"];
 const LABELS = ["New Leads", "Engaged Leads", "Appointments", "Active Clients", "Closed Deals"];
 
 const matchStage = (
-  funnel: Array<{ label?: string | null; count?: NumLike }>,
+  funnel: Array<{ step?: string | null; label?: string | null; count?: NumLike }>,
+  stepKey: string,
   ...keywords: string[]
 ): number | undefined => {
+  // Prefer the stable step key the endpoint emits; fall back to a label keyword
+  // so the row still renders if the API contract ever drifts.
+  const byKey = funnel.find((f) => String(f?.step ?? "") === stepKey);
+  if (byKey) return toNumber(byKey.count);
   const m = funnel.find((f) => {
     const l = String(f?.label ?? "").toLowerCase();
     return keywords.some((k) => l.includes(k));
@@ -46,11 +51,11 @@ const ConversionFunnel: React.FC<ConversionFunnelProps> = ({ data, onRangeChange
   const funnel = data?.funnel ?? [];
   // Source each stage from the real funnel only - no fabricated fallbacks.
   const steps: Step[] = [
-    matchStage(funnel, "new", "lead"),
-    matchStage(funnel, "engaged", "contact", "warm"),
-    matchStage(funnel, "appoint", "showing", "meeting"),
-    matchStage(funnel, "active", "client"),
-    matchStage(funnel, "closed", "won", "deal"),
+    matchStage(funnel, "new_leads", "new", "lead"),
+    matchStage(funnel, "engaged", "engaged", "contact", "warm"),
+    matchStage(funnel, "appointments", "appoint", "showing", "meeting"),
+    matchStage(funnel, "active_clients", "active", "client"),
+    matchStage(funnel, "closed", "closed", "won", "deal"),
   ].map((real, i) => ({
     label: LABELS[i],
     value: real != null ? real : 0,

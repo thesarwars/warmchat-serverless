@@ -176,11 +176,13 @@ const DashboardV2: React.FC = () => {
   // immediately whenever the user returns to the tab. Keeps the daily-summary
   // banner / KPIs / Needs Reply live without a manual reload.
   const freshOnMount = {
-    // Keep the 30-min background refresh, but don't re-fire all ~7 heavy
-    // dashboard queries on every return to the page or window focus - the
-    // 2-min cache makes returning to the dashboard instant.
-    refetchInterval: 30 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    // Near-real-time: poll every 30s while the dashboard is open + visible
+    // (paused in background tabs), and refetch immediately on window/tab focus,
+    // so the KPI strip, Needs Reply and AI Wins reflect new activity (messages,
+    // AI replies, appointments, stage changes) without a manual reload.
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   };
 
   const { data, isLoading: dataLoading } = useFetch(["dashboard_data"], () => fetchDashboardData(orgId), {}, freshOnMount);
@@ -195,10 +197,14 @@ const DashboardV2: React.FC = () => {
   const { data: perfomances, isLoading: perfLoading } = useFetch(
     ["performances", funnelDays, performanceDateRange.start_date, performanceDateRange.end_date],
     () => fetchDashboardPerformance(orgId, performanceDateRange),
+    {},
+    freshOnMount,
   );
   const { data: priroty_actions, isLoading: priorityLoading } = useFetch<PriorityActionsData>(
     ["priorty"],
     () => fetchDashboardPriroty(orgId) as Promise<PriorityActionsData>,
+    {},
+    freshOnMount,
   );
   const { data: kpiGoals } = useFetch<OrgKpiGoals>(["kpi_goals"], () => fetchOrgKpiGoals(orgId), {}, { enabled: Boolean(orgId) });
 
@@ -256,9 +262,17 @@ const DashboardV2: React.FC = () => {
       : (inbox_contacts as { contacts?: unknown[] } | undefined)?.contacts) as
       | Array<{ needs_reply?: boolean | null; total_unread_count?: number | string | null; unread_count?: number | string | null }>
       | undefined ?? [];
-  const needsReplyCount = inboxContactList.filter(
-    (c) => Boolean(c.needs_reply) || toNumber(c.total_unread_count ?? c.unread_count) > 0,
-  ).length;
+  // Prefer the authoritative org-wide count the contacts endpoint returns
+  // (filter_counts.needs_reply) over filtering the first page of contacts, which
+  // is capped at the page size and undercounts.
+  const fcNeedsReply = toNumber(
+    (inbox_contacts as { filter_counts?: { needs_reply?: number } } | undefined)?.filter_counts?.needs_reply,
+  );
+  const needsReplyCount = fcNeedsReply > 0
+    ? fcNeedsReply
+    : inboxContactList.filter(
+        (c) => Boolean(c.needs_reply) || toNumber(c.total_unread_count ?? c.unread_count) > 0,
+      ).length;
 
   // One-line overnight AI-activity summary, built from real dashboard counts.
   const dashSummary = (data as { summary?: Record<string, unknown> } | undefined)?.summary ?? {};
