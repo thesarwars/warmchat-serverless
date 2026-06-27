@@ -1,10 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { Env } from "../../../_shared/env.ts";
 import { json, error, readJson } from "../../../_shared/http.ts";
-import { execute, queryFirst, nowIso } from "../../../_shared/db.ts";
+import { execute, queryFirst, queryAll, nowIso } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { resolveOrgId } from "../../../_shared/callingAccess.ts";
-import { dial } from "../../../_shared/telnyx/client.ts";
+import { dial, hangup } from "../../../_shared/telnyx/client.ts";
 import { notifyQuotaExceeded } from "../../../_shared/quotaNotify.ts";
 import { planMinuteLimit } from "../../../_shared/plans.ts";
 
@@ -31,6 +31,55 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!user) return error("Unauthorized", 401);
   const orgId = await resolveOrgId(env, user.id);
   if (!orgId) return error("Not part of an organization", 403);
+
+  // Self-heal: starting a new outbound call means any earlier non-terminal call
+  // for this agent is already over (the UI only lets one call run at a time).
+  // Finalize those rows NOW so a missed `call.hangup` webhook can't leave a stale
+  // 'IN_PROGRESS' that the busy-on-busy guard would use to auto-drop this new
+  // call (the "2nd call hangs up" bug). Cheap: usually matches 0 rows.
+  const priorOpen = await queryAll<{
+    id: string; provider_call_sid: string | null; web_leg_sid: string | null; phone_leg_sid: string | null;
+  }>(
+    env.D1DB,
+    `SELECT id, provider_call_sid, web_leg_sid, phone_leg_sid FROM calls
+      WHERE agent_id = ? AND status IN ('INITIATED', 'RINGING', 'IN_PROGRESS')`,
+    user.id,
+  );
+  if (priorOpen.length) {
+    const healTs = nowIso();
+    // Never-connected (INITIATED/RINGING) -> NO_ANSWER, connected (IN_PROGRESS) ->
+    // COMPLETED, so a phantom that never answered isn't logged as a 0-second
+    // completed call (which would skew avg-duration). The leg hangup below lets a
+    // real call.hangup webhook overwrite duration on the COMPLETED ones.
+    await execute(
+      env.D1DB,
+      `UPDATE calls SET status = 'NO_ANSWER', completed_at = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE agent_id = ? AND status IN ('INITIATED', 'RINGING')`,
+      healTs, user.id,
+    );
+    await execute(
+      env.D1DB,
+      `UPDATE calls SET status = 'COMPLETED', completed_at = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE agent_id = ? AND status = 'IN_PROGRESS'`,
+      healTs, user.id,
+    );
+    // Clear any lingering "active call" card in other tabs/devices.
+    for (const c of priorOpen) {
+      await emitCallState(env, user.id, { callId: c.id, status: "COMPLETED", terminal: true });
+    }
+    // Best-effort hang up any still-live Telnyx leg: (1) kills a zombie leg that
+    // would otherwise keep billing airtime, and (2) makes its real call.hangup
+    // webhook land so handleHangup writes the usage_record for any connected
+    // minutes (the raw UPDATE above bills nothing on its own). Fire-and-forget via
+    // waitUntil so it never adds latency to the new dial; a leg that already ended
+    // just 404s harmlessly. Placeholder sids ("pending-web-*"/"") are skipped.
+    const legs = priorOpen
+      .flatMap((c) => [c.provider_call_sid, c.web_leg_sid, c.phone_leg_sid])
+      .filter((s): s is string => !!s && !s.startsWith("pending"));
+    if (legs.length) {
+      context.waitUntil(Promise.all(legs.map((sid) => hangup(env, sid).catch(() => undefined))));
+    }
+  }
 
   const body = (await readJson<{
     phoneNumber?: string; leadId?: string; name?: string; origin?: "phone" | "web";

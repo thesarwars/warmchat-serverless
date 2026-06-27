@@ -521,10 +521,14 @@ async function handleIncomingInitiated(env: Env, payload: TelnyxPayload, callCon
   }
 
   // Busy-on-busy: agent already on another live call -> hang up; the hangup
-  // webhook will trigger the missed-call SMS path in handleHangup.
+  // webhook will trigger the missed-call SMS path in handleHangup. Bounded to
+  // RECENT in-progress calls (<2h): a stale row from a missed hangup webhook must
+  // never wedge the line - the stale-call cron + the outbound self-heal finalize
+  // those, and this bound is the backstop so an inbound call still rings through.
   const busy = await queryFirst<{ id: string }>(
     env.D1DB,
-    `SELECT id FROM calls WHERE agent_id = ? AND status = 'IN_PROGRESS' LIMIT 1`,
+    `SELECT id FROM calls WHERE agent_id = ? AND status = 'IN_PROGRESS'
+       AND datetime(COALESCE(answered_at, updated_at, initiated_at)) > datetime('now', '-2 hours') LIMIT 1`,
     agent.id,
   );
   if (busy) {
