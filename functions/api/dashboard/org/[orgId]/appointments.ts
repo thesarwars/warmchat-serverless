@@ -8,6 +8,7 @@ import {
   MEETING_TYPES, APPT_PROPOSED, APPOINTMENT_BOOKED_STATUS, parseStartsAt,
 } from "../../../../_shared/appointments.ts";
 import { sendAppointmentConfirmations } from "../../../../_shared/appointmentConfirmations.ts";
+import { autoCompleteLeadTasks } from "../../../../_shared/tasks.ts";
 
 /**
  * GET /api/dashboard/org/:orgId/appointments - all non-cancelled appointments for
@@ -154,6 +155,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       `UPDATE lead SET status = ?, appointment_booked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       APPOINTMENT_BOOKED_STATUS, leadId,
     );
+    // Appointment booked -> complete any open "book appointment / showing" task.
+    await autoCompleteLeadTasks(env, {
+      leadId, orgId, types: ["showing"], reason: "appointment booked",
+    });
   }
 
   // Optional confirmations - only when attached to a lead and the caller opted

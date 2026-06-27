@@ -4,6 +4,7 @@ import { queryFirst, execute, nowIso } from "./db.ts";
 import { mockTelnyxSendSms } from "./mockSendApi.ts";
 import { checkQuietHours } from "./quietHours.ts";
 import { isPhoneSuppressed } from "./suppression.ts";
+import { autoCompleteLeadTasks } from "./tasks.ts";
 import { appendComplianceFooter, type ComplianceFooterKind } from "./smsCompliance.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
 import { checkAiSmsPace } from "./aiSendPace.ts";
@@ -159,6 +160,11 @@ export async function sendLeadSms(
   // so this lead drops out of "Needs Reply" (was missing, leaving the column
   // stuck on 'inbound' after every AI SMS reply).
   await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
+  // We reached out to the lead -> complete any open "follow up" task.
+  await autoCompleteLeadTasks(env, {
+    leadId: lead.id, orgId: lead.org_id ?? undefined,
+    types: ["followup"], reason: "follow-up sms sent",
+  });
   return { sent: true, queued: false };
 }
 

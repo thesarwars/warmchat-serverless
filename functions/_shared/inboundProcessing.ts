@@ -12,7 +12,7 @@ import {
 import { extractInboundData } from "./qualificationFlow.ts";
 import { runInboundAgent } from "./aiOrchestrator.ts";
 import { openEscalation } from "./escalation.ts";
-import { createTask } from "./tasks.ts";
+import { createTask, autoCompleteLeadTasks } from "./tasks.ts";
 import { reconcileDealStage } from "./deals.ts";
 import { notify } from "./notify.ts";
 import { isReactionOnly } from "./reactions.ts";
@@ -419,6 +419,11 @@ export async function processInboundSms(env: Env, input: InboundSmsInput): Promi
     // auto-advances to the right early stage from real signals (qualification,
     // appointments); major milestones still route to an agent suggestion.
     await reconcileDealStage(env, m.org_id, existingLead.id).catch(() => {});
+    // The lead replied -> any open "follow up / reply to lead" task is done.
+    await autoCompleteLeadTasks(env, {
+      leadId: existingLead.id, orgId: m.org_id,
+      types: ["followup", "email"], reason: "lead replied (inbound sms)",
+    });
   }
 
   // Built-in human-takeover: a personal/callback request, negative sentiment, or
@@ -702,6 +707,13 @@ export async function processInboundEmail(env: Env, input: InboundEmailInput): P
     );
     // Reactions bump recency but do NOT flip direction to 'inbound' (no Needs Reply).
     await bumpLeadActivity(env.D1DB, inboundLeadId, receivedAt, isReaction ? undefined : "inbound");
+    // A genuine email reply (not a reaction) completes any open follow-up task.
+    if (!isReaction && inboundLeadId != null) {
+      await autoCompleteLeadTasks(env, {
+        leadId: inboundLeadId, orgId: orgId ?? undefined,
+        types: ["followup", "email"], reason: "lead replied (inbound email)",
+      });
+    }
   }
 
   // Provider-level audit row (FK requires a connection id, so skip it when the

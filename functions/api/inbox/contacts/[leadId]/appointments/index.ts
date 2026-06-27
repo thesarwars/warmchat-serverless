@@ -9,6 +9,7 @@ import {
   parseStartsAt, serializeAppointment, appointmentToUnifiedDict, type AppointmentRow,
 } from "../../../../../_shared/appointments.ts";
 import { sendAppointmentConfirmations } from "../../../../../_shared/appointmentConfirmations.ts";
+import { autoCompleteLeadTasks } from "../../../../../_shared/tasks.ts";
 
 interface Body {
   appointment_type?: string;
@@ -77,6 +78,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   );
 
   const apptId = Number(ins.meta.last_row_id);
+
+  // Appointment booked -> complete any open "book appointment / schedule showing"
+  // task for this lead.
+  await autoCompleteLeadTasks(env, {
+    leadId: lead.id, orgId: lead.org_id, types: ["showing"], reason: "appointment booked",
+  });
 
   const confirmations = await sendAppointmentConfirmations(env, {
     appointmentId: apptId,

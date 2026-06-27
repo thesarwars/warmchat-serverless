@@ -11,7 +11,8 @@ import {
   aiStatusIsOff,
 } from "../../_shared/autoResponse.ts";
 import { resolveLeadEscalations } from "../../_shared/escalation.ts";
-import { hotStatusSql } from "../../_shared/leadStage.ts";
+import { hotStatusSql, normalizeStage } from "../../_shared/leadStage.ts";
+import { autoCompleteLeadTasks } from "../../_shared/tasks.ts";
 import { capLeadField, LEAD_TEXT_LIMITS, type LeadTextField } from "../../_shared/leadLimits.ts";
 import { stampManualProvenance, isManualTrackedField } from "../../_shared/leadFieldEngine.ts";
 
@@ -401,6 +402,19 @@ async function updateLead(env: Env, userId: number, leadId: number, body: Record
   }
 
   await execute(env.D1DB, `UPDATE lead SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...args, leadId);
+
+  // Documents signed: moving a lead to "Under Contract" (purchase/listing
+  // contract executed) or "Closed" (closing docs) is the deterministic CRM
+  // signal that paperwork was signed -> complete any open "Contract" task.
+  if ("status" in body && body["status"] != null) {
+    const newStage = normalizeStage(String(body["status"]));
+    if (newStage === "Under Contract" || newStage === "Closed") {
+      await autoCompleteLeadTasks(env, {
+        leadId, orgId: lead.org_id ?? undefined,
+        types: ["contract"], reason: `documents signed (stage -> ${newStage})`,
+      });
+    }
+  }
 
   // The inline AI-Status pill is the per-lead control for the REACTIVE AI
   // Inbound Flow (whether AI replies once this lead writes in). It does NOT

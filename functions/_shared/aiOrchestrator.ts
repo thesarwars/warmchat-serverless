@@ -14,7 +14,7 @@ import { getAvailability, findOpenSlots, isSlotBookable } from "./availability.t
 import { createProposedAppointment } from "./booking.ts";
 import { openEscalation } from "./escalation.ts";
 import { loadPersonaUi } from "./personaUi.ts";
-import { createTask } from "./tasks.ts";
+import { createTask, autoCompleteLeadTasks } from "./tasks.ts";
 import { applyAiDealUpdate, ensureDealForLead } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
@@ -494,6 +494,12 @@ async function executeTool(
         notes: args.notes ? String(args.notes) : null,
       });
       state.booked = true;
+      // An appointment is now on the calendar -> complete any pre-existing open
+      // "book appointment / schedule a showing" task. Runs BEFORE the new
+      // "Confirm appointment" task is created below, so that one stays open.
+      await autoCompleteLeadTasks(env, {
+        leadId: lead.id, orgId, types: ["showing"], reason: "appointment booked",
+      });
       // Advance the stage so the Score + pipeline reflect the booking. Capture
       // the previous stage first so a genuine move is counted once.
       const prevApptStatus = (await queryFirst<{ status: string | null }>(env.D1DB, `SELECT status FROM lead WHERE id = ?`, lead.id))?.status ?? null;

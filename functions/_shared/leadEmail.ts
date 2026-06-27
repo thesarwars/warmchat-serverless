@@ -2,6 +2,7 @@
 import type { Env } from "./env.ts";
 import { queryFirst, execute, nowIso } from "./db.ts";
 import { bumpLeadActivity } from "./leadActivity.ts";
+import { autoCompleteLeadTasks } from "./tasks.ts";
 import { checkQuietHours } from "./quietHours.ts";
 import { dispatchOutboundEmail } from "./outboundEmail.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
@@ -139,5 +140,10 @@ export async function sendLeadEmail(
   );
   await execute(env.D1DB, `UPDATE thread SET updated_at = ? WHERE id = ?`, nowIso(), threadId);
   await bumpLeadActivity(env.D1DB, lead.id, nowIso(), "outbound");
+  // We reached out to the lead -> complete any open "follow up" task.
+  await autoCompleteLeadTasks(env, {
+    leadId: lead.id, orgId: lead.org_id ?? undefined,
+    types: ["followup"], reason: "follow-up email sent",
+  });
   return { sent: true, queued: false };
 }

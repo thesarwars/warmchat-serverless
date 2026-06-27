@@ -432,6 +432,19 @@ export async function runScheduledMessages(env: CronEnv): Promise<void> {
         } catch (e) { console.warn("[cron:scheduledMessages] ai_reply_sent notify failed", e); }
       }
 
+      // A sent AI follow-up reply completes any open "follow up" task for the
+      // lead (the follow-up provably went out). Campaign drips (automation_id)
+      // are excluded. Inline UPDATE - the cron worker can't import the shared
+      // tasks helper. Best-effort; never breaks the send loop.
+      if (ok && row.sent_by_ai === 1 && !row.automation_id && row.contact_id) {
+        try {
+          await env.D1DB.prepare(
+            `UPDATE task SET status = 'done', updated_at = CURRENT_TIMESTAMP
+              WHERE lead_id = ? AND status = 'open' AND type = 'followup'`,
+          ).bind(row.contact_id).run();
+        } catch (e) { console.warn("[cron:scheduledMessages] auto-complete followup failed", e); }
+      }
+
       // AI Status lifecycle (background sweep): when the last queued follow-up
       // for a lead finishes without ever getting a reply, flip AI Status to
       // "Awaiting Reply" so the agent knows the AI is waiting on the lead. This
