@@ -98,6 +98,7 @@ export interface AutomationRow {
   message: string | null;
   opening_send_time: string | null;
   email_subject: string | null;
+  email_body: string | null;
   attachments: string | null;
   sources: string | null;
   leads: string | null;

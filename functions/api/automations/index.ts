@@ -15,6 +15,7 @@ interface CreateBody {
   channels?: string[];
   message?: string;
   email_subject?: string;
+  email_body?: string; // opening EMAIL body (distinct from `message`, the SMS body)
   attachments?: unknown[];
   sources?: string[];
   leads?: AutomationLead[];
@@ -98,15 +99,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const ins = await execute(
     env.D1DB,
     `INSERT INTO automation
-       (name, channels, message, opening_send_time, email_subject, attachments, sources, leads,
+       (name, channels, message, opening_send_time, email_subject, email_body, attachments, sources, leads,
         org_id, owner_id, email_sender_type, followup_steps, status, created_at,
         is_archived, delivered_count, opened_count, converted_count, workflow_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)`,
     data.name,
     JSON.stringify(channels),
     data.message,
     openingSendTime,
     subject,
+    (data.email_body || "").trim() || null,
     JSON.stringify(data.attachments || []),
     JSON.stringify(data.sources || []),
     JSON.stringify(data.leads || []),

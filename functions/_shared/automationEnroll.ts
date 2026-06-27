@@ -67,11 +67,12 @@ interface AutomationRow {
   id: number;
   message: string | null;
   email_subject: string | null; // subject line for email steps (opening default)
+  email_body: string | null;    // opening EMAIL body (falls back to `message` when blank)
   opening_send_time: string | null; // NULL = instant opening; "HH:MM" = timed
   channels: string | null;       // JSON string array, e.g. ["sms"]
   followup_steps: string | null; // JSON array of { delay_days, message, send_time }
 }
-interface FollowupStep { delay_days?: number; message?: string; send_time?: string; timezone?: string; channel?: string; subject?: string }
+interface FollowupStep { delay_days?: number; message?: string; email_body?: string; send_time?: string; timezone?: string; channel?: string; subject?: string }
 
 /** Normalize a per-step channel value, falling back to the campaign default. */
 function normChannel(raw: unknown, fallback: "sms" | "email"): "sms" | "email" {
@@ -156,7 +157,7 @@ export async function queueAutomationForLead(
 ): Promise<number> {
   const camp = await queryFirst<AutomationRow>(
     env.D1DB,
-    `SELECT id, message, email_subject, opening_send_time, channels, followup_steps FROM automation WHERE id = ?`,
+    `SELECT id, message, email_subject, email_body, opening_send_time, channels, followup_steps FROM automation WHERE id = ?`,
     automationId,
   );
   if (!camp) return 0;
@@ -217,13 +218,13 @@ export async function queueAutomationForLead(
   // Step 0 (the opening) is INSTANT (sent ~30s after enroll); each follow-up
   // fires `delay_days` later at its `send_time` wall-clock hour.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email"; subject: string | null }> = [];
+  const drip: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email"; subject: string | null; emailBody: string }> = [];
   if ((camp.message || "").trim()) {
     const opening = await personalizeOpening(
       env, lead.org_id, lead.owner_id ?? fallbackUserId, camp.message!.trim(), lead);
     // Instant unless the opening has been given an explicit send time, in which
     // case it is scheduled for that wall-clock time on the enrollment day.
-    drip.push({ body: opening, instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel, subject: emailSubject });
+    drip.push({ body: opening, instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel, subject: emailSubject, emailBody: (camp.email_body || "").trim() || camp.message!.trim() });
   }
   let followups: FollowupStep[] = [];
   try {
@@ -233,7 +234,7 @@ export async function queueAutomationForLead(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel), subject: (f.subject || "").trim() || emailSubject });
+    drip.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel), subject: (f.subject || "").trim() || emailSubject, emailBody: (f.email_body || "").trim() || f.message!.trim() });
   }
   if (drip.length === 0) return 0;
 
@@ -247,7 +248,11 @@ export async function queueAutomationForLead(
   let queued = 0;
   for (let i = 0; i < drip.length; i++) {
     const step = drip[i]!;
-    const rendered = await renderTemplate(env, step.body, lead);
+    // SMS uses the short `body`; EMAIL uses its own `emailBody` (which already
+    // falls back to the SMS text when the user left the email box blank). Render
+    // only what this lead will actually receive.
+    const renderedSms = sendChannels.includes("sms") ? await renderTemplate(env, step.body, lead) : "";
+    const renderedEmail = sendChannels.includes("email") ? await renderTemplate(env, step.emailBody, lead) : "";
     // A scheduled step whose computed wall-time already passed (e.g. a same-day
     // opening time enrolled after that hour) should send PROMPTLY, not sit at a
     // past timestamp - so clamp anything in the past up to now+30s. (The wizard
@@ -263,12 +268,12 @@ export async function queueAutomationForLead(
       // gets the AI disclosure + STOP footer. Steps 1+ are follow-ups in the
       // same program - already known recipient, no extra wrapping.
       const body = channel === "sms"
-        ? appendComplianceFooter(rendered, {
+        ? appendComplianceFooter(renderedSms, {
             kind: i === 0 ? "sequence_first" : "followup_in_thread",
             agentName,
             recipientOptedIn,
           })
-        : rendered;
+        : renderedEmail;
       const id = await queueScheduledMessage(env, {
         leadId, orgId: lead.org_id, userId,
         channel, toAddress, body,
@@ -349,7 +354,7 @@ export async function bulkEnrollAutomation(
 
   const camp = await queryFirst<AutomationRow & { org_id: number }>(
     env.D1DB,
-    `SELECT id, org_id, message, email_subject, opening_send_time, channels, followup_steps FROM automation WHERE id = ?`,
+    `SELECT id, org_id, message, email_subject, email_body, opening_send_time, channels, followup_steps FROM automation WHERE id = ?`,
     automationId,
   );
   if (!camp) return { enrolled: 0, queued: 0 };
@@ -366,8 +371,8 @@ export async function bulkEnrollAutomation(
   // every lead apart from per-lead token expansion + scheduling done in the row
   // loop. Step 0 (opening) is INSTANT; follow-ups carry a day + send_time.
   const openingTime = (camp.opening_send_time || "").trim() || null;
-  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email"; subject: string | null }> = [];
-  if ((camp.message || "").trim()) template.push({ body: camp.message!.trim(), instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel, subject: emailSubject });
+  const template: Array<{ body: string; instant: boolean; delayDays: number; sendTime: string | null; tz?: string | null; channel: "sms" | "email"; subject: string | null; emailBody: string }> = [];
+  if ((camp.message || "").trim()) template.push({ body: camp.message!.trim(), instant: !openingTime, delayDays: 0, sendTime: openingTime, channel: campaignChannel, subject: emailSubject, emailBody: (camp.email_body || "").trim() || camp.message!.trim() });
   let followups: FollowupStep[] = [];
   try {
     const parsed = JSON.parse(camp.followup_steps || "[]");
@@ -376,7 +381,7 @@ export async function bulkEnrollAutomation(
   for (const f of followups) {
     if (!(f.message || "").trim()) continue;
     const days = typeof f.delay_days === "number" && f.delay_days > 0 ? f.delay_days : 0;
-    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel), subject: (f.subject || "").trim() || emailSubject });
+    template.push({ body: f.message!.trim(), instant: false, delayDays: days, sendTime: f.send_time ?? null, tz: f.timezone || null, channel: normChannel(f.channel, campaignChannel), subject: (f.subject || "").trim() || emailSubject, emailBody: (f.email_body || "").trim() || f.message!.trim() });
   }
   if (!template.length) return { enrolled: 0, queued: 0 };
   // A lead can be routed onto SMS by the cross-channel fallback even if no step
@@ -472,7 +477,10 @@ export async function bulkEnrollAutomation(
     let leadQueued = 0;
     for (let i = 0; i < template.length; i++) {
       const step = template[i]!;
-      const rendered = applyPersonalization(step.body, vars);
+      // SMS uses the short `body`; EMAIL uses its own `emailBody` (falls back to
+      // the SMS text when blank).
+      const renderedSms = sendChannels.includes("sms") ? applyPersonalization(step.body, vars) : "";
+      const renderedEmail = sendChannels.includes("email") ? applyPersonalization(step.emailBody, vars) : "";
       const computedAt = step.instant
         ? new Date(startMs + 30 * 1000).toISOString()
         : stepScheduledAt(startMs, step.delayDays, step.sendTime, step.tz || sendTz);
@@ -482,12 +490,12 @@ export async function bulkEnrollAutomation(
       for (const channel of sendChannels) {
         const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
         const body = channel === "sms"
-          ? appendComplianceFooter(rendered, {
+          ? appendComplianceFooter(renderedSms, {
               kind: i === 0 ? "sequence_first" : "followup_in_thread",
               agentName,
               recipientOptedIn,
             })
-          : rendered;
+          : renderedEmail;
         // Email steps carry the campaign's subject; SMS has no subject.
         const subject = channel === "email" ? step.subject : null;
         binds.push(stmt.bind(

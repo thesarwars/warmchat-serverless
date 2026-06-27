@@ -529,18 +529,21 @@ function OutboundBody() {
   const createAuto = useMutation({
     mutationFn: (d: WizardLaunch) => createAutomation({
       name: d.name,
-      // Mixed-channel: the campaign's channel list is the union of the opening
-      // channel and every follow-up's channel, so display + plan limits are accurate.
-      channels: Array.from(new Set([...d.channels, ...d.followups.map((f) => f.channel)].filter(Boolean))),
+      // The Step-1 channel selection IS the campaign's channels (per-message
+      // channel was removed - each message now sends on every channel a lead has).
+      channels: d.channels,
       message: d.message,
       email_subject: d.emailSubject || undefined,
+      // Separate opening EMAIL body (only set when both channels are on); blank
+      // falls back to `message` server-side.
+      email_body: d.emailBody || undefined,
       // "Send now" -> null (instant); "Send at a specific time" -> today at HH:MM
       // (account tz), applied per lead on its enrollment day by the scheduler.
       opening_send_time: d.timing === "scheduled" ? d.openingTime : null,
       sources: [...d.audType, ...d.audStage, ...d.audFilter],
       leads: d.leads,
       timing: d.leads.length > 0 ? "now" : undefined,
-      followups: d.followups.map((f, i) => ({ delay_days: fuDelayDays(f, i), message: f.message, send_time: f.time, channel: f.channel, ...(f.subject ? { subject: f.subject } : {}) })),
+      followups: d.followups.map((f, i) => ({ delay_days: fuDelayDays(f, i), message: f.message, send_time: f.time, ...(f.email_body ? { email_body: f.email_body } : {}), ...(f.subject ? { subject: f.subject } : {}) })),
     }),
     onSuccess: () => { refresh(); setWizard(false); },
     // Reset the re-entrancy lock whether the create succeeded or failed so a
