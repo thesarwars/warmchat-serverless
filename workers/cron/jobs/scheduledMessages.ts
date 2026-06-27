@@ -23,6 +23,7 @@ import {
 import { isMockSendsEnabled } from "../_shared/appSettings.ts";
 import { isAiMasterEnabled, isAgentEnabled } from "../_shared/aiGate.ts";
 import { checkAiSmsPace } from "../_shared/aiSendPace.ts";
+import { tryNormalizeE164 } from "../_shared/phone.ts";
 import { appendCanSpamFooter, makeUnsubscribeToken, unsubscribeUrl } from "../_shared/emailCompliance.ts";
 import { notify } from "../_shared/notify.ts";
 
@@ -626,6 +627,10 @@ async function dispatchEmail(env: CronEnv, row: DueRow): Promise<SendResult> {
 }
 
 async function dispatchSms(env: CronEnv, row: DueRow, senderKey: string): Promise<SendResult> {
+  // Telnyx rejects non-E.164 numbers with HTTP 400, so a lead phone stored as a
+  // bare 10-digit "5594705204" (no +1) fails while "+15594705204" sends fine.
+  // Normalize here so the send works regardless of how the number was stored.
+  const to = tryNormalizeE164(row.to_address) || row.to_address;
   if (await isMockSendsEnabled(env, row.org_id ?? null)) {
     await env.D1DB.prepare(
       `INSERT INTO mock_send_log
@@ -633,7 +638,7 @@ async function dispatchSms(env: CronEnv, row: DueRow, senderKey: string): Promis
        VALUES ('sms', 'telnyx', ?, ?, NULL, ?, ?, ?, ?, 1, ?)`,
     ).bind(
       senderKey || null,
-      row.to_address,
+      to,
       row.body ?? null,
       row.org_id ?? null,
       row.contact_id ?? null,
@@ -646,7 +651,7 @@ async function dispatchSms(env: CronEnv, row: DueRow, senderKey: string): Promis
   const res = await fetch("https://api.telnyx.com/v2/messages", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.TELNYX_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: senderKey, to: row.to_address, text: row.body || "" }),
+    body: JSON.stringify({ from: senderKey, to, text: row.body || "" }),
   });
   if (res.ok) {
     const j = await res.json().catch(() => null) as { data?: { id?: string } } | null;
