@@ -30,6 +30,16 @@ export function isProvenanceField(field: string): field is ProvenanceField {
   return (PROVENANCE_FIELDS as readonly string[]).includes(field);
 }
 
+// Extra lead fields written directly (not through the engine's normalizer) but
+// still tracked for manual-vs-AI provenance, so a hand-edited Timeline /
+// Pre-Approved / Notes isn't clobbered by the next AI extraction.
+const EXTRA_TRACKED_FIELDS = ["timeline", "pre_approved", "notes"] as const;
+
+/** True for any lead field whose manual edits should be provenance-stamped. */
+export function isManualTrackedField(field: string): boolean {
+  return isProvenanceField(field) || (EXTRA_TRACKED_FIELDS as readonly string[]).includes(field);
+}
+
 // Only override a manual edit when the classifier is at least this confident AND
 // flags an explicit intent change (the "Only on clear new intent" policy).
 const OVERRIDE_CONFIDENCE = 0.75;
@@ -192,7 +202,7 @@ export function stampManualProvenance(
   const prov = parseProvenance(currentRaw);
   const now = at || new Date().toISOString();
   for (const f of fields) {
-    if (isProvenanceField(f)) prov[f] = { source: "manual", updated_at: now };
+    if (isManualTrackedField(f)) prov[f] = { source: "manual", updated_at: now };
   }
   return JSON.stringify(prov);
 }

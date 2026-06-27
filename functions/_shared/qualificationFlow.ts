@@ -16,7 +16,10 @@ import { dispatchZapierEvent } from "./zapierDispatch.ts";
 import { toLeadView } from "./integrationApi.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { logAgentActivity } from "./aiAgents.ts";
-import { applyAiLeadFields, setAiStatus, type LeadFieldProposal } from "./leadFieldEngine.ts";
+import {
+  applyAiLeadFields, setAiStatus, parseProvenance, isManuallyLocked,
+  type LeadFieldProposal,
+} from "./leadFieldEngine.ts";
 import { openEscalation } from "./escalation.ts";
 import { ensureDealForLead } from "./deals.ts";
 
@@ -102,7 +105,7 @@ const NOT_INTERESTED_ACK =
  * any field the classifier left null so we never overwrite real data with
  * empty results.
  */
-async function applyExtractions(
+export async function applyExtractions(
   env: Env, leadId: number, extracted: ClassifyResult["extracted"],
   ctx?: { evidence?: string | null; confidence?: number | undefined },
 ): Promise<void> {
@@ -116,10 +119,17 @@ async function applyExtractions(
     await applyAiLeadFields(env, leadId, governed, { agentKey: "inbound", evidence: ctx?.evidence ?? null });
   }
 
+  // Read provenance + current notes once - to avoid clobbering a manual
+  // timeline/pre_approved edit and to dedupe the notes append.
+  const cur = await queryFirst<{ ai_field_provenance: string | null; notes: string | null }>(
+    env.D1DB, `SELECT ai_field_provenance, notes FROM lead WHERE id = ?`, leadId,
+  );
+  const prov = parseProvenance(cur?.ai_field_provenance);
+
   const sets: string[] = [];
   const args: unknown[] = [];
-  if (extracted.timeline) { sets.push("timeline = ?"); args.push(extracted.timeline); }
-  if (typeof extracted.pre_approved === "boolean") {
+  if (extracted.timeline && !isManuallyLocked(prov, "timeline")) { sets.push("timeline = ?"); args.push(extracted.timeline); }
+  if (typeof extracted.pre_approved === "boolean" && !isManuallyLocked(prov, "pre_approved")) {
     sets.push("pre_approved = ?"); args.push(extracted.pre_approved ? 1 : 0);
     sets.push("financing_status = ?"); args.push(extracted.pre_approved ? "pre_approved" : "not_pre_approved");
   }
@@ -132,6 +142,19 @@ async function applyExtractions(
   if (typeof extracted.bathrooms === "number") { sets.push("bathrooms = ?"); args.push(extracted.bathrooms); }
   if (extracted.property_type) { sets.push("property_type = ?"); args.push(extracted.property_type); }
   if (extracted.seller_price_expectations) { sets.push("seller_price_expectations = ?"); args.push(extracted.seller_price_expectations); }
+
+  // Catch-all: concrete details that have no dedicated field (pool, acreage,
+  // must-haves...) are APPENDED to Notes, deduped so the same phrase doesn't
+  // pile up on every reply.
+  const detail = extracted.other_details?.trim();
+  if (detail) {
+    const existing = (cur?.notes || "").trim();
+    if (!existing.toLowerCase().includes(detail.toLowerCase())) {
+      sets.push("notes = ?");
+      args.push(existing ? `${existing}\n${detail}` : detail);
+    }
+  }
+
   if (!sets.length) return;
   args.push(leadId);
   await execute(env.D1DB, `UPDATE lead SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...args);

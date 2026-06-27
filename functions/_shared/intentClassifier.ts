@@ -39,6 +39,9 @@ export interface ClassifyResult {
     bathrooms?: number;
     property_type?: string;
     seller_price_expectations?: string;
+    // Concrete lead facts that don't fit a named field (e.g. "wants a pool",
+    // "5 acres", school district, must-haves) - appended to lead.notes.
+    other_details?: string;
   };
 }
 
@@ -177,11 +180,13 @@ Output schema (strict):
     "bedrooms": number | null,
     "bathrooms": number | null,
     "property_type": string | null,
-    "seller_price_expectations": string | null
+    "seller_price_expectations": string | null,
+    "other_details": string | null
   }
 }
 
 Rules:
+- other_details: any CONCRETE lead fact that does not fit a named field above (e.g. "wants a pool", "5 acres", "good school district", "must have a garage", "cash buyer"). A short comma-joined phrase. null if none. Do NOT restate budget/area/timeline here.
 - intent "booking" only if the lead is asking to schedule/tour/call.
 - intent "not_interested" ONLY when genuinely not interested ("not interested", "stop", "leave me alone", "no thanks").
 - intent "unknown" for vague/exploring replies ("just browsing", "just looking", "maybe", "not sure") - we will ask a clarifying question, not drop them.
@@ -228,6 +233,7 @@ async function callLLM(env: Env, replyText: string, leadType: string | null): Pr
         ...(typeof ex.bathrooms === "number" ? { bathrooms: ex.bathrooms } : {}),
         ...(typeof ex.property_type === "string" ? { property_type: ex.property_type } : {}),
         ...(typeof ex.seller_price_expectations === "string" ? { seller_price_expectations: ex.seller_price_expectations } : {}),
+        ...(typeof ex.other_details === "string" && ex.other_details.trim() ? { other_details: ex.other_details.trim() } : {}),
       },
     };
     return out2;
@@ -244,17 +250,22 @@ export async function classifyReplyText(
 ): Promise<ClassifyResult> {
   const text = (replyText || "").trim();
   const base = extractKeyword(text);
-  // Skip LLM for trivial messages (saves cost; also prevents the model from
-  // hallucinating a budget out of "ok").
-  if (base.intent !== "unknown" || text.length <= 5) return base;
+  // Only skip the LLM for trivially short messages ("ok", "yes") - they carry no
+  // structured fields and the model would hallucinate. For everything else we run
+  // the LLM so Budget/Area/Timeline/Pre-Approved/other_details extract on EVERY
+  // non-trivial reply, NOT only on intent='unknown' turns (the old gate skipped
+  // the field pass whenever a booking/warm keyword was present, which is why
+  // those fields rarely filled).
+  if (text.length <= 5) return base;
   const llm = await callLLM(env, text, leadType);
   if (!llm) return base;
-  // Merge: prefer LLM intent + signal when keyword pass came back empty;
-  // union the extracted fields.
+  // Intent classification is unchanged: the keyword pass stays authoritative when
+  // it matched (booking / not_interested / warm); the LLM only decides intent on
+  // an otherwise-'unknown' turn. We always UNION the extracted fields.
   const mergedConfidence = llm.confidence ?? base.confidence;
   return {
-    intent: llm.intent !== "unknown" ? llm.intent : base.intent,
-    lead_type_signal: llm.lead_type_signal ?? base.lead_type_signal,
+    intent: base.intent !== "unknown" ? base.intent : llm.intent,
+    lead_type_signal: base.lead_type_signal ?? llm.lead_type_signal,
     ...(mergedConfidence !== undefined ? { confidence: mergedConfidence } : {}),
     extracted: { ...base.extracted, ...llm.extracted },
   };
