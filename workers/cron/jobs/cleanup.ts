@@ -97,7 +97,7 @@ export async function runCleanup(env: CronEnv): Promise<void> {
   total += await purge(
     env, "scheduled_message",
     `DELETE FROM scheduled_message
-       WHERE status IN ('sent', 'failed', 'cancelled')
+       WHERE status IN ('sent', 'failed', 'cancelled', 'skipped')
          AND datetime(updated_at) < datetime('now', ?)`,
     `-${RETENTION_DAYS.scheduledMessage} days`,
   );

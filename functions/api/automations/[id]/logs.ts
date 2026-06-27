@@ -16,6 +16,7 @@ interface Row {
   scheduled_at: string | null; sent_at: string | null; error_message: string | null;
   body: string | null; created_at: string;
   first_name: string | null; last_name: string | null; lead_name: string | null;
+  phone: string | null; email: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -23,6 +24,7 @@ const STATUS_LABEL: Record<string, string> = {
   sending: "Sending",
   sent: "Message sent",
   failed: "Failed",
+  skipped: "Not sent",
   cancelled: "Stopped (lead replied or booked)",
 };
 
@@ -43,7 +45,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     env.D1DB,
     `SELECT sm.id, sm.contact_id, sm.channel, sm.status, sm.scheduled_at, sm.sent_at,
             sm.error_message, sm.body, sm.created_at,
-            l.first_name, l.last_name, l.name AS lead_name
+            l.first_name, l.last_name, l.name AS lead_name, l.phone, l.email
        FROM scheduled_message sm
        LEFT JOIN lead l ON l.id = sm.contact_id
       WHERE sm.automation_id = ?
@@ -55,7 +57,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const events = rows.map((r) => ({
     id: r.id,
     lead_id: r.contact_id,
-    lead: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.lead_name || "Lead",
+    // Show the lead's name; if it has none, fall back to its number, then email,
+    // so an unnamed lead reads "+1 559... - SMS" instead of a generic "Lead".
+    lead: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.lead_name || r.phone || r.email || "Lead",
     channel: r.channel,
     status: r.status,
     label: STATUS_LABEL[r.status] || r.status,
@@ -68,16 +72,20 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   // would undercount a large campaign). Drives the live "X sent · Y queued ·
   // sending now" status the UI polls.
   const agg = await queryFirst<{
-    enrolled: number; sent: number; queued: number; sending: number; stopped: number; failed: number; total: number;
+    enrolled: number; sent: number; queued: number; sending: number; stopped: number; failed: number; not_sent: number; total: number;
   }>(
     env.D1DB,
-    `SELECT COUNT(DISTINCT contact_id) AS enrolled,
+    // 'skipped' = a lead with no reachable selected channel (a visible "not sent"
+    // marker, never dispatched). Keep it OUT of enrolled/total so it doesn't
+    // inflate the "X leads" count; surface it separately as not_sent.
+    `SELECT COUNT(DISTINCT CASE WHEN status <> 'skipped' THEN contact_id END) AS enrolled,
             SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent,
             SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) AS queued,
             SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END) AS sending,
             SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS stopped,
             SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
-            COUNT(*) AS total
+            COUNT(DISTINCT CASE WHEN status='skipped' THEN contact_id END) AS not_sent,
+            SUM(CASE WHEN status <> 'skipped' THEN 1 ELSE 0 END) AS total
        FROM scheduled_message WHERE automation_id = ?`,
     id,
   );
@@ -99,6 +107,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       sending: Number(agg?.sending ?? 0),
       stopped: Number(agg?.stopped ?? 0),
       failed: Number(agg?.failed ?? 0),
+      not_sent: Number(agg?.not_sent ?? 0),
       total: Number(agg?.total ?? 0),
       due_now: Number(dueNow?.n ?? 0),
     },

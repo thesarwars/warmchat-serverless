@@ -75,7 +75,7 @@ function AIWriteMenu({ onPick }: { onPick: (tone: string) => void }) {
 const fuField: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 13, fontWeight: 600, color: "var(--ink)" };
 const fuInput: React.CSSProperties = { border: "none", outline: "none", fontSize: 13, fontFamily: "inherit", fontWeight: 600, color: "var(--ink)", background: "transparent", cursor: "pointer" };
 
-function FollowUpSequence({ value, onChange }: { value: FollowUp[]; onChange: (v: FollowUp[]) => void }) {
+function FollowUpSequence({ value, onChange, hasEmail }: { value: FollowUp[]; onChange: (v: FollowUp[]) => void; hasEmail: boolean }) {
   const set = (updater: (p: FollowUp[]) => FollowUp[]) => onChange(updater(value));
   const add = () => set((p) => [...p, { id: Date.now(), time: "09:00", timezone: "PST", channel: "sms", message: "" }]);
   const remove = (id: number) => set((p) => p.filter((f) => f.id !== id));
@@ -106,21 +106,16 @@ function FollowUpSequence({ value, onChange }: { value: FollowUp[]; onChange: (v
                 <button onClick={() => remove(f.id)} style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: 6, border: "none", background: "none", cursor: "pointer", display: "grid", placeItems: "center" }}><Icon name="trash" size={14} style={{ color: "#ef4444" }} /></button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em" }}>Message Type</span>
-                <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
-                  {["sms", "email"].map((ch) => (
-                    <button key={ch} onClick={() => upd(f.id, "channel", ch)} style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: (f.channel || "sms") === ch ? "var(--panel)" : "transparent", color: (f.channel || "sms") === ch ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name={ch === "sms" ? "message" : "mail"} size={14} />{ch === "sms" ? "SMS" : "Email"}</button>
-                  ))}
-                </div>
+                <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Sent on each lead's available channel{hasEmail ? "(s)" : ""}.</span>
                 <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => upd(f.id, "message", aiToneText(tone).text)} /></div>
               </div>
-              {f.channel === "email" && (
+              {hasEmail && (
                 <div style={{ marginBottom: 10 }}>
                   <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
                   <input type="text" value={f.subject || ""} onChange={(e) => upd(f.id, "subject", e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "11px 13px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
                 </div>
               )}
-              <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder={f.channel === "email" ? "Write your email body..." : "Write your follow-up message..."} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
+              <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder="Write your follow-up message..." style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
             </div>
           ))}
         </div>
@@ -156,7 +151,9 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   const [step, setStep] = useState(1);
   const [name, setName] = useState(seed?.name || "");
   const [channels, setChannels] = useState<string[]>([seedCh]);
-  const [msgChannel, setMsgChannel] = useState(seedCh);
+  // Channel is chosen ONCE in Step 1 (campaign-level). Each message is then sent
+  // to every selected channel a lead actually has - no per-message channel choice.
+  const hasEmail = channels.includes("email");
   const [message, setMessage] = useState(seed?.message || "");
   const [emailSubject, setEmailSubject] = useState(seed?.subject || "");
   const [timing, setTiming] = useState("instant");
@@ -246,7 +243,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   // Template mode: build a reusable template (opening + follow-ups) and hand it
   // back to the Templates tab. stage is CUSTOM, sent 0, day 0/1/2/... by index.
   const saveTemplate = () => {
-    const ch = msgChannel;
+    const ch = channels[0] || "sms";
     const flow: Record<string, unknown>[] = [
       ch === "email"
         ? { day: "Day 0", instant: timing === "instant", channel: "email", subject: emailSubject, body: message }
@@ -495,21 +492,16 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                     <span style={{ fontSize: 12, color: "var(--ink-3)", display: "flex", alignItems: "center", gap: 3 }}><Icon name="clock" size={12} />{pstNow}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em" }}>Message Type</span>
-                    <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
-                      {["sms", "email"].map((ch) => (
-                        <button key={ch} onClick={() => setMsgChannel(ch)} style={{ padding: "6px 16px", borderRadius: 7, border: "none", background: msgChannel === ch ? "var(--panel)" : "transparent", color: msgChannel === ch ? "var(--accent-strong)" : "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><Icon name={ch === "sms" ? "message" : "mail"} size={14} />{ch === "sms" ? "SMS" : "Email"}</button>
-                      ))}
-                    </div>
-                    <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setMessage(d.text); if (msgChannel === "email") setEmailSubject(d.subject); }} /></div>
+                    <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Sent on each lead's available channel{channels.length > 1 ? "s (SMS and/or Email)" : ` (${channelLabel})`}.</span>
+                    <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setMessage(d.text); if (hasEmail) setEmailSubject(d.subject); }} /></div>
                   </div>
-                  {msgChannel === "email" && (
+                  {hasEmail && (
                     <div style={{ marginBottom: 12 }}>
                       <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
                       <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
                     </div>
                   )}
-                  <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={msgChannel === "email" ? "Write your email body..." : "Write your message..."} style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 150, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                  <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={hasEmail ? "Write your message..." : "Write your message..."} style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 150, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
                   <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>{message.length} chars · {Math.max(1, Math.ceil(message.length / 160))}/5 segments</div>
                   <div style={{ marginTop: 16 }}>
                     <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 10 }}>When to send the opening</label>
@@ -557,7 +549,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                       </div>
                     ))}
                   </div>
-                  <FollowUpSequence value={followups} onChange={setFollowups} />
+                  <FollowUpSequence value={followups} onChange={setFollowups} hasEmail={hasEmail} />
                 </div>
               </div>
             )}
@@ -585,17 +577,17 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                 <div style={{ padding: 20, background: "var(--line-soft)", borderRadius: 14 }}>
                   <h4 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)", margin: "0 0 16px" }}>Message Flow — How This Workflow Runs</h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {[{ tag: "Opening message", channel: msgChannel, subject: msgChannel === "email" ? emailSubject : "", body: message, when: timing === "instant" ? "Sent immediately" : `Sending at ${formatSendTime(openingTime) || openingTime} ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}` },
-                      ...followups.map((f, i) => ({ tag: `Follow-up ${i + 1}`, channel: f.channel || "sms", subject: f.channel === "email" ? f.subject || "" : "", body: f.message, when: followupWhenLabel(f.date, f.time, f.timezone) })),
+                    {[{ tag: "Opening message", subject: hasEmail ? emailSubject : "", body: message, when: timing === "instant" ? "Sent immediately" : `Sending at ${formatSendTime(openingTime) || openingTime} ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}` },
+                      ...followups.map((f, i) => ({ tag: `Follow-up ${i + 1}`, subject: hasEmail ? (f.subject || "") : "", body: f.message, when: followupWhenLabel(f.date, f.time, f.timezone) })),
                     ].map((m, i) => {
-                      const email = m.channel === "email";
+                      const emailOnly = hasEmail && !channels.includes("sms");
                       return (
                         <div key={i} style={{ padding: 16, background: "var(--panel)", borderRadius: 12, border: "1px solid var(--line)", display: "flex", gap: 14, alignItems: "flex-start" }}>
-                          <div style={{ width: 40, height: 40, borderRadius: 10, background: email ? "#E7F4FB" : "#FFEDE3", color: email ? "#0EA5E9" : "var(--accent-strong)", display: "grid", placeItems: "center", flex: "none" }}><Icon name={email ? "mail" : "message"} size={18} /></div>
+                          <div style={{ width: 40, height: 40, borderRadius: 10, background: emailOnly ? "#E7F4FB" : "#FFEDE3", color: emailOnly ? "#0EA5E9" : "var(--accent-strong)", display: "grid", placeItems: "center", flex: "none" }}><Icon name={emailOnly ? "mail" : "message"} size={18} /></div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                               <span style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{m.tag}</span>
-                              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: email ? "#E7F4FB" : "#FFEDE3", color: email ? "#0EA5E9" : "var(--accent-strong)" }}>{email ? "Email" : "SMS"}</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: "#FFEDE3", color: "var(--accent-strong)" }}>{channelLabel}</span>
                             </div>
                             {m.subject ? <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-2)", marginTop: 6 }}>Subject: {m.subject}</div> : null}
                             <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.body ? `"${m.body}"` : <span style={{ color: "var(--ink-3)", fontStyle: "italic" }}>No message written yet</span>}</div>
