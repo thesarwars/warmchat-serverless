@@ -18,6 +18,7 @@
 import type { Env } from "./env.ts";
 import { execute, queryFirst } from "./db.ts";
 import { logAgentActivity, type AgentKey } from "./aiAgents.ts";
+import { autoCompleteLeadTasks } from "./tasks.ts";
 import { normalizeStage, STAGE_SCORE } from "./leadStage.ts";
 
 /** The lead columns governed by provenance + the override guard. */
@@ -338,6 +339,17 @@ export async function applyAiLeadFields(
         status: "ok",
       });
     }
+  }
+
+  // Documents signed: if the AI advanced the lead to "Under Contract" (contract
+  // executed) or "Closed" (closing docs), complete any open "Contract" task -
+  // the deterministic CRM signal that paperwork was signed.
+  const stageChange = changes.find((c) => c.field === "status");
+  if (stageChange && (stageChange.newVal === "Under Contract" || stageChange.newVal === "Closed")) {
+    await autoCompleteLeadTasks(env, {
+      leadId, orgId: orgId ?? undefined,
+      types: ["contract"], reason: `documents signed (stage -> ${stageChange.newVal})`,
+    });
   }
 
   return changes.map((c) => c.field);

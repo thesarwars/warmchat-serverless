@@ -9,7 +9,7 @@ import { notifyQuotaExceeded } from "../../../../_shared/quotaNotify.ts";
 import { planMinuteLimit } from "../../../../_shared/plans.ts";
 import { isPhoneSuppressed } from "../../../../_shared/suppression.ts";
 import { appendComplianceFooter } from "../../../../_shared/smsCompliance.ts";
-import { createTask } from "../../../../_shared/tasks.ts";
+import { createTask, autoCompleteLeadTasks } from "../../../../_shared/tasks.ts";
 
 /**
  * POST /api/webhooks/calling/telnyx/status - Telnyx Call Control events.
@@ -918,6 +918,16 @@ async function handleHangup(env: Env, payload: TelnyxPayload, callControlId: str
 
   // Usage record (only when there's actual duration).
   if (status === "COMPLETED" && duration > 0) {
+    // A genuinely connected call (answered + non-zero duration) completes any
+    // open "Call lead" task. Excludes missed / NO_ANSWER / BUSY / voicemail-only
+    // calls (answered_at NULL) so we never auto-complete a call that didn't
+    // actually happen.
+    if (call.lead_id && call.answered_at) {
+      await autoCompleteLeadTasks(env, {
+        leadId: call.lead_id, orgId: call.org_id,
+        types: ["call"], reason: "call completed",
+      });
+    }
     const cycle = await ensureCycle(env, call.org_id);
     if (cycle) {
       const minutes = duration / 60;
