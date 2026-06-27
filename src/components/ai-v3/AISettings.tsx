@@ -4,7 +4,7 @@ import toast, { Toaster } from "react-hot-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "./Icon";
 import { AvailabilityEditor } from "../availability/AvailabilityEditor";
-import { fetchAiSettings, updateAiSettings, fetchAutoResponse, updateAutoResponse, fetchAgentProfile, updateAgentProfile, fetchAiQualifications, createAiQualification, deleteAiQualification, fetchMeBootstrap, patchNotificationSettings, fetchAvailability } from "../../helpers/backend";
+import { fetchAiSettings, updateAiSettings, fetchAutoResponse, updateAutoResponse, fetchAgentProfile, updateAgentProfile, fetchAiQualifications, createAiQualification, deleteAiQualification, fetchMeBootstrap, patchNotificationSettings, fetchAvailability, fetchAiKnowledge, createAiKnowledge, updateAiKnowledge } from "../../helpers/backend";
 
 /* AI Settings sub-tab — ported from docs/updated-docs/ai-agent.jsx (§6).
    Self-contained. The master AI on/off is wired to the real /ai/settings
@@ -99,12 +99,40 @@ function SetRadioRow({ name, label, desc, checked, onChange }: { name: string; l
   );
 }
 
-function KbRow({ icon, label, onEdit }: { icon: string; label: string; onEdit?: () => void }) {
+function KbRow({ icon, label, value, saving, onSave }: { icon: string; label: string; value: string; saving?: boolean; onSave: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const openEdit = () => { setDraft(value); setOpen(true); };
+  const close = () => setOpen(false);
+  const save = () => { onSave(draft.trim()); setOpen(false); };
   return (
-    <div className="wc-set-kb">
-      <span className="wc-set-kb-ic"><Icon name={icon} size={17} /></span>
-      <span className="wc-set-kb-label">{label}</span>
-      <button className="wc-set-kb-edit" onClick={onEdit}><Icon name="pencil" size={15} /></button>
+    <div>
+      <div className="wc-set-kb">
+        <span className="wc-set-kb-ic"><Icon name={icon} size={17} /></span>
+        <span className="wc-set-kb-label">{label}</span>
+        {value.trim() && !open && (
+          <span style={{ marginLeft: "auto", marginRight: 10, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--ink-3)" }}>{value.trim()}</span>
+        )}
+        <button className="wc-set-kb-edit" style={open ? { marginLeft: value.trim() ? 0 : "auto" } : undefined} onClick={() => (open ? close() : openEdit())} aria-label={open ? `Close ${label}` : `Edit ${label}`}><Icon name={open ? "x" : "pencil"} size={15} /></button>
+      </div>
+      {open && (
+        <div style={{ margin: "8px 0 4px", padding: 12, border: "1px solid var(--line)", borderRadius: 10, background: "var(--panel)" }}>
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={`Add ${label} information the AI should use to answer questions...`}
+            style={{ width: "100%", minHeight: 90, padding: 11, borderRadius: 8, border: "1px solid var(--line)", fontSize: 13.5, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", outline: "none" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Exit without saving to discard.</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={close} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", color: "var(--ink-2)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+              <button onClick={save} disabled={saving} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "var(--accent-strong)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -167,6 +195,18 @@ export function AISettings() {
   const tone = (profile?.tone_preference as string) || "Professional";
   const goals: string[] = Array.isArray(persona.goals) ? (persona.goals as string[]) : [];
   const saveProfile = useMutation({ mutationFn: (d: Record<string, unknown>) => updateAgentProfile(d), onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-profile"] }) });
+
+  // Knowledge Base rows -> one ai_knowledge_entry per row (keyed by category),
+  // edited inline. These feed the agent's prompt ("info AI uses to answer").
+  interface KbEntry { id: number; category: string; answer: string | null }
+  const { data: kb } = useQuery({ queryKey: ["ai-knowledge"], queryFn: () => fetchAiKnowledge() as Promise<{ entries: KbEntry[] }>, ...AI_QUERY_OPTS });
+  const kbEntries = kb?.entries || [];
+  const saveKb = useMutation({
+    mutationFn: ({ id, category, label, answer }: { id?: number; category: string; label: string; answer: string }) =>
+      id ? updateAiKnowledge(id, { answer }) : createAiKnowledge({ category, question: label, answer }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ai-knowledge"] }); toast.success("Saved"); },
+    onError: () => toast.error("Couldn't save"),
+  });
   const setTone = (t: string) => saveProfile.mutate({ tone_preference: t });
   const toggleGoal = (g: string) => { const next = goals.includes(g) ? goals.filter((x) => x !== g) : [...goals, g]; saveProfile.mutate({ persona_json: { ...persona, goals: next } }); };
   // Custom instructions: local draft, seeded from persona, saved on blur.
@@ -435,11 +475,28 @@ export function AISettings() {
 
         <SetCard title="Knowledge Base" desc="Information AI uses to answer questions">
           <div className="wc-set-kbs">
-            <KbRow icon="user" label="Agent Bio" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
-            <KbRow icon="pin" label="Service Areas" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
-            <KbRow icon="building" label="Office Information" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=identity")} />
-            <KbRow icon="file" label="FAQ" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=faqs")} />
-            <KbRow icon="clipboard" label="Custom Documents" onEdit={() => navigate("/ai/agent-v2?tab=inbound&sub=faqs")} />
+            {[
+              // kb_-prefixed categories keep each row a single, isolated entry so
+              // the inline FAQ box never collides with the agent-v2 FAQ LIST
+              // (which writes category "faq").
+              { icon: "user", label: "Agent Bio", category: "kb_agent_bio" },
+              { icon: "pin", label: "Service Areas", category: "kb_service_areas" },
+              { icon: "building", label: "Office Information", category: "kb_office_information" },
+              { icon: "file", label: "FAQ", category: "kb_faq" },
+              { icon: "clipboard", label: "Custom Documents", category: "kb_custom_documents" },
+            ].map((k) => {
+              const entry = kbEntries.find((e) => e.category === k.category);
+              return (
+                <KbRow
+                  key={k.category}
+                  icon={k.icon}
+                  label={k.label}
+                  value={entry?.answer || ""}
+                  saving={saveKb.isPending}
+                  onSave={(text) => { if (text) saveKb.mutate({ id: entry?.id, category: k.category, label: k.label, answer: text }); }}
+                />
+              );
+            })}
           </div>
         </SetCard>
       </div>
