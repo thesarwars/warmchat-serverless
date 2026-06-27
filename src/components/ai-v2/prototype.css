@@ -1877,7 +1877,9 @@ a.wc-support-card:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
 
 /* ==== Reporting ==== */
 .wc-rep-tabs{flex-wrap:wrap}
-.wc-rep-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:18px}
+.wc-rep-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+@media(max-width:1000px){.wc-rep-kpis{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.wc-rep-kpis{grid-template-columns:1fr}}
 .wc-chart{display:flex;align-items:flex-end;gap:8px;height:200px;padding-top:18px}
 .wc-chart-col{flex:1;height:100%;display:flex;align-items:flex-end}
 .wc-chart-bar{width:100%;background:linear-gradient(180deg,var(--accent),#FBA968);border-radius:7px 7px 0 0;position:relative;min-height:4px;transition:.2s}

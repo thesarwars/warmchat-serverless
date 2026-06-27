@@ -8,7 +8,8 @@ import AdminMessagingTab from "@/components/admin/AdminMessagingTab";
 import AdminGoalsTab from "@/components/admin/AdminGoalsTab";
 import { BillingTab as SettingsBillingTab, ProfileCard, NotificationsCard, PasswordCard, TimezoneCard, DealDefaultsCard, EmailChannelCard, SmsChannelCard } from "@/components/settings/SettingsPage";
 import { fetchConnectedAccounts } from "@/api/connectedAccounts";
-import { inviteUser, fetchOrgUsers } from "@/helpers/backend";
+import { inviteUser, fetchOrgUsers, fetchMeBootstrap } from "@/helpers/backend";
+import { resolvePlanName, formatPlanLabel } from "@/components/settings/profileShared";
 import toast from "react-hot-toast";
 import "@/components/ai-v2/prototype.css";
 
@@ -279,6 +280,13 @@ function Admin() {
   const setTab = (k: string) => setParams({ tab: k });
   const navigate = useNavigate();
   const isSiteAdmin = typeof window !== "undefined" && localStorage.getItem("is_admin") === "1";
+  // Live plan/status for the header badge - same bootstrap source the Billing tab
+  // uses, so the badge reflects the org's real plan instead of a hardcoded label.
+  const boot = useQuery({ queryKey: ["me_bootstrap"], queryFn: fetchMeBootstrap });
+  const bootBilling = (boot.data?.billing ?? null) as { plan?: string | null; subscription_status?: string | null } | null;
+  const bootOrg = ((boot.data?.profile ?? null) as { org?: { plan?: string; subscription_status?: string } } | null)?.org ?? null;
+  const planName = resolvePlanName(bootBilling?.plan ?? null, bootOrg?.plan ?? undefined, typeof window !== "undefined" ? localStorage.getItem("selectedPlan") : null);
+  const planStatus = bootBilling?.subscription_status || bootOrg?.subscription_status || "inactive";
   return (
     <div className="wc-page wc-fade">
       <div className="wc-pagehead">
@@ -304,7 +312,7 @@ function Admin() {
         </div>
         <div className="wc-planbadge">
           <Icon name="checkCircle" size={18} />
-          <div><div className="wc-planbadge-t">PLAN: GROWTH</div><div className="wc-planbadge-s">Status: active</div></div>
+          <div><div className="wc-planbadge-t">PLAN: {formatPlanLabel(planName).toUpperCase()}</div><div className="wc-planbadge-s">Status: {planStatus}</div></div>
         </div>
       </div>
       <div className="wc-admin-tabs">

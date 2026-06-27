@@ -48,7 +48,6 @@ const ConnectDomain = lazy(() => import("./components/ConnectDomain"));
 const AppointmentsCalendar = lazy(() => import("./components/AppointmentsCalendar"));
 const TasksPage = lazy(() => import("./components/tasks/TasksPage"));
 const DealsPage = lazy(() => import("./components/deals/DealsPage"));
-const ReportingPage = lazy(() => import("./components/reporting/ReportingPage"));
 const SettingsPage = lazy(() => import("./components/settings/SettingsPage"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const Support = lazy(() => import("./pages/Support"));
@@ -513,24 +512,6 @@ const App: React.FC = () => {
                 ]}
               >
                 <DealsPage />
-              </RoleProtectedRoute>
-            }
-          />
-
-          {/* Reporting. UI-only demo from the leads-remix-2 design (no reporting
-              backend yet); linked from the sidebar Workspace group. */}
-          <Route
-            path="/reporting"
-            element={
-              <RoleProtectedRoute
-                allowedRoles={[
-                  ROLES.ADMIN,
-                  ROLES.MANAGER,
-                  ROLES.REPRESENTATIVE,
-                  ROLES.GUEST,
-                ]}
-              >
-                <ReportingPage />
               </RoleProtectedRoute>
             }
           />
