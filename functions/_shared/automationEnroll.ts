@@ -14,6 +14,7 @@ import { generateWithOpenAI } from "./openai.ts";
 import { buildAgentSystemPrompt } from "./aiAgents.ts";
 import { stepScheduledAt } from "./workflowSchedule.ts";
 import { humanizeDashes } from "./humanizeText.ts";
+import { tryNormalizeE164 } from "./phone.ts";
 
 /** Split an array into fixed-size chunks (D1 caps bound params per query). */
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -208,7 +209,7 @@ export async function queueAutomationForLead(
     // Email+SMS campaign reaches phone-only and email-only leads alike).
     const channel = resolveLeadChannel(step.channel, campaignChannels, canSms, canEmail);
     if (!channel) continue;
-    const toAddress = channel === "sms" ? lead.phone! : lead.email!;
+    const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
     const rendered = await renderTemplate(env, step.body, lead);
     // Step 0 of the drip is the opening (first message in the sequence). It
     // gets the AI disclosure + STOP footer. Steps 1+ are follow-ups in the
@@ -412,7 +413,7 @@ export async function bulkEnrollAutomation(
       // SMS instead of silently skipping the step.
       const channel = resolveLeadChannel(step.channel, campaignChannels, canSms, canEmail);
       if (!channel) continue;
-      const toAddress = channel === "sms" ? lead.phone! : lead.email!;
+      const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
       const rendered = applyPersonalization(step.body, vars);
       const body = channel === "sms"
         ? appendComplianceFooter(rendered, {

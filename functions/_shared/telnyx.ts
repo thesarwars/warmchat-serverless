@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { Env } from "./env.ts";
+import { tryNormalizeE164 } from "./phone.ts";
 
 /**
  * Telnyx REST client (10DLC SMS + brand/campaign provisioning). Same pattern
@@ -90,7 +91,9 @@ export async function telnyxSendSms(
     method: "POST",
     body: {
       from,
-      to,
+      // Telnyx 400s on non-E.164 numbers; normalize a bare 10-digit lead phone
+      // (e.g. "5594705204") to "+15594705204" so the send isn't rejected.
+      to: tryNormalizeE164(to) || to,
       text: body,
       ...(opts.mediaUrls && opts.mediaUrls.length ? { media_urls: opts.mediaUrls } : {}),
       ...(opts.messagingProfileId ? { messaging_profile_id: opts.messagingProfileId } : {}),
