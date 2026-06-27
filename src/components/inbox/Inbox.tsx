@@ -2111,6 +2111,18 @@ export default function Inbox() {
   // Inline saves for the lead-intelligence sidebar (notes / address). We always
   // re-send name/email/phone/stage/tags so the lead PUT never clears them.
   const [editingAddress, setEditingAddress] = useState(false);
+  // Inline-edit toggles for the auto-filled Buyer/Seller fields (agents can
+  // click any of these to correct or add a value by hand).
+  const [editingBudget, setEditingBudget] = useState(false);
+  const [editingArea, setEditingArea] = useState(false);
+  const [editingTimeline, setEditingTimeline] = useState(false);
+  const [editingPreApproved, setEditingPreApproved] = useState(false);
+  const [editingEstValue, setEditingEstValue] = useState(false);
+  // Canonical Budget buckets - mirror leadFieldEngine.BUDGET_BUCKETS so a manual
+  // pick matches the values the AI writes (and the Budget filter).
+  const BUDGET_BUCKETS = [
+    "Under $300k", "$300k-$500k", "$500k-$750k", "$750k-$1M", "$1M+",
+  ];
   const saveLeadField = async (
     patch: Record<string, unknown>,
     successMsg?: string,
@@ -2246,54 +2258,126 @@ export default function Inbox() {
         </div>
       </div>
 
-      {/* 3. Buyer / Seller Information */}
-      {isSellerLead ? (
-        <div className="wc-intel-sec">
-          <div className="wc-intel-sech">Seller Information</div>
+      {/* 3. Buyer / Seller Information - every field is click-to-edit. The AI
+          auto-fills these from the conversation; agents can correct/add by hand
+          (manual edits are provenance-stamped so the AI won't clobber them). */}
+      {(() => {
+        // Click-to-edit text field (Area / Timeline / Est. Value).
+        const TextRow = (
+          label: string, value: string, editing: boolean,
+          setEditing: (b: boolean) => void, patchKey: string, placeholder: string,
+        ) => (
           <div className="wc-irow">
-            <span>Address</span>
-            <b>{contactForView.property_address || "—"}</b>
+            <span>{label}</span>
+            {editing ? (
+              <input
+                className="wc-modal-input"
+                style={{ height: 32, maxWidth: 190 }}
+                autoFocus
+                defaultValue={value}
+                placeholder={placeholder}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") setEditing(false);
+                }}
+                onBlur={(e) => {
+                  setEditing(false);
+                  const v = e.target.value.trim();
+                  if (v !== value) void saveLeadField({ [patchKey]: v }, `${label} updated.`);
+                }}
+              />
+            ) : (
+              <b className="cursor-pointer hover:text-orange-600" onClick={() => setEditing(true)}>
+                {value || "—"}
+              </b>
+            )}
           </div>
-          <div className="wc-irow">
-            <span>Est. Value</span>
-            <b>
-              {contactForView.seller_price_expectations ||
-                contactForView.price_range ||
-                "—"}
-            </b>
+        );
+
+        if (isSellerLead) {
+          return (
+            <div className="wc-intel-sec">
+              <div className="wc-intel-sech">Seller Information</div>
+              <div className="wc-irow">
+                <span>Address</span>
+                <b>{contactForView.property_address || "—"}</b>
+              </div>
+              {TextRow(
+                "Est. Value",
+                contactForView.seller_price_expectations || contactForView.price_range || "",
+                editingEstValue, setEditingEstValue, "seller_price_expectations", "e.g. $450k",
+              )}
+              {TextRow("Timeline", contactForView.timeline || "", editingTimeline, setEditingTimeline, "timeline", "e.g. 3 months")}
+            </div>
+          );
+        }
+
+        return (
+          <div className="wc-intel-sec">
+            <div className="wc-intel-sech">Buyer Information</div>
+            {/* Budget: canonical bucket dropdown so it matches AI-written values. */}
+            <div className="wc-irow">
+              <span>Budget</span>
+              {editingBudget ? (
+                <select
+                  className="wc-modal-input"
+                  style={{ height: 32, maxWidth: 190 }}
+                  autoFocus
+                  defaultValue={contactForView.price_range || ""}
+                  onBlur={() => setEditingBudget(false)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditingBudget(false);
+                    if (v !== (contactForView.price_range || ""))
+                      void saveLeadField({ price_range: v || null }, "Budget updated.");
+                  }}
+                >
+                  <option value="">—</option>
+                  {BUDGET_BUCKETS.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              ) : (
+                <b className="cursor-pointer hover:text-orange-600" onClick={() => setEditingBudget(true)}>
+                  {contactForView.price_range || "—"}
+                </b>
+              )}
+            </div>
+            {TextRow("Area", contactForView.area || "", editingArea, setEditingArea, "area", "City / neighborhood / zip")}
+            {TextRow("Timeline", contactForView.timeline || "", editingTimeline, setEditingTimeline, "timeline", "e.g. 3 months")}
+            {/* Pre-Approved: tri-state, sends a real boolean / null. */}
+            <div className="wc-irow">
+              <span>Pre-Approved</span>
+              {editingPreApproved ? (
+                <select
+                  className="wc-modal-input"
+                  style={{ height: 32, maxWidth: 190 }}
+                  autoFocus
+                  defaultValue={
+                    contactForView.pre_approved == null ? "" : contactForView.pre_approved ? "yes" : "no"
+                  }
+                  onBlur={() => setEditingPreApproved(false)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setEditingPreApproved(false);
+                    const v = raw === "yes" ? true : raw === "no" ? false : null;
+                    void saveLeadField({ pre_approved: v }, "Pre-approval updated.");
+                  }}
+                >
+                  <option value="">Unknown</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              ) : (
+                <b
+                  className={`cursor-pointer hover:text-orange-600 ${contactForView.pre_approved ? "ok" : ""}`}
+                  onClick={() => setEditingPreApproved(true)}
+                >
+                  {contactForView.pre_approved == null ? "—" : contactForView.pre_approved ? "Yes" : "No"}
+                </b>
+              )}
+            </div>
           </div>
-          <div className="wc-irow">
-            <span>Timeline</span>
-            <b>{contactForView.timeline || "—"}</b>
-          </div>
-        </div>
-      ) : (
-        <div className="wc-intel-sec">
-          <div className="wc-intel-sech">Buyer Information</div>
-          <div className="wc-irow">
-            <span>Budget</span>
-            <b>{contactForView.price_range || "—"}</b>
-          </div>
-          <div className="wc-irow">
-            <span>Area</span>
-            <b>{contactForView.area || "—"}</b>
-          </div>
-          <div className="wc-irow">
-            <span>Timeline</span>
-            <b>{contactForView.timeline || "—"}</b>
-          </div>
-          <div className="wc-irow">
-            <span>Pre-Approved</span>
-            <b className={contactForView.pre_approved ? "ok" : ""}>
-              {contactForView.pre_approved == null
-                ? "—"
-                : contactForView.pre_approved
-                  ? "Yes"
-                  : "No"}
-            </b>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 4. Notes */}
       <div className="wc-intel-sec">

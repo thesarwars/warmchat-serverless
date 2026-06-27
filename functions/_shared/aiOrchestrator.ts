@@ -18,7 +18,7 @@ import { createTask } from "./tasks.ts";
 import { applyAiDealUpdate, ensureDealForLead } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
-import { advanceQualification } from "./qualificationFlow.ts";
+import { advanceQualification, applyExtractions } from "./qualificationFlow.ts";
 import { classifyReplyText } from "./intentClassifier.ts";
 import { notify } from "./notify.ts";
 import { STAGE_OPTIONS, normalizeStage } from "./leadStage.ts";
@@ -736,7 +736,23 @@ async function runAgentLoop(
   const tagsLine = leadTags.length
     ? `\n\nLEAD TAGS (labels set by the agent or at import - use them to tune your TONE and approach, NOT to re-ask facts. Examples: "VIP"/"Past Client" -> warm & familiar; "Hot"/"Urgent" -> prompt, action-oriented; "Cold"/"Nurture" -> gentle, low-pressure; "Investor" -> numbers/ROI-focused): ${leadTags.join(", ")}`
     : "";
-  const system = `${base}\n\nCHANNEL: ${channelLine}\n\nLEAD PROFILE (already known - do not re-ask):\n${profileRow ? profileBlock(profileRow) : "(unknown)"}${tagsLine}\n\nAGENT BOOKING AVAILABILITY: ${availLine}\n\nCURRENT TIME (UTC): ${nowIso()}`;
+  // Deterministic ask-next / pivot-to-booking directive, computed from which of
+  // the four buyer-qualification fields are still missing. Turns the prose
+  // playbook into a concrete per-turn instruction: ask ONE missing thing at a
+  // time (never re-asking a known field), and once all four are on file, stop
+  // qualifying and focus on booking.
+  const qualLine = (() => {
+    const missing: string[] = [];
+    if (!profileRow?.price_range) missing.push("budget");
+    if (!profileRow?.area) missing.push("area");
+    if (!profileRow?.timeline) missing.push("timeline");
+    if (profileRow?.pre_approved == null) missing.push("pre-approval status");
+    if (!missing.length) {
+      return "\n\nQUALIFICATION STATUS: budget, area, timeline and pre-approval are ALL on file. Do NOT ask further qualifying questions - focus on converting: answer their questions and proactively offer to book a time (use find_appointment_slots / book_appointment).";
+    }
+    return `\n\nQUALIFICATION STATUS: still missing ${missing.join(", ")}. Ask ONE natural question for the NEXT missing item ("${missing[0] ?? ""}"). Never re-ask anything already shown in LEAD PROFILE. Once all four (budget, area, timeline, pre-approval) are known, stop qualifying and pivot to booking.`;
+  })();
+  const system = `${base}\n\nCHANNEL: ${channelLine}\n\nLEAD PROFILE (already known - do not re-ask):\n${profileRow ? profileBlock(profileRow) : "(unknown)"}${tagsLine}${qualLine}\n\nAGENT BOOKING AVAILABILITY: ${availLine}\n\nCURRENT TIME (UTC): ${nowIso()}`;
 
   const history = channel === "email"
     ? await loadEmailHistory(env, lead.id)
@@ -850,29 +866,26 @@ export async function runInboundAgent(
     await execute(env.D1DB, `UPDATE lead SET last_reply_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, nowIso(), leadId);
   }
 
-  // Deterministic lead_type backstop: the spec requires intent detection to SET
-  // lead_type (buyer/seller/both) on the lead. LLMs don't reliably fire the
-  // update_lead tool on the same turn they reply, so when the type is still
-  // unknown and the reply clearly signals one, persist it here - before the agent
-  // loop reads the profile - so the type-scoped qualification questions apply and
-  // the CRM reflects intent regardless of the model's tool choices.
-  if (!lead.lead_type || lead.lead_type === "unknown") {
-    try {
-      const c = await classifyReplyText(env, replyText, lead.lead_type);
-      const conf = c.confidence ?? 0.7;
-      const proposals: LeadFieldProposal[] = [];
-      if (c.lead_type_signal) proposals.push({ field: "lead_type", value: c.lead_type_signal, confidence: conf });
-      if (c.extracted.budget) proposals.push({ field: "price_range", value: c.extracted.budget, confidence: conf });
-      if (c.extracted.area) proposals.push({ field: "area", value: c.extracted.area, confidence: conf });
-      if (proposals.length) {
-        const eng = await applyAiLeadFields(env, leadId, proposals, {
+  // Deterministic CRM backstop on EVERY agent reply: the LLM agent doesn't
+  // reliably fire update_lead on the same turn it answers, so we classify the
+  // reply ourselves and persist the structured fields - BEFORE the agent loop
+  // reads the profile - so Budget/Area/Timeline/Pre-Approved (+ extras -> Notes)
+  // fill regardless of the model's tool choices, and the type-scoped questions
+  // apply. applyExtractions routes Budget/Area through the governed engine and
+  // appends extras to Notes; lead_type is set here only while still unknown.
+  try {
+    const c = await classifyReplyText(env, replyText, lead.lead_type);
+    await applyExtractions(env, leadId, c.extracted, { evidence: replyText, confidence: c.confidence });
+    if ((!lead.lead_type || lead.lead_type === "unknown") && c.lead_type_signal) {
+      const eng = await applyAiLeadFields(env, leadId,
+        [{ field: "lead_type", value: c.lead_type_signal, confidence: c.confidence ?? 0.7 }],
+        {
           orgId: lead.org_id, userId: lead.owner_id ?? settings.user_id, agentKey: "inbound",
           evidence: replyText, label: lead.name || lead.first_name || "Lead",
         });
-        if (eng.includes("lead_type")) lead.lead_type = normalizeLeadType(c.lead_type_signal) ?? lead.lead_type;
-      }
-    } catch { /* non-fatal - the agent can still set it via update_lead */ }
-  }
+      if (eng.includes("lead_type")) lead.lead_type = normalizeLeadType(c.lead_type_signal) ?? lead.lead_type;
+    }
+  } catch { /* non-fatal - the agent can still set fields via update_lead */ }
 
   const replySubject = channel === "email" ? buildReplySubject(opts.subject) : "";
 
