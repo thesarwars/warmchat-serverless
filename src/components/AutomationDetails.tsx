@@ -16,6 +16,7 @@ interface FollowupStep {
   delay_label?: string;
   subject?: string;
   message?: string;
+  email_body?: string;
   sendTime?: string;
   send_time?: string;
   send_at?: string;
@@ -49,6 +50,7 @@ interface AutomationDetailsPayload {
   message_preview: {
     subject?: string;
     body?: string;
+    email_body?: string;
     opening_send_time?: string | null;
     channels?: string[];
     attachments?: Array<{ id?: number | string; name?: string; url?: string }>;
@@ -152,6 +154,7 @@ const AutomationDetails: React.FC = () => {
   const [editName, setEditName] = useState("");
   const [editSubject, setEditSubject] = useState("");
   const [editMessage, setEditMessage] = useState("");
+  const [editEmailBody, setEditEmailBody] = useState("");
   const [editFollowups, setEditFollowups] = useState<FollowupStep[]>([]);
   // Opening-message timing: instant (default) or a wall-clock time on enroll day.
   const [editOpeningTiming, setEditOpeningTiming] = useState<"instant" | "timed">("instant");
@@ -210,6 +213,7 @@ const AutomationDetails: React.FC = () => {
       setEditName(raw.name || "");
       setEditSubject(raw.email_subject || "");
       setEditMessage(raw.message || "");
+      setEditEmailBody(raw.email_body || "");
       const rawOpen = String(raw.opening_send_time || "");
       setEditOpeningTiming(/^\d{1,2}:\d{2}$/.test(rawOpen) ? "timed" : "instant");
       setEditOpeningAt(/^\d{1,2}:\d{2}$/.test(rawOpen) ? rawOpen : DEFAULT_STEP_SEND_TIME);
@@ -218,6 +222,7 @@ const AutomationDetails: React.FC = () => {
           ? raw.followup_steps.map((s: FollowupStep) => ({
               delay_days: typeof s.delay_days === "number" ? s.delay_days : 0,
               message: s.message || "",
+              email_body: s.email_body || "",
               subject: s.subject || "",
               send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
               channel: String(s.channel || "").toLowerCase() === "email" ? "email" : "sms",
@@ -237,10 +242,12 @@ const AutomationDetails: React.FC = () => {
         name: editName,
         message: editMessage,
         email_subject: editSubject,
+        email_body: bothChannels ? editEmailBody : "",
         opening_send_time: editOpeningTiming === "timed" ? editOpeningAt : null,
         followup_steps: editFollowups.map((s) => ({
           delay_days: Number(s.delay_days) || 0,
           message: s.message || "",
+          ...(bothChannels && s.email_body ? { email_body: s.email_body } : {}),
           ...(s.subject ? { subject: s.subject } : {}),
           send_time: /^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? s.send_time : DEFAULT_STEP_SEND_TIME,
           ...(s.timezone ? { timezone: s.timezone } : {}),
@@ -275,6 +282,8 @@ const AutomationDetails: React.FC = () => {
 
   const channels = useMemo(() => automation?.message_preview?.channels || [], [automation]);
   const isEmail = channels.some((channel) => String(channel).toLowerCase() === "email");
+  // Both channels on -> edit SMS and Email bodies separately (SMS short to save cost).
+  const bothChannels = isEmail && channels.some((channel) => String(channel).toLowerCase() === "sms");
 
   if (loading) {
     return (
@@ -448,13 +457,26 @@ const AutomationDetails: React.FC = () => {
               ) : null}
               {editing ? (
                 <>
+                  {bothChannels && <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">SMS <span className="font-normal normal-case text-gray-400">· short, billed per 160-char segment</span></div>}
                   <textarea
                     value={editMessage}
                     onChange={(e) => setEditMessage(e.target.value)}
-                    rows={5}
-                    placeholder="Write the opening message..."
+                    rows={bothChannels ? 3 : 5}
+                    placeholder={bothChannels ? "Short SMS text..." : "Write the opening message..."}
                     className="w-full rounded-lg border border-orange-200 bg-white p-4 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
                   />
+                  {bothChannels && (
+                    <div className="mt-3">
+                      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Email body</div>
+                      <textarea
+                        value={editEmailBody}
+                        onChange={(e) => setEditEmailBody(e.target.value)}
+                        rows={5}
+                        placeholder="Longer email body (blank = reuse the SMS text)..."
+                        className="w-full rounded-lg border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
+                      />
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <span className="text-sm font-semibold text-gray-700">When to send:</span>
                     <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm">
@@ -532,21 +554,50 @@ const AutomationDetails: React.FC = () => {
                         <Zap size={11} className="text-orange-400" />
                         If started today, lands {describeStep(Number(step.delay_days ?? 1), step.send_time).dateLabel} at {describeStep(Number(step.delay_days ?? 1), step.send_time).timeLabel}
                       </div>
-                      {isEmail && (
-                        <input
-                          value={step.subject || ""}
-                          onChange={(e) => updateFollowup(index, { subject: e.target.value })}
-                          placeholder="Email subject (used for the email copy)..."
-                          className="mb-2 w-full rounded-md border border-gray-200 p-2 text-sm text-gray-800 outline-none focus:border-orange-400"
-                        />
+                      {bothChannels ? (
+                        <>
+                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">SMS</div>
+                          <textarea
+                            value={step.message || ""}
+                            onChange={(e) => updateFollowup(index, { message: e.target.value })}
+                            rows={2}
+                            placeholder="Short SMS text..."
+                            className="mb-3 w-full rounded-md border border-gray-200 p-2 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
+                          />
+                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Email</div>
+                          <input
+                            value={step.subject || ""}
+                            onChange={(e) => updateFollowup(index, { subject: e.target.value })}
+                            placeholder="Email subject..."
+                            className="mb-2 w-full rounded-md border border-gray-200 p-2 text-sm text-gray-800 outline-none focus:border-orange-400"
+                          />
+                          <textarea
+                            value={step.email_body || ""}
+                            onChange={(e) => updateFollowup(index, { email_body: e.target.value })}
+                            rows={3}
+                            placeholder="Longer email body (blank = reuse the SMS text)..."
+                            className="w-full rounded-md border border-gray-200 p-2 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          {isEmail && (
+                            <input
+                              value={step.subject || ""}
+                              onChange={(e) => updateFollowup(index, { subject: e.target.value })}
+                              placeholder="Email subject (used for the email copy)..."
+                              className="mb-2 w-full rounded-md border border-gray-200 p-2 text-sm text-gray-800 outline-none focus:border-orange-400"
+                            />
+                          )}
+                          <textarea
+                            value={step.message || ""}
+                            onChange={(e) => updateFollowup(index, { message: e.target.value })}
+                            rows={3}
+                            placeholder="Follow-up message..."
+                            className="w-full rounded-md border border-gray-200 p-2 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
+                          />
+                        </>
                       )}
-                      <textarea
-                        value={step.message || ""}
-                        onChange={(e) => updateFollowup(index, { message: e.target.value })}
-                        rows={3}
-                        placeholder="Follow-up message..."
-                        className="w-full rounded-md border border-gray-200 p-2 text-sm leading-6 text-gray-800 outline-none focus:border-orange-400"
-                      />
                     </div>
                   ))}
                   <button

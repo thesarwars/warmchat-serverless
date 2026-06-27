@@ -80,6 +80,10 @@ CREATE TABLE IF NOT EXISTS automation (
     -- enrollment day instead. Follow-up times live in followup_steps[].send_time.
     opening_send_time    TEXT,
     email_subject        TEXT,
+    -- Opening EMAIL body (distinct from `message`, the SMS body) so a multi-channel
+    -- campaign can send short SMS + a longer email. NULL/empty -> email falls back
+    -- to `message`. Follow-up per-step email bodies live in followup_steps[].email_body.
+    email_body           TEXT,
     attachments          TEXT,                 -- JSON
     sources              TEXT NOT NULL,        -- JSON
     leads                TEXT NOT NULL,        -- JSON

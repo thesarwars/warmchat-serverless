@@ -49,7 +49,7 @@ function followupWhenLabel(date: string | undefined, time: string, timezone: str
   return `${head}${timeLabel ? ` at ${timeLabel}` : ""}${timezone ? ` ${timezone}` : ""}`;
 }
 
-export interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; subject?: string; delayDays?: number }
+export interface FollowUp { id: number; date?: string; time: string; timezone: string; channel: string; message: string; email_body?: string; subject?: string; delayDays?: number }
 
 function AIWriteMenu({ onPick }: { onPick: (tone: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -75,7 +75,7 @@ function AIWriteMenu({ onPick }: { onPick: (tone: string) => void }) {
 const fuField: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 13, fontWeight: 600, color: "var(--ink)" };
 const fuInput: React.CSSProperties = { border: "none", outline: "none", fontSize: 13, fontFamily: "inherit", fontWeight: 600, color: "var(--ink)", background: "transparent", cursor: "pointer" };
 
-function FollowUpSequence({ value, onChange, hasEmail }: { value: FollowUp[]; onChange: (v: FollowUp[]) => void; hasEmail: boolean }) {
+function FollowUpSequence({ value, onChange, hasEmail, bothChannels }: { value: FollowUp[]; onChange: (v: FollowUp[]) => void; hasEmail: boolean; bothChannels: boolean }) {
   const set = (updater: (p: FollowUp[]) => FollowUp[]) => onChange(updater(value));
   const add = () => set((p) => [...p, { id: Date.now(), time: "09:00", timezone: "PST", channel: "sms", message: "" }]);
   const remove = (id: number) => set((p) => p.filter((f) => f.id !== id));
@@ -107,15 +107,28 @@ function FollowUpSequence({ value, onChange, hasEmail }: { value: FollowUp[]; on
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Sent on each lead's available channel{hasEmail ? "(s)" : ""}.</span>
-                <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => upd(f.id, "message", aiToneText(tone).text)} /></div>
+                <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); upd(f.id, "message", d.text); if (bothChannels) upd(f.id, "email_body", d.text); }} /></div>
               </div>
-              {hasEmail && (
-                <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
-                  <input type="text" value={f.subject || ""} onChange={(e) => upd(f.id, "subject", e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "11px 13px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
-                </div>
+              {bothChannels ? (
+                <>
+                  <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>SMS</label>
+                  <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder="Short SMS text..." style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 64, resize: "vertical", boxSizing: "border-box", marginBottom: 4 }} />
+                  <div style={{ textAlign: "right", fontSize: 11.5, color: "var(--ink-3)", marginBottom: 10 }}>{(f.message || "").length} chars · {Math.max(1, Math.ceil((f.message || "").length / 160))} segment{Math.ceil((f.message || "").length / 160) === 1 ? "" : "s"}</div>
+                  <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>Email</label>
+                  <input type="text" value={f.subject || ""} onChange={(e) => upd(f.id, "subject", e.target.value)} placeholder="Email subject..." style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 8 }} />
+                  <textarea value={f.email_body || ""} onChange={(e) => upd(f.id, "email_body", e.target.value)} placeholder="Longer email body (blank = reuse the SMS text)..." style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
+                </>
+              ) : (
+                <>
+                  {hasEmail && (
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
+                      <input type="text" value={f.subject || ""} onChange={(e) => upd(f.id, "subject", e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "11px 13px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                    </div>
+                  )}
+                  <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder="Write your follow-up message..." style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
+                </>
               )}
-              <textarea value={f.message} onChange={(e) => upd(f.id, "message", e.target.value)} placeholder="Write your follow-up message..." style={{ width: "100%", padding: 12, borderRadius: 8, border: "1.5px solid var(--accent-strong)", fontSize: 13, fontFamily: "inherit", minHeight: 80, resize: "vertical", boxSizing: "border-box" }} />
             </div>
           ))}
         </div>
@@ -128,7 +141,7 @@ const chip = (on: boolean): React.CSSProperties => ({ padding: "8px 14px", borde
 const groupLbl: React.CSSProperties = { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--ink-3)", marginBottom: 10 };
 
 export interface WizardLaunch {
-  name: string; channels: string[]; message: string; emailSubject: string;
+  name: string; channels: string[]; message: string; emailSubject: string; emailBody: string;
   // timing: "instant" (send now) | "scheduled" (send today at openingTime).
   timing: string; openingTime: string; followups: FollowUp[];
   audType: string[]; audStage: string[]; audFilter: string[];
@@ -140,7 +153,7 @@ interface OrgLead { id: number; name?: string | null; first_name?: string | null
 const leadName = (l: OrgLead) => (l.name || [l.first_name, l.last_name].filter(Boolean).join(" ") || "Unnamed lead").trim();
 const wfInitials = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
 
-export interface WizardSeed { name?: string; channel?: string; message?: string; subject?: string; followups?: FollowUp[] }
+export interface WizardSeed { name?: string; channel?: string; message?: string; subject?: string; emailBody?: string; followups?: FollowUp[] }
 /** A template built by the wizard in template mode (saved to the Templates tab). */
 export interface WizardTemplate { id: string; channel: string; name: string; stage: string; sent: number; flow: Record<string, unknown>[] }
 
@@ -154,8 +167,13 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   // Channel is chosen ONCE in Step 1 (campaign-level). Each message is then sent
   // to every selected channel a lead actually has - no per-message channel choice.
   const hasEmail = channels.includes("email");
+  const hasSms = channels.includes("sms");
+  // Both channels on -> author SMS and Email separately (SMS short to save cost,
+  // email longer). One channel -> a single composer (message = that channel).
+  const bothChannels = hasSms && hasEmail;
   const [message, setMessage] = useState(seed?.message || "");
   const [emailSubject, setEmailSubject] = useState(seed?.subject || "");
+  const [emailBody, setEmailBody] = useState(seed?.emailBody || "");
   const [timing, setTiming] = useState("instant");
   const [openingTime, setOpeningTime] = useState(DEFAULT_STEP_SEND_TIME);
   // Template-mode opening schedule (cosmetic - only the instant flag is saved).
@@ -238,7 +256,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
   // Same-day scheduled opening must still be in the future (account tz) - block
   // launch otherwise so a lead enrolled today never gets a past-dated send.
   const openingPast = timing === "scheduled" && !isTimeInFutureToday(openingTime, acctTz);
-  const launch = () => { if (openingPast || busy) return; onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, timing, openingTime, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] }); };
+  const launch = () => { if (openingPast || busy) return; onLaunch({ name: name.trim() || "New workflow", channels, message, emailSubject, emailBody: bothChannels ? emailBody : "", timing, openingTime, followups, audType: [...audType], audStage: [...audStage], audFilter: [...audFilter], leads: audMode === "select" ? selectedLeads : [] }); };
 
   // Template mode: build a reusable template (opening + follow-ups) and hand it
   // back to the Templates tab. stage is CUSTOM, sent 0, day 0/1/2/... by index.
@@ -493,16 +511,34 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                     <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Sent on each lead's available channel{channels.length > 1 ? "s (SMS and/or Email)" : ` (${channelLabel})`}.</span>
-                    <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setMessage(d.text); if (hasEmail) setEmailSubject(d.subject); }} /></div>
+                    <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setMessage(d.text); if (hasEmail && !bothChannels) setEmailSubject(d.subject); }} /></div>
                   </div>
-                  {hasEmail && (
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
-                      <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
-                    </div>
+                  {bothChannels ? (
+                    <>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>SMS message <span style={{ textTransform: "none", fontWeight: 500 }}>· keep short, billed per 160-char segment</span></label>
+                      <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Short SMS text..." style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 110, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                      <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>{message.length} chars · {Math.max(1, Math.ceil(message.length / 160))} SMS segment{Math.ceil(message.length / 160) === 1 ? "" : "s"}</div>
+                      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                          <label style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em" }}>Email</label>
+                          <div style={{ marginLeft: "auto" }}><AIWriteMenu onPick={(tone) => { const d = aiToneText(tone); setEmailBody(d.text); setEmailSubject(d.subject); }} /></div>
+                        </div>
+                        <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Email subject..." style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 10 }} />
+                        <textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} placeholder="Longer email body (leave blank to reuse the SMS text)..." style={{ width: "100%", padding: 16, borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", minHeight: 130, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {hasEmail && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Subject</label>
+                          <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Enter email subject..." style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                        </div>
+                      )}
+                      <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Write your message..." style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 150, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                      {hasSms && <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>{message.length} chars · {Math.max(1, Math.ceil(message.length / 160))}/5 segments</div>}
+                    </>
                   )}
-                  <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={hasEmail ? "Write your message..." : "Write your message..."} style={{ width: "100%", padding: 16, borderRadius: 10, border: "2px solid var(--accent-strong)", fontSize: 14, fontFamily: "inherit", minHeight: 150, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
-                  <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>{message.length} chars · {Math.max(1, Math.ceil(message.length / 160))}/5 segments</div>
                   <div style={{ marginTop: 16 }}>
                     <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 10 }}>When to send the opening</label>
                     <div style={{ display: "inline-flex", background: "var(--line-soft)", borderRadius: 10, padding: 3, gap: 3 }}>
@@ -549,7 +585,7 @@ export function WorkflowWizard({ seed, onClose, onLaunch, mode = "workflow", onS
                       </div>
                     ))}
                   </div>
-                  <FollowUpSequence value={followups} onChange={setFollowups} hasEmail={hasEmail} />
+                  <FollowUpSequence value={followups} onChange={setFollowups} hasEmail={hasEmail} bothChannels={bothChannels} />
                 </div>
               </div>
             )}

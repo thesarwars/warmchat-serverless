@@ -70,6 +70,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     message_preview: {
       subject: automation.email_subject || automation.name || "",
       body: automation.message || "",
+      email_body: automation.email_body || "",
       opening_send_time: automation.opening_send_time ?? null,
       channels: safeJson<string[]>(automation.channels, []),
       attachments: safeJson<unknown[]>(automation.attachments, []),

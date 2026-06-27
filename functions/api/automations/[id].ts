@@ -29,6 +29,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     channels: safeJson<string[]>(c.channels, []),
     message: c.message || "",
     email_subject: c.email_subject || c.name || "",
+    email_body: c.email_body || "",
     attachments: safeJson<unknown[]>(c.attachments, []),
     sources: safeJson<string[]>(c.sources, []),
     leads: safeJson<unknown[]>(c.leads, []),
@@ -64,9 +65,10 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     name?: string;
     message?: string;
     email_subject?: string;
+    email_body?: string;
     channels?: string[];
     opening_send_time?: string | null;
-    followup_steps?: Array<{ delay_days?: number; message?: string; subject?: string; send_time?: string; timezone?: string; channel?: string }>;
+    followup_steps?: Array<{ delay_days?: number; message?: string; email_body?: string; subject?: string; send_time?: string; timezone?: string; channel?: string }>;
   }>(request)) || {};
 
   const sets: string[] = [];
@@ -80,6 +82,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     args.push(/^\d{1,2}:\d{2}$/.test(String(body.opening_send_time || "")) ? String(body.opening_send_time) : null);
   }
   if (body.email_subject !== undefined) { sets.push("email_subject = ?"); args.push(String(body.email_subject)); }
+  if (body.email_body !== undefined) { sets.push("email_body = ?"); args.push((body.email_body || "").trim() || null); }
   if (body.channels !== undefined) { sets.push("channels = ?"); args.push(JSON.stringify(body.channels)); }
   if (body.followup_steps !== undefined) {
     const steps = (body.followup_steps || [])
@@ -87,6 +90,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
       .map((s) => ({
         delay_days: Number(s.delay_days) || 0,
         message: String(s.message || "").trim(),
+        ...(s.email_body ? { email_body: String(s.email_body) } : {}),
         ...(s.subject ? { subject: String(s.subject) } : {}),
         ...(/^\d{1,2}:\d{2}$/.test(String(s.send_time || "")) ? { send_time: String(s.send_time) } : {}),
         ...(s.timezone ? { timezone: String(s.timezone) } : {}),

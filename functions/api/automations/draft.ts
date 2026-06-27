@@ -10,6 +10,7 @@ interface DraftBody {
   channels?: string[];
   message?: string;
   email_subject?: string;
+  email_body?: string;
   attachments?: unknown[];
   sources?: string[];
   leads?: unknown[];
@@ -39,14 +40,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const ins = await execute(
     env.D1DB,
     `INSERT INTO automation
-       (name, channels, message, email_subject, attachments, sources, leads,
+       (name, channels, message, email_subject, email_body, attachments, sources, leads,
         org_id, owner_id, email_sender_type, followup_steps, timezone,
         status, created_at, is_archived, delivered_count, opened_count, converted_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, 0, 0, 0, 0)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, 0, 0, 0, 0)`,
     body.name,
     JSON.stringify(body.channels || []),
     body.message || "",
     body.email_subject || body.name,
+    (body.email_body || "").trim() || null,
     JSON.stringify(body.attachments || []),
     JSON.stringify(body.sources || []),
     JSON.stringify(body.leads || []),
