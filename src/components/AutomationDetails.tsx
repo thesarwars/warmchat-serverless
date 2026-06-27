@@ -520,15 +520,7 @@ const AutomationDetails: React.FC = () => {
                             <option value="America/New_York">Eastern (ET)</option>
                           </select>
                           <span className="text-gray-300">·</span>
-                          <select
-                            value={step.channel || "sms"}
-                            onChange={(e) => updateFollowup(index, { channel: e.target.value })}
-                            className="rounded border border-gray-200 px-2 py-1 text-sm font-semibold"
-                            title="Channel for this step"
-                          >
-                            <option value="sms">SMS</option>
-                            <option value="email">Email</option>
-                          </select>
+                          <span className="text-xs font-medium text-gray-400" title="Each message sends on every channel a lead has (SMS and/or Email), based on the workflow channels">all available channels</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <button type="button" onClick={() => moveFollowup(index, -1)} disabled={index === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" aria-label="Move step up"><ChevronUp size={16} /></button>
@@ -540,11 +532,11 @@ const AutomationDetails: React.FC = () => {
                         <Zap size={11} className="text-orange-400" />
                         If started today, lands {describeStep(Number(step.delay_days ?? 1), step.send_time).dateLabel} at {describeStep(Number(step.delay_days ?? 1), step.send_time).timeLabel}
                       </div>
-                      {(step.channel || "sms") === "email" && (
+                      {isEmail && (
                         <input
                           value={step.subject || ""}
                           onChange={(e) => updateFollowup(index, { subject: e.target.value })}
-                          placeholder="Email subject..."
+                          placeholder="Email subject (used for the email copy)..."
                           className="mb-2 w-full rounded-md border border-gray-200 p-2 text-sm text-gray-800 outline-none focus:border-orange-400"
                         />
                       )}

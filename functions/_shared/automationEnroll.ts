@@ -15,6 +15,7 @@ import { buildAgentSystemPrompt } from "./aiAgents.ts";
 import { stepScheduledAt } from "./workflowSchedule.ts";
 import { humanizeDashes } from "./humanizeText.ts";
 import { tryNormalizeE164 } from "./phone.ts";
+import { isPhoneSuppressed } from "./suppression.ts";
 
 /** Split an array into fixed-size chunks (D1 caps bound params per query). */
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -113,25 +114,41 @@ function parseChannels(rawChannels: string | null): Set<"sms" | "email"> {
 }
 
 /**
- * Pick the channel a lead will actually receive a step on. Prefer the step's own
- * channel; if the lead has no usable address for it BUT the campaign also uses
- * the other channel and the lead can receive that, fall back to the other one.
- * This is what makes an "Email + SMS" campaign reach an email-only lead by email
- * and a phone-only lead by SMS, instead of silently skipping the step. A lead
- * with both addresses keeps the step's declared channel - never double-sent.
- * Returns null when the lead can't receive the step on any campaign channel.
+ * Every channel a lead should receive a message on: each channel the campaign
+ * has selected AND the lead has a usable (non-suppressed) address for. The per-
+ * message channel is intentionally ignored - the campaign's channel selection is
+ * the single source of truth, applied per lead:
+ *   - campaign [SMS, Email], lead has both  -> BOTH (one SMS + one email)
+ *   - campaign [SMS, Email], lead phone only -> SMS only
+ *   - campaign [SMS, Email], lead email only -> Email only
+ *   - campaign [SMS] only -> SMS only (email-only leads get nothing -> logged "not sent")
+ * Returns [] when the lead can't be reached on any selected channel.
  */
-function resolveLeadChannel(
-  stepChannel: "sms" | "email",
+function resolveLeadChannels(
   campaignChannels: Set<"sms" | "email">,
   canSms: boolean,
   canEmail: boolean,
-): "sms" | "email" | null {
-  if (stepChannel === "sms" && canSms) return "sms";
-  if (stepChannel === "email" && canEmail) return "email";
-  if (campaignChannels.has("sms") && canSms) return "sms";
-  if (campaignChannels.has("email") && canEmail) return "email";
-  return null;
+): Array<"sms" | "email"> {
+  const out: Array<"sms" | "email"> = [];
+  if (campaignChannels.has("sms") && canSms) out.push("sms");
+  if (campaignChannels.has("email") && canEmail) out.push("email");
+  return out;
+}
+
+/**
+ * Human-readable reason a lead couldn't be reached on any selected channel, for
+ * the visible "not sent" log row (e.g. "no phone number" when an SMS-only
+ * campaign hits a lead without a phone).
+ */
+function leadSkipReason(
+  campaignChannels: Set<"sms" | "email">,
+  phone: string | null,
+  email: string | null,
+): string {
+  const parts: string[] = [];
+  if (campaignChannels.has("sms") && !phone) parts.push("no phone number");
+  if (campaignChannels.has("email") && !email) parts.push("no email address");
+  return parts.length ? parts.join(", ") : "opted out / unavailable";
 }
 
 export async function queueAutomationForLead(
@@ -144,10 +161,13 @@ export async function queueAutomationForLead(
   );
   if (!camp) return 0;
   const emailSubject = (camp.email_subject || "").trim() || null;
-  const lead = await queryFirst<LeadFull & { sms_consent_status: string | null; timezone: string | null }>(
+  const lead = await queryFirst<LeadFull & {
+    sms_consent_status: string | null; timezone: string | null;
+    sms_opt_out: number | null; email_opt_out: number | null;
+  }>(
     env.D1DB,
     `SELECT id, org_id, owner_id, first_name, last_name, name, email, phone, area, lead_type,
-            sms_consent_status, timezone
+            sms_consent_status, timezone, sms_opt_out, email_opt_out
        FROM lead WHERE id = ?`,
     leadId,
   );
@@ -162,10 +182,36 @@ export async function queueAutomationForLead(
   // no address for a given step's channel simply skips that step.
   const campaignChannel = firstChannel(camp.channels);
   const campaignChannels = parseChannels(camp.channels);
-  if (!lead.phone && !lead.email) return 0;
+
+  // Per lead: every selected channel the lead can receive (both, if it has both).
+  // Suppression-aware (matching the bulk path) so an opted-out lead yields no
+  // reachable channel and logs a single "not sent" row instead of silently
+  // dropping at send time.
+  const userId = lead.owner_id ?? fallbackUserId;
+  const smsSuppressed = !lead.phone
+    || (await isPhoneSuppressed(env, lead.org_id, lead.phone))
+    || lead.sms_opt_out === 1
+    || lead.sms_consent_status === "no_sms";
+  const emailSuppressed = !lead.email || lead.email_opt_out === 1;
+  const canSms = !smsSuppressed && !!lead.phone;
+  const canEmail = !emailSuppressed && !!lead.email;
+  const sendChannels = resolveLeadChannels(campaignChannels, canSms, canEmail);
 
   // One automation per lead - cancel any pending messages before starting this one.
   await cancelPendingFollowups(env, leadId);
+
+  // No reachable selected channel -> a visible "not sent" row (cron ignores
+  // 'skipped') instead of a silent no-op, so the Logs show why.
+  if (sendChannels.length === 0) {
+    const ts = nowIso();
+    await execute(
+      env.D1DB, SKIPPED_INSERT_SQL,
+      userId, lead.org_id, leadId, automationId,
+      campaignChannels.has("sms") ? "sms" : "email",
+      ts, leadSkipReason(campaignChannels, lead.phone, lead.email), ts, ts,
+    );
+    return 0;
+  }
 
   // Build the ordered drip: instant opening message + each timed follow-up.
   // Step 0 (the opening) is INSTANT (sent ~30s after enroll); each follow-up
@@ -191,7 +237,6 @@ export async function queueAutomationForLead(
   }
   if (drip.length === 0) return 0;
 
-  const userId = lead.owner_id ?? fallbackUserId;
   // Resolve the owner's name once so the AI disclosure prefix on the opening
   // message reads "(Automated msg from {Agent Name})".
   const owner = await queryFirst<{ name: string | null }>(
@@ -200,27 +245,9 @@ export async function queueAutomationForLead(
   const agentName = owner?.name ?? null;
   const now = Date.now();
   let queued = 0;
-  const canSms = !!lead.phone;
-  const canEmail = !!lead.email;
   for (let i = 0; i < drip.length; i++) {
     const step = drip[i]!;
-    // Cross-channel fallback: a lead with no address for the step's declared
-    // channel still receives it on the campaign's other channel if it can (so an
-    // Email+SMS campaign reaches phone-only and email-only leads alike).
-    const channel = resolveLeadChannel(step.channel, campaignChannels, canSms, canEmail);
-    if (!channel) continue;
-    const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
     const rendered = await renderTemplate(env, step.body, lead);
-    // Step 0 of the drip is the opening (first message in the sequence). It
-    // gets the AI disclosure + STOP footer. Steps 1+ are follow-ups in the
-    // same program - already known recipient, no extra wrapping.
-    const body = channel === "sms"
-      ? appendComplianceFooter(rendered, {
-          kind: i === 0 ? "sequence_first" : "followup_in_thread",
-          agentName,
-          recipientOptedIn,
-        })
-      : rendered;
     // A scheduled step whose computed wall-time already passed (e.g. a same-day
     // opening time enrolled after that hour) should send PROMPTLY, not sit at a
     // past timestamp - so clamp anything in the past up to now+30s. (The wizard
@@ -229,17 +256,31 @@ export async function queueAutomationForLead(
       ? new Date(now + 30 * 1000).toISOString()
       : stepScheduledAt(now, step.delayDays, step.sendTime, step.tz || sendTz);
     const scheduledAt = Date.parse(computedAt) < now ? new Date(now + 30 * 1000).toISOString() : computedAt;
-    const id = await queueScheduledMessage(env, {
-      leadId, orgId: lead.org_id, userId,
-      channel, toAddress, body,
-      subject: channel === "email" ? step.subject : null,
-      scheduledAt,
-      // Outbound automation drip: NOT tagged as "AI Agent" - the inbox marks
-      // these with the campaign/workflow name instead (derived from
-      // automation_id on the materialized message row).
-      automationId,
-    });
-    if (id) queued++;
+    // Send this step on EVERY channel the lead can receive (both, if it has both).
+    for (const channel of sendChannels) {
+      const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
+      // Step 0 of the drip is the opening (first message in the sequence). It
+      // gets the AI disclosure + STOP footer. Steps 1+ are follow-ups in the
+      // same program - already known recipient, no extra wrapping.
+      const body = channel === "sms"
+        ? appendComplianceFooter(rendered, {
+            kind: i === 0 ? "sequence_first" : "followup_in_thread",
+            agentName,
+            recipientOptedIn,
+          })
+        : rendered;
+      const id = await queueScheduledMessage(env, {
+        leadId, orgId: lead.org_id, userId,
+        channel, toAddress, body,
+        subject: channel === "email" ? step.subject : null,
+        scheduledAt,
+        // Outbound automation drip: NOT tagged as "AI Agent" - the inbox marks
+        // these with the campaign/workflow name instead (derived from
+        // automation_id on the materialized message row).
+        automationId,
+      });
+      if (id) queued++;
+    }
   }
   return queued;
 }
@@ -255,6 +296,15 @@ const SCHEDULED_INSERT_SQL =
      (user_id, org_id, contact_id, automation_id, channel, to_address, subject, body,
       scheduled_at, sent_by_ai, status, created_at, updated_at)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)`;
+
+// A visible "not sent" row for a lead with no reachable selected channel. status
+// 'skipped' is never picked up by the cron (it only drains 'scheduled'); it exists
+// purely so the workflow Logs can show "<lead> - <reason> - not sent".
+const SKIPPED_INSERT_SQL =
+  `INSERT INTO scheduled_message
+     (user_id, org_id, contact_id, automation_id, channel, to_address, subject, body,
+      scheduled_at, sent_by_ai, status, error_message, created_at, updated_at)
+   VALUES (?, ?, ?, ?, ?, '', NULL, '', ?, 0, 'skipped', ?, ?, ?)`;
 
 interface EnrollLeadRow {
   id: number;
@@ -389,12 +439,12 @@ export async function bulkEnrollAutomation(
 
   // 5) Build every scheduled_message insert, then flush in batched transactions.
   const stmt = env.D1DB.prepare(SCHEDULED_INSERT_SQL);
+  const skipStmt = env.D1DB.prepare(SKIPPED_INSERT_SQL);
   const binds: D1PreparedStatement[] = [];
   const startMs = Date.now();
   let enrolled = 0;
+  let queuedRows = 0; // real send rows only (excludes 'skipped' not-sent markers)
   for (const lead of leads) {
-    // Mixed-channel: a lead with neither contact can't receive anything.
-    if (!lead.phone && !lead.email) continue;
     const smsSuppressed = !lead.phone || optedOutPhones.has(lead.phone) || lead.sms_opt_out === 1 || lead.sms_consent_status === "no_sms";
     const emailSuppressed = !lead.email || lead.email_opt_out === 1;
 
@@ -403,41 +453,52 @@ export async function bulkEnrollAutomation(
     const recipientOptedIn = lead.sms_consent_status === "opted_in";
     const vars = buildPersonalizationVars(lead, agentName || "");
     const sendTz = (lead.timezone || "").trim() || orgTz;
-    let leadQueued = 0;
     const canSms = !smsSuppressed && !!lead.phone;
     const canEmail = !emailSuppressed && !!lead.email;
+
+    // Per lead: send on EVERY selected channel the lead can receive (both, if the
+    // lead has both and the campaign uses both). No reachable channel -> record a
+    // single visible "not sent" row with the reason instead of silently skipping.
+    const sendChannels = resolveLeadChannels(campaignChannels, canSms, canEmail);
+    if (sendChannels.length === 0) {
+      const channelLabel = campaignChannels.has("sms") ? "sms" : "email";
+      binds.push(skipStmt.bind(
+        userId, lead.org_id, lead.id, automationId, channelLabel,
+        now, leadSkipReason(campaignChannels, lead.phone, lead.email), now, now,
+      ));
+      continue;
+    }
+
+    let leadQueued = 0;
     for (let i = 0; i < template.length; i++) {
       const step = template[i]!;
-      // Per-step channel resolution with cross-channel fallback: an Email+SMS
-      // campaign reaches an email-only lead by email and a phone-only lead by
-      // SMS instead of silently skipping the step.
-      const channel = resolveLeadChannel(step.channel, campaignChannels, canSms, canEmail);
-      if (!channel) continue;
-      const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
       const rendered = applyPersonalization(step.body, vars);
-      const body = channel === "sms"
-        ? appendComplianceFooter(rendered, {
-            kind: i === 0 ? "sequence_first" : "followup_in_thread",
-            agentName,
-            recipientOptedIn,
-          })
-        : rendered;
       const computedAt = step.instant
         ? new Date(startMs + 30 * 1000).toISOString()
         : stepScheduledAt(startMs, step.delayDays, step.sendTime, step.tz || sendTz);
       // Past same-day time (e.g. opening "today at 9am" enrolled at 5pm) sends
       // promptly rather than at a past timestamp; never silently rolls a day.
       const scheduledAt = Date.parse(computedAt) < startMs ? new Date(startMs + 30 * 1000).toISOString() : computedAt;
-      // Email steps carry the campaign's subject (per-follow-up override already
-      // folded into step.subject); SMS has no subject.
-      const subject = channel === "email" ? step.subject : null;
-      binds.push(stmt.bind(
-        userId, lead.org_id, lead.id, automationId, channel, toAddress, subject, body,
-        scheduledAt, 0, now, now,
-      ));
-      leadQueued++;
+      for (const channel of sendChannels) {
+        const toAddress = channel === "sms" ? (tryNormalizeE164(lead.phone) || lead.phone!) : lead.email!;
+        const body = channel === "sms"
+          ? appendComplianceFooter(rendered, {
+              kind: i === 0 ? "sequence_first" : "followup_in_thread",
+              agentName,
+              recipientOptedIn,
+            })
+          : rendered;
+        // Email steps carry the campaign's subject; SMS has no subject.
+        const subject = channel === "email" ? step.subject : null;
+        binds.push(stmt.bind(
+          userId, lead.org_id, lead.id, automationId, channel, toAddress, subject, body,
+          scheduledAt, 0, now, now,
+        ));
+        leadQueued++;
+      }
     }
     if (leadQueued > 0) enrolled++;
+    queuedRows += leadQueued;
   }
 
   for (const part of chunk(binds, ENROLL_BATCH)) {
@@ -450,5 +511,5 @@ export async function bulkEnrollAutomation(
     }
   }
 
-  return { enrolled, queued: binds.length };
+  return { enrolled, queued: queuedRows };
 }
