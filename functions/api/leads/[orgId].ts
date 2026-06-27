@@ -78,6 +78,7 @@ const serialize = (l: LeadRow) => ({
   email_notifications_enabled: Boolean(l.email_notifications_enabled),
   sms_notifications_enabled: Boolean(l.sms_notifications_enabled),
   status: l.status,
+  lead_score: l.lead_score ?? null,
   owner_id: l.owner_id,
   timezone: l.timezone,
   timezone_source: l.timezone_source,

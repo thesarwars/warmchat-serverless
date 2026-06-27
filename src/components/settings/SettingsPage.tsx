@@ -120,11 +120,13 @@ const ADMIN_BLURB: Record<string, string> = {
 };
 
 interface ExKpi { icon: string; label: string; value: string; sub: string; tone: string }
+// Lead Exchange has no backend yet (no pool/claim tables or endpoints), so these
+// show honest zeros instead of demo numbers until the marketplace is built.
 const EX_KPIS: ExKpi[] = [
-  { icon: "users", label: "Total Pools", value: "8", sub: "Active lead pools", tone: "violet" },
-  { icon: "user", label: "Leads Available", value: "317", sub: "Ready to claim", tone: "green" },
-  { icon: "flame", label: "Hot Opportunities", value: "62", sub: "High intent leads", tone: "orange" },
-  { icon: "target", label: "Claimed Today", value: "23", sub: "By your agents", tone: "blue" },
+  { icon: "users", label: "Total Pools", value: "0", sub: "No lead pools yet", tone: "violet" },
+  { icon: "user", label: "Leads Available", value: "0", sub: "None to claim yet", tone: "green" },
+  { icon: "flame", label: "Hot Opportunities", value: "0", sub: "No leads yet", tone: "orange" },
+  { icon: "target", label: "Claimed Today", value: "0", sub: "None claimed", tone: "blue" },
 ];
 const EX_STATUS: Record<string, { fg: string; bg: string; icon: string }> = {
   Hot: { fg: "#DC2626", bg: "#FEE2E2", icon: "flame" },
@@ -136,36 +138,8 @@ interface ExLead {
   id: string; name: string; city: string; type: string; score: number; act: string; src: string; status: string;
   summary: string; rec: string; recCta: string; activity: { t: string; ev: string; d: string }[];
 }
-const EX_LEADS: ExLead[] = [
-  { id: "js", name: "John Smith", city: "Fresno, CA", type: "Buyer", score: 92, act: "5m ago", src: "Website Form", status: "Hot",
-    summary: "John is looking for a 4 bed, 2 bath home in Fresno between $450k-$550k. Pre-approved and wants to buy within the next 60 days. He asked about school districts and neighborhoods.",
-    rec: "High intent buyer. Call within 5 minutes for best results.", recCta: "Call Now",
-    activity: [{ t: "5m ago", ev: "Form Submitted", d: "Website Form" }, { t: "7m ago", ev: "AI Auto Reply Sent", d: "Asked about preferences" }, { t: "12m ago", ev: "Email Opened", d: "Property Recommendations" }] },
-  { id: "sj", name: "Sarah Jones", city: "Clovis, CA", type: "Seller", score: 88, act: "1h ago", src: "Zillow", status: "Warm",
-    summary: "Sarah is considering listing her Clovis home in the next 3 months. Wants a valuation and a sense of the current market before committing.",
-    rec: "Send a CMA and offer a no-pressure listing consult.", recCta: "Send CMA",
-    activity: [{ t: "1h ago", ev: "Replied to text", d: "Zillow" }, { t: "2h ago", ev: "AI Auto Reply Sent", d: "Valuation offer" }] },
-  { id: "mb", name: "Mike Brown", city: "Fresno, CA", type: "Buyer", score: 76, act: "Yesterday", src: "Google Ads", status: "Warm",
-    summary: "Mike is an early-stage buyer browsing 3-bed homes. Budget and timeline not yet confirmed.",
-    rec: "Qualify budget and timeline before nurturing.", recCta: "Qualify",
-    activity: [{ t: "Yesterday", ev: "Clicked ad", d: "Google Ads" }] },
-  { id: "kt", name: "Katie Taylor", city: "Madera, CA", type: "Seller", score: 72, act: "Yesterday", src: "Facebook Lead Ad", status: "Nurturing",
-    summary: "Katie filled out a Facebook lead form about home value. Long-term seller, likely 6+ months out.",
-    rec: "Add to the seller nurture sequence.", recCta: "Add to sequence",
-    activity: [{ t: "Yesterday", ev: "Form Submitted", d: "Facebook Lead Ad" }] },
-  { id: "rw", name: "Robert Wilson", city: "Fresno, CA", type: "Buyer", score: 68, act: "2d ago", src: "Realtor.com", status: "Cold",
-    summary: "Robert inquired about a single listing on Realtor.com and has not responded since.",
-    rec: "Send a re-engagement message with similar homes.", recCta: "Re-engage",
-    activity: [{ t: "2d ago", ev: "Inquiry", d: "Realtor.com" }] },
-  { id: "al", name: "Amanda Lee", city: "Clovis, CA", type: "Buyer", score: 64, act: "2d ago", src: "Website Form", status: "Cold",
-    summary: "Amanda browsed listings and submitted a general inquiry. No budget captured.",
-    rec: "Send qualifying questions to warm her up.", recCta: "Qualify",
-    activity: [{ t: "2d ago", ev: "Form Submitted", d: "Website Form" }] },
-  { id: "dl", name: "David Lopez", city: "Fresno, CA", type: "Seller", score: 61, act: "3d ago", src: "Zillow", status: "Nurturing",
-    summary: "David is a potential seller researching the market. Not ready to list yet.",
-    rec: "Keep in the monthly market-update drip.", recCta: "Add to drip",
-    activity: [{ t: "3d ago", ev: "Viewed listing", d: "Zillow" }] },
-];
+// Empty until a real lead-exchange backend exists - no sample/demo leads.
+const EX_LEADS: ExLead[] = [];
 
 interface IntItem { name: string; desc: string; color: string; letter: string; on: boolean }
 const INTEGRATIONS: { cat: string; items: IntItem[] }[] = [

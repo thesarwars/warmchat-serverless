@@ -26,6 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const items = await queryAll<{
     id: number; first_name: string | null; last_name: string | null; email: string | null;
     company: string | null; last_activity_at: string | null;
+    lead_score: number | null; status: string | null;
   }>(
     env.D1DB,
     `WITH inb AS (
@@ -42,7 +43,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         WHERE i.org_id=? AND im.direction='outbound' AND im.to_email IS NOT NULL
         GROUP BY LOWER(im.to_email)
      )
-     SELECT l.id, l.first_name, l.last_name, l.email, l.company, inb.last_in AS last_activity_at
+     SELECT l.id, l.first_name, l.last_name, l.email, l.company, inb.last_in AS last_activity_at,
+            l.lead_score, l.status
        FROM inb JOIN lead l ON LOWER(l.email)=inb.email AND l.org_id=?
        LEFT JOIN outb ON outb.email=inb.email
       WHERE datetime(inb.last_in) >= datetime(?)
@@ -64,6 +66,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       last_activity_at: it.last_activity_at,
       last_activity_channel: "email",
       last_activity_label: "Unreplied",
+      status: it.status,
+      lead_score: it.lead_score,
     })),
   });
 };

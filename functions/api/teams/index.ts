@@ -26,21 +26,51 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return error("Access forbidden", 403);
   }
 
-  const teams = await queryAll<{
+  // Per-team live aggregates over the leads owned by the team's members
+  // (team_member.user_id = lead.owner_id), scoped to the org. Correlated
+  // subqueries on indexed columns; one team list per org keeps this cheap.
+  const rows = await queryAll<{
     id: number; name: string; description: string | null;
     leader_id: number | null; leader_name: string | null; leader_email: string | null;
-    member_count: number;
+    member_count: number; active_leads: number; conversations: number;
+    appointments: number; pipeline_value: number; won_deals: number;
   }>(
     env.D1DB,
     `SELECT t.id, t.name, t.description, t.leader_id,
             u.name AS leader_name, u.email AS leader_email,
-            (SELECT COUNT(*) FROM team_member tm WHERE tm.team_id = t.id) AS member_count
+            (SELECT COUNT(*) FROM team_member tm WHERE tm.team_id = t.id) AS member_count,
+            (SELECT COUNT(*) FROM lead l
+               WHERE l.org_id = t.org_id
+                 AND l.owner_id IN (SELECT tm2.user_id FROM team_member tm2 WHERE tm2.team_id = t.id)) AS active_leads,
+            (SELECT COUNT(DISTINCT im.lead_id) FROM inbox_messages im
+               JOIN lead l2 ON l2.id = im.lead_id
+               WHERE l2.org_id = t.org_id
+                 AND l2.owner_id IN (SELECT tm3.user_id FROM team_member tm3 WHERE tm3.team_id = t.id)) AS conversations,
+            (SELECT COUNT(*) FROM lead_appointment la
+               JOIN lead l3 ON l3.id = la.lead_id
+               WHERE l3.org_id = t.org_id
+                 AND l3.owner_id IN (SELECT tm4.user_id FROM team_member tm4 WHERE tm4.team_id = t.id)
+                 AND LOWER(IFNULL(la.status,'')) <> 'cancelled') AS appointments,
+            (SELECT COALESCE(SUM(d.value),0) FROM deal d
+               JOIN lead l4 ON l4.id = d.lead_id
+               WHERE l4.org_id = t.org_id
+                 AND l4.owner_id IN (SELECT tm5.user_id FROM team_member tm5 WHERE tm5.team_id = t.id)
+                 AND LOWER(IFNULL(d.status,'open')) = 'open') AS pipeline_value,
+            (SELECT COUNT(*) FROM deal d2
+               JOIN lead l5 ON l5.id = d2.lead_id
+               WHERE l5.org_id = t.org_id
+                 AND l5.owner_id IN (SELECT tm6.user_id FROM team_member tm6 WHERE tm6.team_id = t.id)
+                 AND LOWER(IFNULL(d2.status,'')) = 'won') AS won_deals
        FROM team t
        LEFT JOIN "user" u ON u.id = t.leader_id
       WHERE t.org_id = ?
       ORDER BY t.id ASC`,
     orgId,
   );
+  const teams = rows.map((t) => ({
+    ...t,
+    conversion_rate: t.active_leads > 0 ? `${Math.round((t.won_deals / t.active_leads) * 100)}%` : "0%",
+  }));
   return json({ teams });
 };
 

@@ -18,6 +18,7 @@ interface HotLeadRow {
   location?: string;
   range?: string;
   score?: number;
+  lead_score?: number | null;
   status?: string;
   stage?: string;
   pipeline_stage?: string;
@@ -128,14 +129,28 @@ const isHotLead = (lead: HotLeadRow): boolean => {
   );
 };
 
-const inferScore = (lead: HotLeadRow, fallback: number): number => {
-  if (typeof lead.score === "number") return lead.score;
-  if (isHotLead(lead)) return Math.min(98, 90 + fallback);
+// The lead's AI Score is the real, DB-stored engagement score (lead.lead_score,
+// computed server-side from the lead's pipeline stage). When a lead has no stored
+// score yet, derive a deterministic value from the lead's OWN stage/intent signals
+// - never from its position in the list (the old fallback used the row index, so a
+// lead's "score" changed depending on where it sorted).
+const STAGE_BUCKET: Record<string, number> = {
+  closed: 100, "under contract": 98, "active client": 90,
+  "appointment set": 80, "appointment booked": 80, qualified: 65,
+  engaged: 45, contacted: 25, "new lead": 10, new: 10, "not engaged": 10, lost: 5,
+};
+const inferScore = (lead: HotLeadRow): number => {
+  const real = typeof lead.lead_score === "number" ? lead.lead_score
+    : (typeof lead.score === "number" ? lead.score : null);
+  if (real != null && real > 0) return real;
+  const status = String(lead.status ?? lead.stage ?? lead.pipeline_stage ?? "").trim().toLowerCase();
+  if (status && STAGE_BUCKET[status] != null) return STAGE_BUCKET[status];
+  if (isHotLead(lead)) return 65;
   const intent = String(lead.intent ?? lead.last_activity_label ?? "").toLowerCase();
-  if (intent.includes("high") || intent.includes("urgent")) return 88 + fallback;
-  if (intent.includes("medium")) return 65 + fallback;
-  if (intent.includes("low")) return 42 + fallback;
-  return Math.max(20, 92 - fallback * 7);
+  if (intent.includes("high") || intent.includes("urgent")) return 65;
+  if (intent.includes("medium")) return 45;
+  if (intent.includes("low")) return 25;
+  return 10;
 };
 
 const scoreClass = (score: number): { stroke: string; label: string } => {
@@ -358,7 +373,7 @@ const HotLead: React.FC<HotLeadProps> = ({
           {/* Mobile: card list */}
           <ul className="flex flex-col gap-2 px-2 pb-2 md:hidden">
             {leads.slice(0, 4).map((l, i) => {
-              const score = inferScore(l, i);
+              const score = inferScore(l);
               return (
                 <li key={l.id}>
                   <button
@@ -394,7 +409,7 @@ const HotLead: React.FC<HotLeadProps> = ({
             </thead>
             <tbody>
               {leads.slice(0, 4).map((l, i) => {
-                const score = inferScore(l, i);
+                const score = inferScore(l);
                 const signals = inferSignals(l);
                 const last = relativeTime(l.last_activity_at);
                 return (
