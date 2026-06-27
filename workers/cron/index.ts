@@ -19,6 +19,7 @@ import { runAppointmentReminders } from "./jobs/appointmentReminders.ts";
 import { runEscalationAdvance } from "./jobs/escalationAdvance.ts";
 import { runCleanup } from "./jobs/cleanup.ts";
 import { runCompExpiry } from "./jobs/compExpiry.ts";
+import { runStaleCalls } from "./jobs/staleCalls.ts";
 
 /**
  * Per-job wall-clock budget. On the Workers Paid plan a Cron Trigger invocation
@@ -76,6 +77,9 @@ async function runAllJobs(env: CronEnv, trigger: string): Promise<void> {
     runJob("cleanup", () => runCleanup(env)),
     // Revert lapsed 100%-off comps back to free + alert the owner to add a card.
     runJob("compExpiry", () => runCompExpiry(env)),
+    // Finalize calls stuck at RINGING/IN_PROGRESS (missed hangup webhook) so a
+    // phantom "active call" can't auto-drop the agent's next call.
+    runJob("staleCalls", () => runStaleCalls(env)),
   ]);
   console.log(`[cron] tick complete in ${Date.now() - t0}ms`);
 }
