@@ -14,7 +14,6 @@ import {
   X,
   Search,
   Filter,
-  ChevronDown,
   Inbox,
 } from "lucide-react";
 import "./brokerDesign.css";
@@ -161,13 +160,13 @@ export default function TeamsPage() {
   const PERF_POINTS = 14;
   const perfSeries = useMemo(() => {
     const colors = ["#F76A2D", "#7A7770", "#C9A26E", "#A8A6A0", "#2563EB", "#7C3AED"];
+    // Each team's REAL current conversion rate, drawn as a flat reference line.
+    // We don't track historical conversion over time, so we never fabricate a
+    // trend - the line sits at the team's actual present value, and teams with
+    // no closed deals correctly read 0%.
     return filteredTeams.slice(0, 6).map((t, i) => {
-      const target = Number(String(t.conversion_rate || 0).replace(/[^0-9.]/g, "")) || (15 + i * 3);
-      // Smooth synthetic time series with the team's conversion rate as anchor
-      const data = Array.from({ length: PERF_POINTS }, (_, k) => {
-        const wobble = Math.sin((k + i) * 0.7) * 4;
-        return Math.max(0, Math.min(100, target + wobble - 6 + (k / PERF_POINTS) * 12));
-      });
+      const conv = Number(String(t.conversion_rate || 0).replace(/[^0-9.]/g, "")) || 0;
+      const data = Array.from({ length: PERF_POINTS }, () => conv);
       return { name: t.name, color: colors[i % colors.length], data, conv: fmtRate(t.conversion_rate) };
     });
   }, [filteredTeams]);
@@ -437,12 +436,8 @@ export default function TeamsPage() {
                   <div>
                     <h2>Team Performance Overview</h2>
                     <div style={{ fontSize: 12.5, color: "var(--b-muted)", marginTop: 2 }}>
-                      Conversion rate by team over the last 30 days
+                      Current conversion rate by team
                     </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button className="b-select" type="button">This Month <ChevronDown size={12} /></button>
-                    <button className="b-btn-ghost b-btn-accent" type="button">View Full Report</button>
                   </div>
                 </div>
                 <div style={{ padding: "8px 20px 22px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
@@ -459,10 +454,6 @@ export default function TeamsPage() {
                     {perfSeries.map((s, i) => (
                       <path key={i} d={toPath(s.data)} fill="none" stroke={s.color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
                     ))}
-                    {["W1", "W2", "W3", "W4"].map((lab, i) => {
-                      const x = padL + (i / 3) * innerW;
-                      return <text key={lab} x={x} y={PERF_H - 8} fontSize="10.5" fill="#8C8579" textAnchor="middle" fontFamily="Inter">{lab}</text>;
-                    })}
                   </svg>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 160 }}>
                     {perfSeries.map((s, i) => (

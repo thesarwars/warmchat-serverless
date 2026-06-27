@@ -37,6 +37,11 @@ interface OrgUser {
   leads_count?: number;
   response_time?: string;
   status?: string;
+  conversations?: number;
+  appointments?: number;
+  pipeline_value?: number;
+  won_deals?: number;
+  conversion_rate?: string;
   avatar?: string;
 }
 
@@ -183,13 +188,23 @@ export default function UsersPage() {
     return out;
   }, [page, totalPages]);
 
+  // Live roll-ups across the org's users (each row carries its own aggregates
+  // from GET /api/auth/users). Response time needs message-latency tracking we
+  // don't compute yet, so it stays "-" rather than showing a fabricated number.
+  const fmtMoney = (n: number) =>
+    n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${Math.round(n / 1_000)}K` : `$${n}`;
+  const sumConvs = users.reduce((s, u) => s + (Number(u.conversations) || 0), 0);
+  const sumAppts = users.reduce((s, u) => s + (Number(u.appointments) || 0), 0);
+  const sumPipeline = users.reduce((s, u) => s + (Number(u.pipeline_value) || 0), 0);
+  const totalLeads = users.reduce((s, u) => s + (Number(u.leads_count) || 0), 0);
+  const totalWon = users.reduce((s, u) => s + (Number(u.won_deals) || 0), 0);
   const kpis = [
     { label: "Total Agents", icon: Users, value: users.length || "-" },
-    { label: "Active Conversations", icon: MessageSquare, value: "-" },
-    { label: "Appointments Booked", icon: CalendarCheck, value: "-" },
+    { label: "Active Conversations", icon: MessageSquare, value: sumConvs || "-" },
+    { label: "Appointments Booked", icon: CalendarCheck, value: sumAppts || "-" },
     { label: "Avg. Response Time", icon: Clock, value: "-" },
-    { label: "Pipeline Value", icon: DollarSign, value: "-" },
-    { label: "Conversion Rate", icon: TrendingUp, value: "-" },
+    { label: "Pipeline Value", icon: DollarSign, value: sumPipeline ? fmtMoney(sumPipeline) : "-" },
+    { label: "Conversion Rate", icon: TrendingUp, value: totalLeads > 0 ? `${Math.round((totalWon / totalLeads) * 100)}%` : "-" },
   ];
 
   const exportCsv = () => {

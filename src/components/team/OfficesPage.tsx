@@ -164,15 +164,17 @@ export default function OfficesPage() {
     { label: "Pipeline Value", value: totalPipeline ? fmtPipeline(totalPipeline) : "-", icon: DollarSign },
   ];
 
-  const lineSeries = filtered.slice(0, 5).map((o, i) => {
-    const target = Number(String(o.pipeline_value || 0).replace(/[^0-9.]/g, "")) || 1;
-    const scaled = Math.max(1, target / 1_000_000);
-    return {
+  // Real office pipeline values only (flat reference line in $M). We don't track
+  // pipeline history, and offices aren't yet linked to agents/leads, so this is
+  // empty until that data exists - no synthetic trend is ever drawn.
+  const lineSeries = filtered.slice(0, 5)
+    .map((o, i) => ({ o, i, pv: Number(String(o.pipeline_value || 0).replace(/[^0-9.]/g, "")) || 0 }))
+    .filter((x) => x.pv > 0)
+    .map(({ o, i, pv }) => ({
       label: o.name,
-      values: Array.from({ length: 12 }, (_, k) => Math.max(0.1, scaled * (0.6 + Math.sin((k + i) * 0.6) * 0.2 + (k / 24)))),
+      values: Array.from({ length: 12 }, () => pv / 1_000_000),
       color: PALETTE[i % PALETTE.length],
-    };
-  });
+    }));
 
   const donutSlices = filtered.slice(0, 5).map((o, i) => ({
     label: o.name,
@@ -376,7 +378,7 @@ export default function OfficesPage() {
                   <div>
                     <h2>Office Pipeline Overview</h2>
                     <div style={{ fontSize: 12.5, color: "var(--b-muted)", marginTop: 2 }}>
-                      Pipeline value trend by office (last 12 weeks)
+                      Pipeline value by office
                     </div>
                   </div>
                 </div>
