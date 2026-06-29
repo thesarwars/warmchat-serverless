@@ -12,6 +12,7 @@ import {
 import { sendLeadSms } from "./leadSms.ts";
 import { resolveReplyDelayMs } from "./aiAgents.ts";
 import { classifyReplyText, type ClassifyResult } from "./intentClassifier.ts";
+import { tryNormalizeE164 } from "./phone.ts";
 import { dispatchZapierEvent } from "./zapierDispatch.ts";
 import { toLeadView } from "./integrationApi.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
@@ -112,22 +113,46 @@ export async function applyExtractions(
   // Governed "smart filter" fields go through the engine: Budget is bucketed to
   // the 5 canonical ranges, Area is normalized, both stamped with provenance +
   // an audit row (and never clobber a manual edit).
+  // Read current contact fields + provenance + notes once - so contact info is
+  // filled ONLY when blank (never clobber a known email/phone/source or the SMS
+  // thread key) and we don't clobber a manual timeline/pre_approved edit.
+  const cur = await queryFirst<{
+    ai_field_provenance: string | null; notes: string | null;
+    email: string | null; phone: string | null; source: string | null;
+  }>(
+    env.D1DB, `SELECT ai_field_provenance, notes, email, phone, source FROM lead WHERE id = ?`, leadId,
+  );
+  const prov = parseProvenance(cur?.ai_field_provenance);
+
   const governed: LeadFieldProposal[] = [];
   if (extracted.budget) governed.push({ field: "price_range", value: extracted.budget, confidence: ctx?.confidence ?? 0.7 });
   if (extracted.area) governed.push({ field: "area", value: extracted.area, confidence: ctx?.confidence ?? 0.7 });
+  // Source attribution ("found you on Zillow") - fill ONLY when the lead has no
+  // source yet, so we never overwrite an import/intake source. Normalized to the
+  // canonical option set by the governed engine.
+  if (extracted.source && !(cur?.source || "").trim()) {
+    governed.push({ field: "source", value: extracted.source, confidence: ctx?.confidence ?? 0.7 });
+  }
   if (governed.length) {
     await applyAiLeadFields(env, leadId, governed, { agentKey: "inbound", evidence: ctx?.evidence ?? null });
   }
 
-  // Read provenance + current notes once - to avoid clobbering a manual
-  // timeline/pre_approved edit and to dedupe the notes append.
-  const cur = await queryFirst<{ ai_field_provenance: string | null; notes: string | null }>(
-    env.D1DB, `SELECT ai_field_provenance, notes FROM lead WHERE id = ?`, leadId,
-  );
-  const prov = parseProvenance(cur?.ai_field_provenance);
-
   const sets: string[] = [];
   const args: unknown[] = [];
+  // Email: fill only when blank + the captured value is a plausible address.
+  if (extracted.email && !(cur?.email || "").trim() && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(extracted.email)) {
+    sets.push("email = ?"); args.push(extracted.email.trim().toLowerCase());
+  }
+  // Phone: fill only when blank (never overwrite the SMS thread key). Validate as
+  // a real NANP number - +1 with area + exchange codes both starting 2-9 - so a
+  // bare 10-digit run that is actually an MLS/account/confirmation number (those
+  // typically start 0/1 or have an invalid exchange) is rejected, not written as
+  // a phone. tryNormalizeE164 is non-strict (echoes raw on failure), so this
+  // explicit NANP check is what actually guards the write.
+  if (extracted.phone && !(cur?.phone || "").trim()) {
+    const e164 = tryNormalizeE164(extracted.phone);
+    if (e164 && /^\+1[2-9]\d{2}[2-9]\d{6}$/.test(e164)) { sets.push("phone = ?"); args.push(e164); }
+  }
   if (extracted.timeline && !isManuallyLocked(prov, "timeline")) { sets.push("timeline = ?"); args.push(extracted.timeline); }
   if (typeof extracted.pre_approved === "boolean" && !isManuallyLocked(prov, "pre_approved")) {
     sets.push("pre_approved = ?"); args.push(extracted.pre_approved ? 1 : 0);
