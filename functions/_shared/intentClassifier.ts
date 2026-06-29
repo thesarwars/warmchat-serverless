@@ -42,6 +42,12 @@ export interface ClassifyResult {
     // Concrete lead facts that don't fit a named field (e.g. "wants a pool",
     // "5 acres", school district, must-haves) - appended to lead.notes.
     other_details?: string;
+    // Contact facts stated in conversation. email/phone are captured by
+    // deterministic regex (never the LLM - we must not invent contact info);
+    // source ("found you on Zillow") is LLM + keyword. All written fill-if-empty.
+    email?: string;
+    phone?: string;
+    source?: string;
   };
 }
 
@@ -211,6 +217,30 @@ function extractKeyword(text: string): ClassifyResult {
     if (rx.test(lowered)) { result.extracted.property_type = label; break; }
   }
 
+  // Contact facts (DETERMINISTIC only - never let the LLM invent these).
+  // Email: standard address shape. Phone/source validated + filled at write time.
+  const emailMatch = text.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/);
+  if (emailMatch) result.extracted.email = emailMatch[0].trim();
+  // Phone: a US-style 10/11-digit number (with typical separators) or a bare
+  // 10-digit run. Only a CANDIDATE here - applyExtractions normalizes it through
+  // tryNormalizeE164 (rejects non-phones) and only fills when the lead has none.
+  const phoneMatch = text.match(/(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}\b|\b\d{10}\b/);
+  if (phoneMatch) result.extracted.phone = phoneMatch[0].trim();
+  // Source attribution the lead volunteers ("saw you on Zillow", "a friend
+  // referred me"). Clearest platforms only; the LLM covers the nuanced cases.
+  const SOURCE_HINTS: [RegExp, string][] = [
+    [/\bzillow\b/i, "Zillow"],
+    [/\brealtor\.?com\b/i, "Realtor.com"],
+    [/\bopen house\b/i, "Open House"],
+    [/\bfacebook\b/i, "Facebook Ads"],
+    [/\binstagram\b/i, "Instagram"],
+    [/\b(referr?(ed|al)|a friend (told|referred))\b/i, "Referral"],
+    [/\b(your )?(website|web ?form)\b/i, "Website"],
+  ];
+  for (const [rx, label] of SOURCE_HINTS) {
+    if (rx.test(text)) { result.extracted.source = label; break; }
+  }
+
   // Warm fallback: positive engagement words promote unknown -> warm.
   if (result.intent === "unknown" && /\b(yes|sure|interested|let'?s|send|please)\b/i.test(text)) {
     result.intent = "warm";
@@ -240,11 +270,13 @@ Output schema (strict):
     "bathrooms": number | null,
     "property_type": string | null,
     "seller_price_expectations": string | null,
+    "source": string | null,
     "other_details": string | null
   }
 }
 
 Rules:
+- source: ONLY if the lead says where they found/heard about you - map to one of: Zillow, Realtor.com, Open House, Google Ads, Facebook Ads, Instagram, Referral, Website. null otherwise. Do NOT guess.
 - other_details: any CONCRETE lead fact that does not fit a named field above (e.g. "wants a pool", "5 acres", "good school district", "must have a garage", "cash buyer"). A short comma-joined phrase. null if none. Do NOT restate budget/area/timeline here.
 - intent "booking" only if the lead is asking to schedule/tour/call.
 - intent "not_interested" ONLY when genuinely not interested ("not interested", "stop", "leave me alone", "no thanks").
@@ -292,6 +324,7 @@ async function callLLM(env: Env, replyText: string, leadType: string | null): Pr
         ...(typeof ex.bathrooms === "number" ? { bathrooms: ex.bathrooms } : {}),
         ...(typeof ex.property_type === "string" ? { property_type: ex.property_type } : {}),
         ...(typeof ex.seller_price_expectations === "string" ? { seller_price_expectations: ex.seller_price_expectations } : {}),
+        ...(typeof ex.source === "string" ? { source: ex.source } : {}),
         ...(typeof ex.other_details === "string" && ex.other_details.trim() ? { other_details: ex.other_details.trim() } : {}),
       },
     };
