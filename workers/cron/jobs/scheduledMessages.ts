@@ -690,6 +690,18 @@ async function persistOutboundSms(
   await env.D1DB.prepare(
     `UPDATE sms_conversation SET last_message_at = ? WHERE id = ?`,
   ).bind(new Date().toISOString(), conv.id).run();
+  // Bump lead recency (monotonic) so a campaign/AI SMS bubbles the contact up the
+  // inbox contacts list - which is `FROM lead WHERE last_activity_at IS NOT NULL
+  // ORDER BY last_activity_at DESC`. WITHOUT this, an SMS persists the thread but
+  // the lead's last_activity_at stays stale, so the recipient never appears in the
+  // inbox (this is why a 98-recipient SMS campaign showed nothing). Mirrors the
+  // bump persistOutboundEmail already does. contact_id is the lead id.
+  if (row.contact_id) {
+    const ts = new Date().toISOString();
+    await env.D1DB.prepare(
+      `UPDATE lead SET last_activity_at = ?, last_activity_direction = 'outbound' WHERE id = ? AND (last_activity_at IS NULL OR last_activity_at < ?)`,
+    ).bind(ts, row.contact_id, ts).run();
+  }
 }
 
 async function persistOutboundEmail(
