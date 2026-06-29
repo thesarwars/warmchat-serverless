@@ -123,11 +123,28 @@ function parseDollarFigures(text: string): number[] {
     let n = parseFloat(digits);
     if (!Number.isFinite(n)) continue;
     const suffix = (m[2] || "").toLowerCase();
+    const hasComma = g1.includes(",");
+    const hasDecimal = g1.includes(".");
+    // Skip numbers that are clearly NOT money so an incidental "2.5 bath" /
+    // "3 bed" / "1800 sqft" in a budget string isn't read as a dollar figure
+    // (and especially isn't scaled to millions by the decimal rule below).
+    // A $-prefixed or k/m-suffixed number is always money, so never skip those.
+    const moneyMarked = m[0].includes("$") || suffix === "k" || suffix === "m";
+    if (!moneyMarked) {
+      const after = text.slice(rx.lastIndex, rx.lastIndex + 12).toLowerCase();
+      if (/^\s*(bed|bd\b|br\b|bath|ba\b|sq|acre|%|percent|mile|min|hour|yr|year|month|week|day|kid|child|people|guest|star)/.test(after)) continue;
+    }
     if (suffix === "k") n *= 1_000;
     else if (suffix === "m") n *= 1_000_000;
-    // Bare small numbers in a budget context are shorthand thousands
-    // ("around 400" -> 400k). Numbers with commas/decimals already absolute.
-    else if (n > 0 && n < 10_000 && !g1.includes(",")) n *= 1_000;
+    // A small DECIMAL with no unit is millions shorthand in a home-price context:
+    // "no more than 1.2" means $1.2M, never $1,200 (and never $1.2k). Likewise
+    // "0.9" -> 900k, "2.5" -> 2.5M. This was the bug behind "1.2" bucketing to
+    // "Under $300k" (it had been ×1,000 -> $1,200). Guard < 100 so a real
+    // absolute like 1200000.50 isn't touched.
+    else if (hasDecimal && !hasComma && n > 0 && n < 100) n *= 1_000_000;
+    // Bare small integers are thousands shorthand ("around 400" -> 400k,
+    // "750" -> 750k). Numbers with commas are already absolute.
+    else if (n > 0 && n < 10_000 && !hasComma) n *= 1_000;
     if (n > 0) out.push(n);
   }
   return out;
