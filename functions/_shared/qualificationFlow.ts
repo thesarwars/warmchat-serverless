@@ -153,10 +153,17 @@ export async function applyExtractions(
     const e164 = tryNormalizeE164(extracted.phone);
     if (e164 && /^\+1[2-9]\d{2}[2-9]\d{6}$/.test(e164)) { sets.push("phone = ?"); args.push(e164); }
   }
+  // Note fragments to append (the "extra info important for criteria" the owner
+  // wants in Notes): a derived next-step from the pre-approval answer + any
+  // free-form other_details. Combined + deduped into a single notes write below.
+  const noteAdds: string[] = [];
   if (extracted.timeline && !isManuallyLocked(prov, "timeline")) { sets.push("timeline = ?"); args.push(extracted.timeline); }
   if (typeof extracted.pre_approved === "boolean" && !isManuallyLocked(prov, "pre_approved")) {
     sets.push("pre_approved = ?"); args.push(extracted.pre_approved ? 1 : 0);
     sets.push("financing_status = ?"); args.push(extracted.pre_approved ? "pre_approved" : "not_pre_approved");
+    // A buyer who isn't pre-approved yet needs to get with a lender - surface that
+    // as the actionable next step in Notes, not just a 0/1 flag.
+    if (extracted.pre_approved === false) noteAdds.push("Needs lender help");
   }
   if (extracted.property_address) { sets.push("property_address = ?"); args.push(extracted.property_address); }
   if (extracted.occupancy_status) { sets.push("occupancy_status = ?"); args.push(extracted.occupancy_status); }
@@ -169,14 +176,23 @@ export async function applyExtractions(
   if (extracted.seller_price_expectations) { sets.push("seller_price_expectations = ?"); args.push(extracted.seller_price_expectations); }
 
   // Catch-all: concrete details that have no dedicated field (pool, acreage,
-  // must-haves...) are APPENDED to Notes, deduped so the same phrase doesn't
-  // pile up on every reply.
+  // must-haves...) join the derived notes above. All are APPENDED to Notes,
+  // deduped (vs existing notes AND within this batch) so nothing piles up on
+  // every reply.
   const detail = extracted.other_details?.trim();
-  if (detail) {
+  if (detail) noteAdds.push(detail);
+  if (noteAdds.length) {
     const existing = (cur?.notes || "").trim();
-    if (!existing.toLowerCase().includes(detail.toLowerCase())) {
+    const existingLower = existing.toLowerCase();
+    const seen = new Set<string>();
+    const fresh = noteAdds.filter((n) => {
+      const k = n.trim().toLowerCase();
+      if (!k || existingLower.includes(k) || seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+    if (fresh.length) {
       sets.push("notes = ?");
-      args.push(existing ? `${existing}\n${detail}` : detail);
+      args.push([existing, ...fresh].filter(Boolean).join("\n"));
     }
   }
 
