@@ -43,3 +43,21 @@ export function appendComplianceFooter(body: string, opts: ComplianceFooterOpts)
   }
   return out;
 }
+
+/**
+ * Mirror of functions/_shared/smsCompliance.ts phone-scope helpers. SMS consent
+ * attaches to the PHONE NUMBER, not one CRM lead row - so the footer must be
+ * suppressed when ANY opted_in lead exists for the destination phone (matched on
+ * the last 10 digits so format drift still matches). Used as a correlated EXISTS
+ * column inside sequenceDispatch's due-step SELECT. Keep in sync with the Pages
+ * copy.
+ */
+export function normalizedPhoneSql(col: string): string {
+  return `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col}, '+', ''), '-', ''), ' ', ''), '(', ''), ')', ''), '.', '')`;
+}
+
+export function phoneOptedInExistsSql(orgCol: string, phoneCol: string): string {
+  return `EXISTS(SELECT 1 FROM lead l2 WHERE l2.org_id = ${orgCol} `
+    + `AND l2.sms_consent_status = 'opted_in' AND l2.phone IS NOT NULL `
+    + `AND ${normalizedPhoneSql("l2.phone")} LIKE '%' || substr(${normalizedPhoneSql(phoneCol)}, -10))`;
+}

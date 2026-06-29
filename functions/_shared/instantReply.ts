@@ -4,7 +4,7 @@ import { queryFirst } from "./db.ts";
 import {
   queueScheduledMessage, renderTemplate, isAiMasterEnabled, type LeadFull,
 } from "./autoResponse.ts";
-import { appendComplianceFooter } from "./smsCompliance.ts";
+import { appendComplianceFooter, phoneHasOptedInConsent } from "./smsCompliance.ts";
 import { resolveReplyDelayMs } from "./aiAgents.ts";
 
 /**
@@ -53,6 +53,11 @@ export async function scheduleInstantReply(env: Env, leadId: number): Promise<{ 
   const owner = await queryFirst<{ name: string | null }>(
     env.D1DB, `SELECT name FROM "user" WHERE id = ?`, lead.owner_id,
   );
+  // Phone-scoped consent: opted_in on this row OR any sibling lead sharing the
+  // phone (a stale 'unknown' duplicate must not re-add the footer). Cheap string
+  // check first so the extra query only fires for not-yet-opted-in leads.
+  const recipientOptedIn = lead.sms_consent_status === "opted_in"
+    || await phoneHasOptedInConsent(env, lead.org_id, lead.phone);
   const body = appendComplianceFooter(
     await renderTemplate(env, templateFor(lead.lead_type), lead),
     {
@@ -60,7 +65,7 @@ export async function scheduleInstantReply(env: Env, leadId: number): Promise<{ 
       agentName: owner?.name ?? null,
       // Already-opted-in leads got the bot disclosure + STOP in the original
       // consent flow; don't re-paste it on every program's first message.
-      recipientOptedIn: lead.sms_consent_status === "opted_in",
+      recipientOptedIn,
     },
   );
   // Honor the agent's "Response Time" (AI Settings); defaults to the 30s natural

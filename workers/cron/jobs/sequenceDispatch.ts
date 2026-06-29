@@ -19,7 +19,7 @@ import { isMockSendsEnabled } from "../_shared/appSettings.ts";
 import { isAiMasterEnabled, isAgentEnabled } from "../_shared/aiGate.ts";
 import { currentSecondBucket } from "../_shared/sendRateLimiter.ts";
 import { appendCanSpamFooter, makeUnsubscribeToken, unsubscribeUrl } from "../_shared/emailCompliance.ts";
-import { appendComplianceFooter } from "../_shared/smsCompliance.ts";
+import { appendComplianceFooter, phoneOptedInExistsSql } from "../_shared/smsCompliance.ts";
 
 interface DueRow {
   exec_id: string;
@@ -36,6 +36,8 @@ interface DueRow {
   lead_timezone: string | null;
   lead_email_opt_out: number | null;
   lead_sms_consent_status: string | null;
+  /** 1 when ANY opted_in lead shares the dispatch phone (phone-scoped consent). */
+  phone_opted_in: number | null;
   sender_name: string | null;
   sender_business_address: string | null;
 }
@@ -77,6 +79,7 @@ export async function runSequenceDispatch(env: CronEnv): Promise<void> {
             l.timezone          AS lead_timezone,
             l.email_opt_out     AS lead_email_opt_out,
             l.sms_consent_status AS lead_sms_consent_status,
+            ${phoneOptedInExistsSql("i.org_id", "i.lead_contact")} AS phone_opted_in,
             u.name              AS sender_name,
             u.business_address  AS sender_business_address
        FROM step_executions e
@@ -178,7 +181,9 @@ export async function runSequenceDispatch(env: CronEnv): Promise<void> {
         dispatched = await sendSms(
           env, row.org_id, row.lead_contact, row.message_template,
           row.step_number, row.sender_name,
-          row.lead_sms_consent_status === "opted_in",
+          // Phone-scoped consent: opted_in on this lead OR any sibling lead sharing
+          // the dispatch phone (a stale 'unknown' duplicate must not re-add STOP).
+          row.lead_sms_consent_status === "opted_in" || row.phone_opted_in === 1,
         );
       }
 

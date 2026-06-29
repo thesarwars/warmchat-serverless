@@ -8,7 +8,7 @@ import { notify } from "../../../../_shared/notify.ts";
 import { notifyQuotaExceeded } from "../../../../_shared/quotaNotify.ts";
 import { planMinuteLimit } from "../../../../_shared/plans.ts";
 import { isPhoneSuppressed } from "../../../../_shared/suppression.ts";
-import { appendComplianceFooter } from "../../../../_shared/smsCompliance.ts";
+import { appendComplianceFooter, phoneHasOptedInConsent } from "../../../../_shared/smsCompliance.ts";
 import { createTask, autoCompleteLeadTasks } from "../../../../_shared/tasks.ts";
 
 /**
@@ -374,16 +374,17 @@ async function sendMissedCallTextback(
   const agentRow = await queryFirst<{ name: string | null }>(
     env.D1DB, `SELECT name FROM "user" WHERE id = ?`, a.agentId,
   );
-  // Consented callers get the bare message; only unknown/cold numbers carry
-  // the STOP footer.
-  const callerLead = await queryFirst<{ sms_consent_status: string | null }>(
-    env.D1DB, `SELECT sms_consent_status FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
-    a.orgId, a.customerNumber,
-  );
+  // Consented callers get the bare message; only unknown/cold numbers carry the
+  // STOP footer. Phone-scoped + last-10-digit normalized: the old
+  // `WHERE phone = ? LIMIT 1` (no ORDER BY) read an ARBITRARY duplicate row, so a
+  // stale 'unknown' duplicate could re-add the footer for a number that had
+  // opted in on another row. (And a caller dialing in is itself consent - the
+  // inbound-call branch upserts the lead to opted_in.)
+  const callerOptedIn = await phoneHasOptedInConsent(env, a.orgId, a.customerNumber);
   const template = appendComplianceFooter(rawTemplate, {
     kind: "first_auto",
     agentName: agentRow?.name ?? null,
-    recipientOptedIn: callerLead?.sms_consent_status === "opted_in",
+    recipientOptedIn: callerOptedIn,
   });
   try {
     await mockTelnyxSendSms(

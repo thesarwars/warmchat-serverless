@@ -5,7 +5,7 @@ import { mockTelnyxSendSms } from "./mockSendApi.ts";
 import { checkQuietHours } from "./quietHours.ts";
 import { isPhoneSuppressed } from "./suppression.ts";
 import { autoCompleteLeadTasks } from "./tasks.ts";
-import { appendComplianceFooter, type ComplianceFooterKind } from "./smsCompliance.ts";
+import { appendComplianceFooter, phoneHasOptedInConsent, type ComplianceFooterKind } from "./smsCompliance.ts";
 import { queueScheduledMessage, type LeadFull, type AutoResponseRow } from "./autoResponse.ts";
 import { checkAiSmsPace } from "./aiSendPace.ts";
 import { bumpLeadActivity } from "./leadActivity.ts";
@@ -48,10 +48,20 @@ export async function sendLeadSms(
         env.D1DB, `SELECT telnyx_phone_number, name FROM "user" WHERE id = ?`, lead.owner_id,
       )
     : null;
+  // Phone-scoped consent: opted_in on this row OR any sibling lead sharing the
+  // phone (a stale 'unknown' duplicate must not re-add the footer). The default
+  // kind here ("followup_in_thread") never appends a footer anyway, so only run
+  // the extra query when the kind would actually append AND the row isn't already
+  // opted_in - keeps the common mid-conversation send at zero extra cost.
+  const footerKind = opts.complianceKind ?? "followup_in_thread";
+  const kindAppendsFooter = footerKind === "first_auto"
+    || footerKind === "sequence_first" || footerKind === "campaign";
+  const recipientOptedIn = lead.sms_consent_status === "opted_in"
+    || (kindAppendsFooter && await phoneHasOptedInConsent(env, lead.org_id, lead.phone));
   const body = appendComplianceFooter(finalBody, {
-    kind: opts.complianceKind ?? "followup_in_thread",
+    kind: footerKind,
     agentName: owner?.name ?? null,
-    recipientOptedIn: lead.sms_consent_status === "opted_in",
+    recipientOptedIn,
   });
 
   // "Natural delay" response timing: instead of replying instantly, queue the
