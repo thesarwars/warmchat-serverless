@@ -7,6 +7,8 @@ import { resolveOrgId } from "../../../_shared/callingAccess.ts";
 import { dial, hangup } from "../../../_shared/telnyx/client.ts";
 import { notifyQuotaExceeded } from "../../../_shared/quotaNotify.ts";
 import { planMinuteLimit } from "../../../_shared/plans.ts";
+import { tryNormalizeE164 } from "../../../_shared/phone.ts";
+import { normalizedPhoneSql } from "../../../_shared/smsCompliance.ts";
 
 /**
  * POST /api/calling/calls/outbound - kick off an outbound call.
@@ -146,11 +148,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     leadId = leadById.id;
     leadPhone = leadById.phone;
   } else if (body.phoneNumber) {
-    const existing = await queryFirst<{ id: number; phone: string | null }>(
-      env.D1DB,
-      `SELECT id, phone FROM lead WHERE org_id = ? AND phone = ? LIMIT 1`,
-      orgId, body.phoneNumber,
-    );
+    // Normalize to E.164 + dedup on the last 10 digits (mirrors leadIntake's
+    // findExisting). The old exact-string match on the raw client-supplied number
+    // missed format variants (+15594705204 vs 5594705204 vs (559) 470-5204), so a
+    // re-formatted dial created a DUPLICATE lead - which, left at consent
+    // 'unknown', re-added the STOP footer for a number that had already opted in
+    // on another row. Match-normalized dedup is the root-cause fix for that split.
+    const dialPhone = tryNormalizeE164(body.phoneNumber) ?? body.phoneNumber;
+    const digits = dialPhone.replace(/\D/g, "");
+    const suffix = digits.length >= 10 ? digits.slice(-10) : digits;
+    const existing = suffix
+      ? await queryFirst<{ id: number; phone: string | null }>(
+          env.D1DB,
+          `SELECT id, phone FROM lead
+             WHERE org_id = ? AND phone IS NOT NULL
+               AND ${normalizedPhoneSql("phone")} LIKE ?
+             LIMIT 1`,
+          orgId, `%${suffix}`,
+        )
+      : null;
     if (existing) {
       leadId = existing.id;
       leadPhone = existing.phone;
@@ -164,12 +180,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } else {
       const ins = await execute(
         env.D1DB,
-        `INSERT INTO lead (name, phone, status, owner_id, org_id, created_at, updated_at)
-         VALUES (?, ?, 'New', ?, ?, ?, ?)`,
-        body.name ?? null, body.phoneNumber, user.id, orgId, nowIso(), nowIso(),
+        `INSERT INTO lead (name, phone, source, status, owner_id, org_id, created_at, updated_at)
+         VALUES (?, ?, 'Outbound Call', 'New', ?, ?, ?, ?)`,
+        body.name ?? null, dialPhone, user.id, orgId, nowIso(), nowIso(),
       );
       leadId = Number(ins.meta.last_row_id);
-      leadPhone = body.phoneNumber;
+      leadPhone = dialPhone;
     }
   } else {
     return error("Either leadId or phoneNumber is required", 400);

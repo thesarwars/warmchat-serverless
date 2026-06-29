@@ -170,3 +170,59 @@ export function appendComplianceFooter(body: string, opts: ComplianceFooterOpts)
 export function appendStopFooter(body: string): string {
   return appendComplianceFooter(body, { kind: "campaign" });
 }
+
+/**
+ * Phone-scoped consent: SMS consent attaches to the PHONE NUMBER, not a single
+ * CRM lead row. The same person can exist as several `lead` rows (a duplicate
+ * import, an outbound-call auto-create, a re-formatted phone after a data
+ * migration); if ONE of those rows is opted_in the org genuinely has consent for
+ * that number, so the STOP footer must be suppressed even when the row driving
+ * this particular send is still 'unknown'. Reading consent off one lead row let a
+ * stale duplicate re-introduce "Reply STOP to opt out" for a number that had
+ * already opted in elsewhere - producing the same-number-two-messages-one-footer
+ * inconsistency. These helpers widen the check to "is ANY opted_in lead present
+ * for this phone (matched on the last 10 digits so format drift like
+ * +15594705204 vs 5594705204 still matches)".
+ *
+ * SQL is built (not bound) for the column identifiers - callers pass fixed table
+ * aliases, never user input.
+ */
+export function normalizedPhoneSql(col: string): string {
+  return `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col}, '+', ''), '-', ''), ' ', ''), '(', ''), ')', ''), '.', '')`;
+}
+
+/**
+ * A correlated EXISTS, for embedding as a `... AS phone_opted_in` column inside a
+ * lead-loading SELECT, so the phone-scope check costs ZERO extra round-trips
+ * (it runs in-DB inside the one batched SELECT). `orgCol`/`phoneCol` are the
+ * OUTER row's org + phone identifiers (e.g. 'lead.org_id', 'lead.phone').
+ */
+export function phoneOptedInExistsSql(orgCol: string, phoneCol: string): string {
+  return `EXISTS(SELECT 1 FROM lead l2 WHERE l2.org_id = ${orgCol} `
+    + `AND l2.sms_consent_status = 'opted_in' AND l2.phone IS NOT NULL `
+    + `AND ${normalizedPhoneSql("l2.phone")} LIKE '%' || substr(${normalizedPhoneSql(phoneCol)}, -10))`;
+}
+
+/**
+ * Standalone resolver for the single-send paths that receive a pre-loaded lead
+ * (speedToLead / instantReply / leadSms) and don't control the SELECT, and for
+ * the missed-call text (telnyx/status.ts) whose old `... WHERE phone=? LIMIT 1`
+ * read an arbitrary duplicate row. Returns true when the org has any opted_in
+ * lead whose phone matches on the last 10 digits. Cheap (one indexed-ish scan);
+ * callers short-circuit on the plain `=== 'opted_in'` check first so it only
+ * fires for not-yet-opted-in single sends.
+ */
+export async function phoneHasOptedInConsent(
+  env: Env, orgId: number, phone: string | null | undefined,
+): Promise<boolean> {
+  const digits = (phone || "").replace(/\D/g, "");
+  const suffix = digits.length >= 10 ? digits.slice(-10) : digits;
+  if (!suffix) return false;
+  const row = await queryFirst<{ ok: number }>(
+    env.D1DB,
+    `SELECT EXISTS(SELECT 1 FROM lead WHERE org_id = ? AND sms_consent_status = 'opted_in'`
+      + ` AND phone IS NOT NULL AND ${normalizedPhoneSql("phone")} LIKE ?) AS ok`,
+    orgId, `%${suffix}`,
+  );
+  return !!row && row.ok === 1;
+}

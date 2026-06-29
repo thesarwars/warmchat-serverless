@@ -4,7 +4,7 @@ import { queryFirst } from "./db.ts";
 import {
   queueScheduledMessage, renderTemplate, isAiMasterEnabled, type LeadFull,
 } from "./autoResponse.ts";
-import { appendComplianceFooter } from "./smsCompliance.ts";
+import { appendComplianceFooter, phoneHasOptedInConsent } from "./smsCompliance.ts";
 import { stepScheduledAt } from "./workflowSchedule.ts";
 import { resolveReplyDelayMs } from "./aiAgents.ts";
 import { loadPersonaUi, frequencyMultiplier } from "./personaUi.ts";
@@ -109,12 +109,17 @@ export async function enrollSpeedToLead(
 
   // Instant opening carries the AI disclosure + STOP footer (first auto message);
   // the two follow-ups are same-thread nudges and don't repaste it.
+  // Phone-scoped consent: opted_in on this row OR any sibling lead with the same
+  // phone (so a stale 'unknown' duplicate can't re-add the footer). Short-circuit
+  // on the cheap string check so the extra query only fires when needed.
+  const recipientOptedIn = lead.sms_consent_status === "opted_in"
+    || await phoneHasOptedInConsent(env, lead.org_id, lead.phone);
   const instantBody = appendComplianceFooter(
     await renderTemplate(env, seq.instant, lead),
     {
       kind: "first_auto",
       agentName: owner?.name ?? null,
-      recipientOptedIn: lead.sms_consent_status === "opted_in",
+      recipientOptedIn,
     },
   );
   const fu1Body = await renderTemplate(env, seq.fu1, lead);

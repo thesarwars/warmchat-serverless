@@ -6,7 +6,7 @@ import { requireUser } from "../../../_shared/auth.ts";
 import { isOrgMember } from "../../../_shared/orgAccess.ts";
 import { safeJson, type AutomationRow, type AutomationLead } from "../../../_shared/automationHelpers.ts";
 import { loadOrgQuietConfig, evaluateQuietHours } from "../../../_shared/quietHours.ts";
-import { appendComplianceFooter } from "../../../_shared/smsCompliance.ts";
+import { appendComplianceFooter, phoneOptedInExistsSql } from "../../../_shared/smsCompliance.ts";
 
 /**
  * POST /api/automations/send/:automationId
@@ -48,19 +48,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // Pre-load lead-level data for quiet hours + STOP compliance. We hit `lead`
   // once per lead-id (rather than per channel) so an automation that fans out to
   // both SMS and email doesn't double the read load.
-  interface LeadInfo { timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null }
+  interface LeadInfo { timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null; phone_opted_in: number | null }
   const leadInfo = new Map<number, LeadInfo>();
   const leadIds = leads
     .map((l) => Number(l.id))
     .filter((n): n is number => Number.isInteger(n));
   if (leadIds.length > 0) {
     const placeholders = leadIds.map(() => "?").join(",");
-    const rows = await queryAll<{ id: number; timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null }>(
+    const rows = await queryAll<{ id: number; timezone: string | null; sms_opt_out: number | null; sms_consent_status: string | null; phone_opted_in: number | null }>(
       env.D1DB,
-      `SELECT id, timezone, sms_opt_out, sms_consent_status FROM lead WHERE id IN (${placeholders})`,
+      `SELECT id, timezone, sms_opt_out, sms_consent_status,
+              ${phoneOptedInExistsSql("lead.org_id", "lead.phone")} AS phone_opted_in
+         FROM lead WHERE id IN (${placeholders})`,
       ...leadIds,
     );
-    for (const r of rows) leadInfo.set(r.id, { timezone: r.timezone, sms_opt_out: r.sms_opt_out, sms_consent_status: r.sms_consent_status });
+    for (const r of rows) leadInfo.set(r.id, { timezone: r.timezone, sms_opt_out: r.sms_opt_out, sms_consent_status: r.sms_consent_status, phone_opted_in: r.phone_opted_in });
   }
 
   // Quiet hours: load the org window ONCE, then evaluate per-lead with no
@@ -125,7 +127,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
       const smsBody = appendComplianceFooter(body, {
         kind: "campaign",
-        recipientOptedIn: leadId !== null && leadInfo.get(leadId)?.sms_consent_status === "opted_in",
+        // Phone-scoped consent: opted_in on this lead OR any sibling lead sharing
+        // the phone (a stale duplicate row must not re-add the STOP footer).
+        recipientOptedIn: leadId !== null
+          && (leadInfo.get(leadId)?.sms_consent_status === "opted_in"
+            || leadInfo.get(leadId)?.phone_opted_in === 1),
       });
       const sendAt = scheduledAtFor(leadId);
       stmts.push(env.D1DB.prepare(SMS_SQL).bind(

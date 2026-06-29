@@ -8,7 +8,7 @@ import {
   isAiMasterEnabled,
   type LeadFull,
 } from "./autoResponse.ts";
-import { appendComplianceFooter } from "./smsCompliance.ts";
+import { appendComplianceFooter, phoneOptedInExistsSql } from "./smsCompliance.ts";
 import { applyPersonalization, buildPersonalizationVars } from "./personalize.ts";
 import { generateWithOpenAI } from "./openai.ts";
 import { buildAgentSystemPrompt } from "./aiAgents.ts";
@@ -164,16 +164,18 @@ export async function queueAutomationForLead(
   const emailSubject = (camp.email_subject || "").trim() || null;
   const lead = await queryFirst<LeadFull & {
     sms_consent_status: string | null; timezone: string | null;
-    sms_opt_out: number | null; email_opt_out: number | null;
+    sms_opt_out: number | null; email_opt_out: number | null; phone_opted_in: number | null;
   }>(
     env.D1DB,
     `SELECT id, org_id, owner_id, first_name, last_name, name, email, phone, area, lead_type,
-            sms_consent_status, timezone, sms_opt_out, email_opt_out
+            sms_consent_status, timezone, sms_opt_out, email_opt_out,
+            ${phoneOptedInExistsSql("lead.org_id", "lead.phone")} AS phone_opted_in
        FROM lead WHERE id = ?`,
     leadId,
   );
   if (!lead) return 0;
-  const recipientOptedIn = lead.sms_consent_status === "opted_in";
+  // Phone-scoped consent: opted_in here OR any sibling lead with the same phone.
+  const recipientOptedIn = lead.sms_consent_status === "opted_in" || lead.phone_opted_in === 1;
   // Step send times are wall-clock in the lead's timezone, falling back to the
   // org's account timezone (the single source of truth).
   const sendTz = (lead.timezone || "").trim() || (await loadOrgTimezone(env, lead.org_id));
@@ -325,6 +327,8 @@ interface EnrollLeadRow {
   sms_opt_out: number | null;
   email_opt_out: number | null;
   timezone: string | null;
+  /** 1 when ANY opted_in lead shares this phone (phone-scoped consent). */
+  phone_opted_in: number | null;
 }
 
 /**
@@ -398,7 +402,8 @@ export async function bulkEnrollAutomation(
     const rows = await queryAll<EnrollLeadRow>(
       env.D1DB,
       `SELECT id, org_id, owner_id, first_name, last_name, name, email, phone, area,
-              sms_consent_status, sms_opt_out, email_opt_out, timezone
+              sms_consent_status, sms_opt_out, email_opt_out, timezone,
+              ${phoneOptedInExistsSql("lead.org_id", "lead.phone")} AS phone_opted_in
          FROM lead WHERE id IN (${part.map(() => "?").join(",")}) AND org_id = ?`,
       ...part, orgId,
     );
@@ -455,7 +460,9 @@ export async function bulkEnrollAutomation(
 
     const userId = lead.owner_id ?? fallbackUserId;
     const agentName = ownerName.get(userId) || null;
-    const recipientOptedIn = lead.sms_consent_status === "opted_in";
+    // Phone-scoped consent: opted_in on THIS row OR any sibling lead with the
+    // same phone (so a stale 'unknown' duplicate can't re-add the STOP footer).
+    const recipientOptedIn = lead.sms_consent_status === "opted_in" || lead.phone_opted_in === 1;
     const vars = buildPersonalizationVars(lead, agentName || "");
     const sendTz = (lead.timezone || "").trim() || orgTz;
     const canSms = !smsSuppressed && !!lead.phone;
