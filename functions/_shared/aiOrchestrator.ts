@@ -19,7 +19,7 @@ import { applyAiDealUpdate, ensureDealForLead } from "./deals.ts";
 import { searchListings, countOfferableListings, listingMediaUrls, parseImageKeys } from "./listings.ts";
 import { refreshLeadIntelligence } from "./leadIntelligence.ts";
 import { advanceQualification, applyExtractions } from "./qualificationFlow.ts";
-import { classifyReplyText } from "./intentClassifier.ts";
+import { classifyReplyText, detectAnsweredQualifiers, replyLooksLikeYesNo } from "./intentClassifier.ts";
 import { notify } from "./notify.ts";
 import { STAGE_OPTIONS, normalizeStage } from "./leadStage.ts";
 import {
@@ -370,6 +370,25 @@ async function loadEmailHistory(env: Env, leadId: number): Promise<ChatMessage[]
     role: r.direction === "inbound" ? "user" : "assistant",
     content: (r.body || "").slice(0, 2000),
   } as ChatMessage));
+}
+
+/**
+ * The most recent OUTBOUND (agent/AI) message text for the lead - i.e. the
+ * question the inbound reply is answering. Reuses the verified history loaders
+ * and returns the last 'assistant'-role content. Used by the context-aware
+ * qualifier recovery so a bare "Not yet" can be tied to the pre-approval Q.
+ */
+async function loadLastOutboundText(
+  env: Env, lead: { id: number; org_id: number; phone: string | null }, channel: Channel,
+): Promise<string | null> {
+  const hist = channel === "email"
+    ? await loadEmailHistory(env, lead.id)
+    : (lead.phone ? await loadHistory(env, lead.org_id, lead.phone) : []);
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && (h.content || "").trim()) return h.content;
+  }
+  return null;
 }
 
 /** "Re: <subject>" for a threaded email reply (prefix once, default if empty). */
@@ -881,6 +900,17 @@ export async function runInboundAgent(
   // appends extras to Notes; lead_type is set here only while still unknown.
   try {
     const c = await classifyReplyText(env, replyText, lead.lead_type);
+    // Context-aware recovery: a bare "Not yet" / "Yes" answering the agent's
+    // pre-approval question can't be read from the single message alone, so the
+    // classifier misses pre_approved. Pair it with the prior outbound message -
+    // but only bother loading it when the reply actually LOOKS like a short
+    // yes/no (cheap, no-DB pre-check), so we don't add a round-trip on ordinary
+    // replies and we keep the false-positive surface small.
+    if (typeof c.extracted.pre_approved !== "boolean" && replyLooksLikeYesNo(replyText)) {
+      const prior = await loadLastOutboundText(env, lead, channel);
+      const ans = detectAnsweredQualifiers(prior, replyText);
+      if (typeof ans.pre_approved === "boolean") c.extracted.pre_approved = ans.pre_approved;
+    }
     await applyExtractions(env, leadId, c.extracted, { evidence: replyText, confidence: c.confidence });
     if ((!lead.lead_type || lead.lead_type === "unknown") && c.lead_type_signal) {
       const eng = await applyAiLeadFields(env, leadId,

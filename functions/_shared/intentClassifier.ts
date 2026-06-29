@@ -45,6 +45,65 @@ export interface ClassifyResult {
   };
 }
 
+// --------------------------------------------------------------------------
+// Context-aware answer extraction.
+// --------------------------------------------------------------------------
+// The single-message classifier can't tell what a bare "Not yet" / "Yes" refers
+// to - so a lead answering the agent's pre-approval question ("Not yet, still
+// figuring it out") never set pre_approved. Pairing the reply with the PRIOR
+// outbound (agent) message recovers it. Deliberately CONSERVATIVE (owner's rule:
+// never make up data) - it only fires when BOTH hold:
+//   1. the prior message is a genuine pre-approval/pre-qualification STATUS
+//      QUESTION: "pre-approv"/"pre-qualif" stem AND an actual "?". Broad
+//      financing words (lender/mortgage/financing) are deliberately NOT enough -
+//      those also appear in OFFERS ("want our preferred lender's info?") where a
+//      "yeah" means "send it", not "I'm approved".
+//   2. the reply's LEADING clause is a short, unambiguous yes/no answer - not a
+//      mid-sentence stray yes/no, and not a non-answer ("no problem", "no rush").
+const PRE_APPROVAL_STATUS_Q_RE = /pre[-\s]?approv|pre[-\s]?qualif/i;
+// Anchored to the START of the reply's first clause (not "anywhere") so an
+// incidental yes/no later in the reply can't flip the field. Negation first.
+const ANSWER_NEGATIVE_RE = /^(no|nope|nah|not|haven'?t|hasn'?t|don'?t|doesn'?t|still|need|trying|working on|in the process|figuring)\b/i;
+const ANSWER_AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|already|i\s+(am|do|have|did|got)|we\s+(are|do|have|did|got)|all set|approved|pre[-\s]?approved|got\s+(it|that|approved))\b/i;
+// Leading yes/no that is really a non-answer - never treat as a status answer.
+const NONANSWER_RE = /^(no problem|no worries|no rush|no big deal|no thanks|not sure|either way|yes please send|yeah send|yes send)\b/i;
+
+/** The first clause of a reply (up to the first sentence/clause break). */
+function firstClause(s: string): string {
+  return (s || "").trim().split(/[.!?\n,;]/)[0]?.trim() || "";
+}
+
+/**
+ * Cheap pre-check (no DB): does the reply LOOK like a short yes/no answer worth
+ * pairing with the prior question? Lets callers skip the prior-message lookup
+ * on the common case where the reply clearly isn't a yes/no.
+ */
+export function replyLooksLikeYesNo(reply: string): boolean {
+  const fc = firstClause(reply);
+  if (!fc || fc.split(/\s+/).length > 8 || NONANSWER_RE.test(fc)) return false;
+  return ANSWER_NEGATIVE_RE.test(fc) || ANSWER_AFFIRMATIVE_RE.test(fc);
+}
+
+/**
+ * Given the agent's previous message and the lead's reply, recover yes/no
+ * qualifier answers the bare reply can't express on its own. Returns only the
+ * fields it is confident about; leaves the rest unknown (never guesses).
+ */
+export function detectAnsweredQualifiers(
+  priorAiText: string | null | undefined, replyText: string,
+): { pre_approved?: boolean } {
+  const out: { pre_approved?: boolean } = {};
+  const prior = priorAiText || "";
+  if (!prior || !replyText) return out;
+  // Must be a real pre-approval STATUS question (stem + an actual "?").
+  if (!(/\?/.test(prior) && PRE_APPROVAL_STATUS_Q_RE.test(prior))) return out;
+  const fc = firstClause(replyText);
+  if (!fc || fc.split(/\s+/).length > 8 || NONANSWER_RE.test(fc)) return out;
+  if (ANSWER_NEGATIVE_RE.test(fc)) out.pre_approved = false;
+  else if (ANSWER_AFFIRMATIVE_RE.test(fc)) out.pre_approved = true;
+  return out;
+}
+
 const BOOKING_WORDS = [
   "call", "appointment", "tour", "showing", "tomorrow", "today",
   "book", "schedule", "meet", "viewing", "visit",
