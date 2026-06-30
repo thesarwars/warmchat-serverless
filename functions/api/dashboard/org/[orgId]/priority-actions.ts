@@ -94,6 +94,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         AND substr(replace(replace(replace(replace(sc.phone_number_e164,'-',''),' ',''),'(',''),')',''), -10)
           = substr(replace(replace(replace(replace(l.phone,'-',''),' ',''),'(',''),')',''), -10)
       WHERE c.org_id = ? AND ${NOT_DEAD}
+        AND COALESCE(l.sms_opt_out,0) = 0 AND COALESCE(sc.opted_out,0) = 0
         AND (SELECT m.direction FROM sms_message m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC LIMIT 1) = 'inbound'
       ORDER BY c.last_message_at ASC LIMIT ?`,
     orgId, perType,

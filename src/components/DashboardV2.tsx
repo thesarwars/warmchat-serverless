@@ -493,6 +493,7 @@ const DashboardV2: React.FC = () => {
             <NeedsReply
               priority={priroty_actions}
               contacts={inbox_contacts}
+              needsReplyCount={needsReplyCount}
               isLoading={priorityLoading || inboxLoading}
             />
             <HotLead
