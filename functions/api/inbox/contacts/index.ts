@@ -229,7 +229,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       queryFirst<{ all_c: number; needs_reply_c: number; hot_c: number; buyers_c: number; sellers_c: number }>(
         env.D1DB,
         `SELECT COUNT(*) AS all_c,
-                SUM(CASE WHEN last_activity_direction = 'inbound' THEN 1 ELSE 0 END) AS needs_reply_c,
+                SUM(CASE WHEN last_activity_direction = 'inbound' AND COALESCE(sms_opt_out,0)=0 THEN 1 ELSE 0 END) AS needs_reply_c,
                 SUM(CASE WHEN ${HOT_STATUS_SQL} THEN 1 ELSE 0 END) AS hot_c,
                 SUM(CASE WHEN LOWER(COALESCE(lead_type,'')) IN ('buyer','both') THEN 1 ELSE 0 END) AS buyers_c,
                 SUM(CASE WHEN LOWER(COALESCE(lead_type,'')) IN ('seller','both') THEN 1 ELSE 0 END) AS sellers_c
@@ -327,7 +327,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const pageContacts = pageLeads.map((l) => byId.get(l.id)!);
     for (const e of pageContacts) {
       e.total_unread_count = e.email_unread_count + e.sms_unread_count;
-      e.needs_reply = e.last_activity_direction === "inbound";
+      // Opted-out leads can't be replied to (STOP/unsubscribe), so they never
+      // "need a reply" - matches the SQL count above + the dashboard.
+      e.needs_reply = e.last_activity_direction === "inbound" && !e.sms_opt_out;
     }
     pageContacts.sort((a, b) => (b.last_activity_at || "").localeCompare(a.last_activity_at || ""));
 
@@ -478,10 +480,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const everyone: ContactEntry[] = [];   // every lead in the org (for search)
   for (const e of byId.values()) {
     e.total_unread_count = e.email_unread_count + e.sms_unread_count;
-    // "Needs reply" = the lead spoke last. Read state is deliberately NOT part
-    // of this - opening a thread to read it doesn't discharge the obligation to
-    // reply, so reading must not clear the flag (only an outbound message does).
-    e.needs_reply = e.last_activity_direction === "inbound";
+    // "Needs reply" = the lead spoke last AND is still reachable. Read state is
+    // deliberately NOT part of this - opening a thread to read it doesn't
+    // discharge the obligation to reply, so reading must not clear the flag (only
+    // an outbound message does). Opted-out leads (STOP/unsubscribe) are excluded:
+    // you can't text them back, so they're not an action item - this keeps the
+    // full-scan count identical to the fast-path SQL + the dashboard.
+    e.needs_reply = e.last_activity_direction === "inbound" && !e.sms_opt_out;
     everyone.push(e);
     if (e.has_email_history || e.has_sms_history) all.push(e);
   }

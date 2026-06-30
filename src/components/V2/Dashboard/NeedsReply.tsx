@@ -36,6 +36,15 @@ interface NeedsReplyProps {
   priority?: { items?: PriorityItem[] };
   /** fetchInboxContacts payload: { contacts: [...] } - fallback source. */
   contacts?: { contacts?: InboxContact[] } | InboxContact[];
+  /**
+   * The TRUE needs-reply count (DashboardV2 derives it from the inbox's
+   * per-contact needs_reply, identical to the inbox "Needs Reply" chip). The
+   * headline + "View all" use THIS, not the mixed priority-feed length, so the
+   * card's number matches both the inbox queue it deep-links to and the
+   * WaitingBanner - the whole point of the sync fix. The list below still shows
+   * the broader "most important right now" priority feed.
+   */
+  needsReplyCount?: number;
   isLoading?: boolean;
 }
 
@@ -112,7 +121,7 @@ const isUrgent = (c: InboxContact): boolean => {
   return status.includes("hot") || intent === "hot" || Number(c.total_unread_count ?? c.unread_count) > 1;
 };
 
-const NeedsReply: React.FC<NeedsReplyProps> = ({ priority, contacts, isLoading }) => {
+const NeedsReply: React.FC<NeedsReplyProps> = ({ priority, contacts, needsReplyCount, isLoading }) => {
   const navigate = useNavigate();
 
   if (isLoading && priority == null && contacts == null) {
@@ -176,8 +185,11 @@ const NeedsReply: React.FC<NeedsReplyProps> = ({ priority, contacts, isLoading }
       });
   }
 
-  const total = rows.length;
-  const urgentCount = rows.filter((r) => r.urgent).length;
+  // Headline count = the TRUE needs-reply count (matches the inbox chip + the
+  // queue "View all" opens). Fall back to the row count only if the parent didn't
+  // pass it. The list itself (`top`) still shows the broader priority feed.
+  const total = typeof needsReplyCount === "number" ? needsReplyCount : rows.length;
+  const urgentCount = Math.min(rows.filter((r) => r.urgent).length, total);
   const top = rows.slice(0, 3);
 
   const openLead = (leadId: string | number | null) => {

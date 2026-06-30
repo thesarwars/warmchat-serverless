@@ -103,6 +103,12 @@ export async function suppressPhone(
             blocked_by_user_id = excluded.blocked_by_user_id`,
     orgId, phoneE164, now, opts.reason, blockedBy,
   );
+  // Match the lead on the LAST 10 DIGITS, not an exact string. The STOP arrives
+  // as a provider-normalized E.164, but the lead's stored phone may be in any
+  // format (a re-import, a hand-typed number); an exact `phone = ?` silently
+  // matched 0 rows, leaving lead.sms_opt_out=0 while sms_contact.opted_out=1 -
+  // the split that let an opted-out lead still count as "needs reply".
+  const optOutSuffix = phoneE164.replace(/\D/g, "").slice(-10);
   await execute(
     env.D1DB,
     `UPDATE lead
@@ -110,8 +116,9 @@ export async function suppressPhone(
             sms_consent_status = 'opted_out',
             last_opt_out_at = ?,
             updated_at = CURRENT_TIMESTAMP
-      WHERE org_id = ? AND phone = ?`,
-    now, orgId, phoneE164,
+      WHERE org_id = ? AND phone IS NOT NULL
+        AND substr(replace(replace(replace(replace(replace(replace(phone,'+',''),'-',''),' ',''),'(',''),')',''),'.',''), -10) = ?`,
+    now, orgId, optOutSuffix,
   );
   await execute(
     env.D1DB,
