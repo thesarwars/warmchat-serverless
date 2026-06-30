@@ -4,6 +4,7 @@ import { json, error } from "../../../_shared/http.ts";
 import { queryFirst, execute } from "../../../_shared/db.ts";
 import { requireUser } from "../../../_shared/auth.ts";
 import { isOrgMember } from "../../../_shared/orgAccess.ts";
+import { normalizedPhoneSql } from "../../../_shared/smsCompliance.ts";
 
 /**
  * DELETE /api/leads/delete/:id - remove a lead + cleanup tag mappings and
@@ -23,6 +24,17 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
     return error("Forbidden", 403);
   }
 
+  // Purge the lead's conversation HISTORY (so a re-import of the same number
+  // starts clean) but keep sms_contact (the opt-out record) - a STOP must never be
+  // forgotten. Runs before the lead delete (joins lead by phone).
+  const convSubq = `SELECT c.id FROM sms_conversation c
+      JOIN sms_contact sc ON sc.id = c.contact_id
+      JOIN lead l ON l.org_id = c.org_id AND l.phone IS NOT NULL
+        AND ${normalizedPhoneSql("sc.phone_number_e164")} = ${normalizedPhoneSql("l.phone")}
+     WHERE l.id = ?`;
+  await execute(env.D1DB, `DELETE FROM sms_message WHERE conversation_id IN (${convSubq})`, id);
+  await execute(env.D1DB, `DELETE FROM sms_conversation WHERE id IN (${convSubq})`, id);
+  await execute(env.D1DB, `DELETE FROM inbox_messages WHERE lead_id = ?`, id);
   await execute(env.D1DB, `DELETE FROM thread_lead_assignments WHERE lead_id = ?`, id);
   await execute(env.D1DB, `DELETE FROM lead_appointment WHERE lead_id = ?`, id);
   await execute(env.D1DB, `DELETE FROM lead_tags WHERE lead_id = ?`, id);
