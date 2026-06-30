@@ -7,6 +7,7 @@ import { isOrgMember } from "../../../_shared/orgAccess.ts";
 import { tryNormalizeE164 } from "../../../_shared/phone.ts";
 import { normalizeTimezone } from "../../../_shared/timezoneAliases.ts";
 import { suppressPhone } from "../../../_shared/suppression.ts";
+import { normalizedPhoneSql } from "../../../_shared/smsCompliance.ts";
 import { capLeadField, type LeadTextField } from "../../../_shared/leadLimits.ts";
 
 /**
@@ -585,6 +586,26 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     try {
       await suppressPhone(env, orgId, phone, { reason: "manual_import", blockedByUserId: user.id });
     } catch { /* non-fatal - row already imported */ }
+  }
+
+  // Inherit a prior opt-out: any imported lead whose number already said STOP
+  // (sms_contact.opted_out survives a lead delete) is marked opted-out, so a
+  // re-import of a previously-unsubscribed number doesn't resurrect it as
+  // reachable. Sends are blocked by sms_contact regardless; this keeps the lead
+  // row (opt-out badge + needs_reply count) honest. Scoped to the imported ids.
+  for (let start = 0; start < importedLeadIds.length; start += BATCH_CHUNK) {
+    const chunkIds = importedLeadIds.slice(start, start + BATCH_CHUNK);
+    const ph = chunkIds.map(() => "?").join(",");
+    try {
+      await execute(
+        env.D1DB,
+        `UPDATE lead SET sms_opt_out = 1, sms_consent_status = 'opted_out', updated_at = CURRENT_TIMESTAMP
+          WHERE id IN (${ph}) AND COALESCE(sms_opt_out,0) = 0 AND phone IS NOT NULL
+            AND EXISTS (SELECT 1 FROM sms_contact sc WHERE sc.org_id = ? AND sc.opted_out = 1
+              AND substr(${normalizedPhoneSql("sc.phone_number_e164")}, -10) = substr(${normalizedPhoneSql("lead.phone")}, -10))`,
+        ...chunkIds, orgId,
+      );
+    } catch { /* non-fatal - re-sync can run again on the next import/backfill */ }
   }
 
   return json({

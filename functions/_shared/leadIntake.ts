@@ -15,6 +15,7 @@
 import { queryFirst, execute } from "./db.ts";
 import { capLeadField } from "./leadLimits.ts";
 import { tryNormalizeE164 } from "./phone.ts";
+import { normalizedPhoneSql } from "./smsCompliance.ts";
 import { normalizeTimezone } from "./timezoneAliases.ts";
 import { usAreaCodeToTimezone } from "./usAreaCodeTimezone.ts";
 import { dispatchZapierEvent } from "./zapierDispatch.ts";
@@ -270,6 +271,23 @@ export async function createOrUpdateLead(
     );
     leadId = Number(insert.meta.last_row_id);
     created = true;
+  }
+
+  // Inherit a prior opt-out: if this number already said STOP (sms_contact.opted_out,
+  // which survives a lead delete), mark the lead opted-out too - a re-import must
+  // not resurrect a number that opted out, regardless of any 'opted_in' the caller
+  // asserted. Sends are already blocked by sms_contact at dispatch; this keeps the
+  // lead row (badge + needs_reply) honest. Matched on the last 10 digits.
+  if (phone) {
+    await execute(
+      env.D1DB,
+      `UPDATE lead SET sms_opt_out = 1, sms_consent_status = 'opted_out', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND COALESCE(sms_opt_out,0) = 0 AND EXISTS (
+          SELECT 1 FROM sms_contact sc WHERE sc.org_id = ? AND sc.opted_out = 1
+            AND substr(${normalizedPhoneSql("sc.phone_number_e164")}, -10) = substr(${normalizedPhoneSql("?")}, -10)
+        )`,
+      leadId, input.orgId, phone,
+    );
   }
 
   const lead = await queryFirst<Record<string, unknown>>(env.D1DB, `SELECT * FROM lead WHERE id = ?`, leadId);
