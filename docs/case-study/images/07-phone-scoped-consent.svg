@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1200 580" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="580" fill="#FBF8F3"/>
+  <text x="60" y="64" font-size="30" font-weight="800" fill="#211A14">Consent belongs to the phone, not the row</text>
+  <text x="60" y="96" font-size="16" fill="#7A6E60">The same person, two CRM rows — one campaign, two different “Reply STOP” footers.</text>
+
+  <!-- phone node -->
+  <g transform="translate(80,250)">
+    <rect width="150" height="96" rx="18" fill="#fff" stroke="#EAE4DA"/>
+    <rect x="55" y="18" width="40" height="60" rx="8" fill="#FDEBDD"/>
+    <rect x="61" y="26" width="28" height="38" rx="3" fill="#fff"/>
+    <circle cx="75" cy="71" r="3" fill="#C0530F"/>
+    <text x="75" y="112" font-size="12.5" font-weight="700" fill="#211A14" text-anchor="middle">+1 …4705204</text>
+  </g>
+
+  <!-- two lead rows -->
+  <g transform="translate(300,180)">
+    <rect width="230" height="70" rx="14" fill="#fff" stroke="#EAE4DA"/>
+    <text x="20" y="30" font-size="14" font-weight="700" fill="#211A14">Lead #1403</text>
+    <g transform="translate(150,20)"><rect width="60" height="30" rx="15" fill="#E7F6EC"/><text x="30" y="20" font-size="11.5" font-weight="700" fill="#128A3E" text-anchor="middle">opted-in</text></g>
+    <text x="20" y="54" font-size="12" fill="#8B7E6F">imported earlier</text>
+  </g>
+  <g transform="translate(300,300)">
+    <rect width="230" height="70" rx="14" fill="#fff" stroke="#EAE4DA"/>
+    <text x="20" y="30" font-size="14" font-weight="700" fill="#211A14">Lead #2471</text>
+    <g transform="translate(150,20)"><rect width="60" height="30" rx="15" fill="#F3EEE7"/><text x="30" y="20" font-size="11.5" font-weight="700" fill="#8B7E6F" text-anchor="middle">unknown</text></g>
+    <text x="20" y="54" font-size="12" fill="#8B7E6F">a re-import duplicate</text>
+  </g>
+  <line x1="230" y1="286" x2="300" y2="215" stroke="#DDCDB8" stroke-width="2"/>
+  <line x1="230" y1="300" x2="300" y2="335" stroke="#DDCDB8" stroke-width="2"/>
+
+  <!-- before -->
+  <g transform="translate(600,175)">
+    <rect width="250" height="200" rx="16" fill="#fff" stroke="#F1CACA"/>
+    <text x="22" y="36" font-size="14" font-weight="800" fill="#B91C1C">Before · per-row</text>
+    <g transform="translate(22,54)"><rect width="206" height="52" rx="10" fill="#F3EEE7"/><text x="14" y="24" font-size="12.5" fill="#3F362C">Hello Joseph!!</text><text x="14" y="42" font-size="11" fill="#9A8C7C">(clean)</text></g>
+    <g transform="translate(22,116)"><rect width="206" height="66" rx="10" fill="#FBEAEA"/><text x="14" y="24" font-size="12.5" fill="#3F362C">Hello Joseph!!</text><text x="14" y="44" font-size="11.5" font-weight="700" fill="#B91C1C">Reply STOP to opt out</text></g>
+  </g>
+
+  <!-- after -->
+  <g transform="translate(880,175)">
+    <rect width="260" height="200" rx="16" fill="#fff" stroke="#BFE6CC"/>
+    <text x="22" y="36" font-size="14" font-weight="800" fill="#128A3E">After · phone-scoped</text>
+    <text x="22" y="66" font-size="12.5" fill="#5C5145">consent matched on the</text>
+    <text x="22" y="86" font-size="12.5" fill="#5C5145">last 10 digits of the number</text>
+    <g transform="translate(22,104)"><rect width="216" height="46" rx="10" fill="#E7F6EC"/><path d="M18 27 l7 7 12 -14" stroke="#16A34A" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><text x="50" y="31" font-size="12.5" font-weight="700" fill="#128A3E">consistent · no footer</text></g>
+    <text x="22" y="176" font-size="11.5" fill="#7A6E60">Cold numbers still get the footer.</text>
+  </g>
+
+  <text x="60" y="470" font-size="15" font-weight="800" fill="#C0530F">TCPA / CTIA / 10DLC</text>
+  <text x="60" y="498" font-size="13.5" fill="#5C5145">Compliance stayed strict; the inconsistency disappeared. Verified against production before shipping.</text>
+</svg>

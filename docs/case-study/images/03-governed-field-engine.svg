@@ -1,0 +1,73 @@
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="560" fill="#FBF8F3"/>
+  <text x="60" y="64" font-size="30" font-weight="800" fill="#211A14">Governed field-write engine</text>
+  <text x="60" y="96" font-size="16" fill="#7A6E60">One choke point for every AI-driven write, so the AI can be trusted with the CRM.</text>
+
+  <defs>
+    <marker id="g" markerWidth="11" markerHeight="11" refX="7" refY="5.5" orient="auto"><path d="M0 0 L10 5.5 L0 11 z" fill="#D8A876"/></marker>
+  </defs>
+
+  <!-- input -->
+  <g transform="translate(60,180)">
+    <rect width="176" height="150" rx="16" fill="#F3EEE7" stroke="#E3D8C9"/>
+    <text x="24" y="42" font-size="14" font-weight="800" fill="#6A5D50">AI proposal</text>
+    <text x="24" y="74" font-size="12.5" fill="#8B7E6F">"budget: no</text>
+    <text x="24" y="93" font-size="12.5" fill="#8B7E6F">more than 1.2"</text>
+    <text x="24" y="122" font-size="11.5" fill="#A89B8C">free text · guess</text>
+  </g>
+
+  <!-- pipeline stages -->
+  <g>
+    <g transform="translate(288,180)">
+      <rect width="176" height="150" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <circle cx="34" cy="40" r="16" fill="#FDEBDD"/><text x="34" y="45" font-size="15" font-weight="800" fill="#C0530F" text-anchor="middle">1</text>
+      <text x="24" y="86" font-size="15" font-weight="800" fill="#211A14">Normalize</text>
+      <text x="24" y="112" font-size="12" fill="#6A5D50">→ canonical option</text>
+      <text x="24" y="130" font-size="12" fill="#6A5D50">"$1M+" bucket</text>
+    </g>
+    <g transform="translate(486,180)">
+      <rect width="176" height="150" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <circle cx="34" cy="40" r="16" fill="#FDEBDD"/><text x="34" y="45" font-size="15" font-weight="800" fill="#C0530F" text-anchor="middle">2</text>
+      <text x="24" y="86" font-size="15" font-weight="800" fill="#211A14">Override guard</text>
+      <text x="24" y="112" font-size="12" fill="#6A5D50">never clobber a</text>
+      <text x="24" y="130" font-size="12" fill="#6A5D50">manual edit</text>
+    </g>
+    <g transform="translate(684,180)">
+      <rect width="176" height="150" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <circle cx="34" cy="40" r="16" fill="#FDEBDD"/><text x="34" y="45" font-size="15" font-weight="800" fill="#C0530F" text-anchor="middle">3</text>
+      <text x="24" y="86" font-size="15" font-weight="800" fill="#211A14">Provenance</text>
+      <text x="24" y="112" font-size="12" fill="#6A5D50">source = ai</text>
+      <text x="24" y="130" font-size="12" fill="#6A5D50">+ confidence</text>
+    </g>
+    <g transform="translate(882,180)">
+      <rect width="176" height="150" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <circle cx="34" cy="40" r="16" fill="#FDEBDD"/><text x="34" y="45" font-size="15" font-weight="800" fill="#C0530F" text-anchor="middle">4</text>
+      <text x="24" y="86" font-size="15" font-weight="800" fill="#211A14">Audit row</text>
+      <text x="24" y="112" font-size="12" fill="#6A5D50">"AI updated</text>
+      <text x="24" y="130" font-size="12" fill="#6A5D50">Budget → $1M+"</text>
+    </g>
+  </g>
+
+  <!-- output -->
+  <g transform="translate(1080,205)">
+    <rect width="76" height="100" rx="14" fill="#E7F6EC" stroke="#BFE6CC"/>
+    <path d="M26 50 l10 10 18 -20" stroke="#16A34A" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="38" y="86" font-size="11.5" font-weight="700" fill="#128A3E" text-anchor="middle">lead field</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#D8A876" stroke-width="2.4" fill="none">
+    <path d="M236 255 H288" marker-end="url(#g)"/>
+    <path d="M464 255 H486" marker-end="url(#g)"/>
+    <path d="M662 255 H684" marker-end="url(#g)"/>
+    <path d="M860 255 H882" marker-end="url(#g)"/>
+    <path d="M1058 255 H1080" marker-end="url(#g)"/>
+  </g>
+
+  <g transform="translate(60,392)">
+    <rect width="1096" height="112" rx="16" fill="#FFF6EE" stroke="#F5E2CE"/>
+    <text x="28" y="42" font-size="15" font-weight="800" fill="#C0530F">Why it matters</text>
+    <text x="28" y="72" font-size="13.5" fill="#5C5145">The AI's writes are normalized, audited, and reversible — and a value a human set by hand is protected</text>
+    <text x="28" y="94" font-size="13.5" fill="#5C5145">unless clear new intent appears. Deterministic rails beneath a probabilistic model.</text>
+  </g>
+</svg>

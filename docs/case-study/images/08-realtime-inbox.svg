@@ -1,0 +1,66 @@
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="560" fill="#FBF8F3"/>
+  <text x="60" y="64" font-size="30" font-weight="800" fill="#211A14">A real-time inbox on stateless infra</text>
+  <text x="60" y="96" font-size="16" fill="#7A6E60">Newest conversation on top, live, no refresh — a WebSocket push with a poll as the safety net.</text>
+
+  <defs>
+    <marker id="r" markerWidth="11" markerHeight="11" refX="7" refY="5.5" orient="auto"><path d="M0 0 L10 5.5 L0 11 z" fill="#F0A868"/></marker>
+  </defs>
+
+  <!-- new message source -->
+  <g transform="translate(60,220)">
+    <rect width="170" height="120" rx="16" fill="#fff" stroke="#EAE4DA"/>
+    <circle cx="34" cy="36" r="15" fill="#FDEBDD"/><path d="M27 32 h14 v10 l-7 -3 -7 3 z" fill="#C0530F"/>
+    <text x="20" y="76" font-size="15" font-weight="800" fill="#211A14">New message</text>
+    <text x="20" y="98" font-size="12.5" fill="#7A6E60">inbound reply</text>
+  </g>
+
+  <!-- two mechanisms -->
+  <g transform="translate(300,175)">
+    <rect width="320" height="72" rx="14" fill="#F3E9FB" stroke="#DEC6F6"/>
+    <text x="22" y="32" font-size="15" font-weight="800" fill="#6D28D9">WebSocket push</text>
+    <text x="22" y="56" font-size="12.5" fill="#7C3AED">near-instant · shared notification socket</text>
+  </g>
+  <g transform="translate(300,283)">
+    <rect width="320" height="72" rx="14" fill="#FFF6EE" stroke="#F5E2CE"/>
+    <text x="22" y="32" font-size="15" font-weight="800" fill="#C0530F">Background poll</text>
+    <text x="22" y="56" font-size="12.5" fill="#8B7E6F">always-on fallback · every ~20s</text>
+  </g>
+
+  <!-- inbox result -->
+  <g transform="translate(700,150)">
+    <rect width="440" height="270" rx="18" fill="#fff" stroke="#EAE4DA"/>
+    <text x="24" y="38" font-size="14" font-weight="800" fill="#211A14">Conversations</text>
+    <!-- top row highlighted -->
+    <g transform="translate(16,56)">
+      <rect width="408" height="56" rx="12" fill="#FEF6EF" stroke="#F7DFC7"/>
+      <circle cx="34" cy="28" r="15" fill="#FDEBDD"/>
+      <text x="60" y="26" font-size="13.5" font-weight="700" fill="#211A14">Kisha</text>
+      <text x="60" y="45" font-size="12" fill="#8B7E6F">Not yet, still figuring it out</text>
+      <circle cx="392" cy="28" r="9" fill="#F97316"/><text x="392" y="32" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">1</text>
+      <text x="360" y="20" font-size="10" fill="#C0530F">now</text>
+    </g>
+    <g transform="translate(16,122)" opacity="0.85">
+      <rect width="408" height="46" rx="12" fill="#fff"/>
+      <circle cx="34" cy="23" r="14" fill="#F3EEE7"/>
+      <text x="58" y="21" font-size="13" font-weight="600" fill="#3F362C">Wayne Adams</text>
+      <text x="58" y="38" font-size="11.5" fill="#9A8C7C">Sounds good, thanks</text>
+    </g>
+    <g transform="translate(16,176)" opacity="0.7">
+      <rect width="408" height="46" rx="12" fill="#fff"/>
+      <circle cx="34" cy="23" r="14" fill="#F3EEE7"/>
+      <text x="58" y="21" font-size="13" font-weight="600" fill="#3F362C">Pat Begg</text>
+      <text x="58" y="38" font-size="11.5" fill="#9A8C7C">Hi</text>
+    </g>
+    <text x="24" y="252" font-size="11.5" fill="#8B7E6F">↑ jumps to the top the moment it arrives</text>
+  </g>
+
+  <g stroke="#F0A868" stroke-width="2.4" fill="none">
+    <path d="M230 250 C 260 250, 265 211, 300 211" marker-end="url(#r)"/>
+    <path d="M230 300 C 260 300, 265 319, 300 319" marker-end="url(#r)"/>
+    <path d="M620 211 C 660 211, 660 260, 700 260" marker-end="url(#r)"/>
+    <path d="M620 319 C 660 319, 660 275, 700 275" marker-end="url(#r)"/>
+  </g>
+
+  <text x="60" y="484" font-size="13.5" fill="#8B7E6F">Every send/receive path (inbound, AI reply, bulk campaign) bumps the recency column, so recipients actually move up.</text>
+</svg>

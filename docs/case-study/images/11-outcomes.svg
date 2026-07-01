@@ -1,0 +1,43 @@
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="ob" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFF7EF"/><stop offset="1" stop-color="#FCEBD9"/></linearGradient>
+  </defs>
+  <rect width="1200" height="560" fill="url(#ob)"/>
+  <text x="60" y="70" font-size="32" font-weight="800" fill="#211A14">From ~80% demo → trustworthy product</text>
+  <text x="60" y="104" font-size="16" fill="#7A6E60">Hardening the three things that decide whether a CRM can run a business's pipeline.</text>
+
+  <!-- 3 pillars -->
+  <g transform="translate(60,150)">
+    <rect width="345" height="150" rx="18" fill="#fff" stroke="#F0D9C4"/>
+    <circle cx="40" cy="44" r="18" fill="#FDEBDD"/><path d="M32 44 l6 6 10 -12" stroke="#C0530F" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="72" y="50" font-size="18" font-weight="800" fill="#211A14">AI accuracy</text>
+    <text x="28" y="90" font-size="13.5" fill="#5C5145">Auto-fills budget, timeline, financing,</text>
+    <text x="28" y="110" font-size="13.5" fill="#5C5145">contact &amp; source from conversation —</text>
+    <text x="28" y="130" font-size="13.5" fill="#5C5145">normalized, audited, never invented.</text>
+  </g>
+  <g transform="translate(428,150)">
+    <rect width="345" height="150" rx="18" fill="#fff" stroke="#F0D9C4"/>
+    <circle cx="40" cy="44" r="18" fill="#E7F6EC"/><path d="M40 34 v14 M40 53 v.5" stroke="#16A34A" stroke-width="2.8" stroke-linecap="round"/>
+    <text x="72" y="50" font-size="18" font-weight="800" fill="#211A14">Compliance</text>
+    <text x="28" y="90" font-size="13.5" fill="#5C5145">Phone-scoped consent, reliable opt-out</text>
+    <text x="28" y="110" font-size="13.5" fill="#5C5145">persistence &amp; inheritance, no duplicate</text>
+    <text x="28" y="130" font-size="13.5" fill="#5C5145">or inconsistent STOP footers.</text>
+  </g>
+  <g transform="translate(796,150)">
+    <rect width="345" height="150" rx="18" fill="#fff" stroke="#F0D9C4"/>
+    <circle cx="40" cy="44" r="18" fill="#E8EFFC"/><path d="M31 44 h18 M40 35 v18" stroke="#2563EB" stroke-width="2.8" stroke-linecap="round"/>
+    <text x="72" y="50" font-size="18" font-weight="800" fill="#211A14">Data consistency</text>
+    <text x="28" y="90" font-size="13.5" fill="#5C5145">One live definition for every KPI across</text>
+    <text x="28" y="110" font-size="13.5" fill="#5C5145">inbox &amp; dashboard; safe deletes that</text>
+    <text x="28" y="130" font-size="13.5" fill="#5C5145">don't leave ghosts or leak sends.</text>
+  </g>
+
+  <!-- takeaway strip -->
+  <g transform="translate(60,340)">
+    <rect width="1081" height="150" rx="18" fill="#211A14"/>
+    <text x="34" y="52" font-size="15" font-weight="800" letter-spacing="1" fill="#F9A05C">THE TAKEAWAY</text>
+    <text x="34" y="90" font-size="18" font-weight="700" fill="#fff">The interesting engineering in an AI product isn't the model call.</text>
+    <text x="34" y="120" font-size="15" fill="#D9CFC4">It's the deterministic guarantees beneath a probabilistic system, the invariants across an</text>
+    <text x="34" y="142" font-size="15" fill="#D9CFC4">eventually-consistent read model, and the domain constraints where “mostly works” isn't good enough.</text>
+  </g>
+</svg>

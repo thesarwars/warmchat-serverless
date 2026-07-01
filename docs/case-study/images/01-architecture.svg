@@ -1,0 +1,79 @@
+<svg viewBox="0 0 1200 720" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="720" fill="#FBF8F3"/>
+  <text x="60" y="66" font-size="30" font-weight="800" fill="#211A14">Serverless architecture</text>
+  <text x="60" y="98" font-size="16" fill="#7A6E60">Three deployables on Cloudflare, one edge database — no always-on servers.</text>
+
+  <!-- client -->
+  <g transform="translate(60,140)">
+    <rect width="300" height="86" rx="16" fill="#fff" stroke="#EAE4DA"/>
+    <rect x="22" y="24" width="44" height="38" rx="7" fill="#FDEBDD"/>
+    <path d="M32 40 h24 M32 47 h16" stroke="#C0530F" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="84" y="47" font-size="18" font-weight="700" fill="#211A14">React app</text>
+    <text x="84" y="69" font-size="13" fill="#8B7E6F">TanStack Query · WebSocket</text>
+  </g>
+
+  <!-- edge band -->
+  <rect x="60" y="270" width="740" height="250" rx="20" fill="#FFF6EE" stroke="#F5E2CE"/>
+  <text x="84" y="302" font-size="14" font-weight="800" letter-spacing="1" fill="#C0530F">CLOUDFLARE EDGE</text>
+
+  <!-- pages functions -->
+  <g transform="translate(84,322)">
+    <rect width="220" height="172" rx="14" fill="#fff" stroke="#EEDFCF"/>
+    <rect x="18" y="18" width="34" height="34" rx="9" fill="#F97316"/>
+    <path d="M27 35 l5 5 8 -10" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="18" y="82" font-size="16.5" font-weight="800" fill="#211A14">Pages Functions</text>
+    <text x="18" y="104" font-size="12.5" fill="#6A5D50">The API + app.</text>
+    <text x="18" y="124" font-size="12.5" fill="#6A5D50">Auth · leads · inbox · AI</text>
+    <text x="18" y="144" font-size="12.5" fill="#6A5D50">automations · webhooks</text>
+  </g>
+  <!-- cron worker -->
+  <g transform="translate(320,322)">
+    <rect width="220" height="172" rx="14" fill="#fff" stroke="#EEDFCF"/>
+    <circle cx="35" cy="35" r="17" fill="#FDEBDD"/>
+    <path d="M35 26 v9 l6 4" stroke="#C0530F" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="18" y="82" font-size="16.5" font-weight="800" fill="#211A14">Cron Worker</text>
+    <text x="18" y="104" font-size="12.5" fill="#6A5D50">Drains the send queue</text>
+    <text x="18" y="124" font-size="12.5" fill="#6A5D50">Runs follow-up sequences</text>
+    <text x="18" y="144" font-size="12.5" fill="#6A5D50">OAuth refresh · sweeps</text>
+  </g>
+  <!-- gateway worker -->
+  <g transform="translate(556,322)">
+    <rect width="220" height="172" rx="14" fill="#fff" stroke="#EEDFCF"/>
+    <rect x="18" y="18" width="34" height="34" rx="9" fill="#7C3AED"/>
+    <path d="M27 40 a8 8 0 0 1 16 0" stroke="#fff" stroke-width="2.6" fill="none"/>
+    <circle cx="35" cy="30" r="3.4" fill="#fff"/>
+    <text x="18" y="82" font-size="16.5" font-weight="800" fill="#211A14">Gateway Worker</text>
+    <text x="18" y="104" font-size="12.5" fill="#6A5D50">Durable Objects</text>
+    <text x="18" y="124" font-size="12.5" fill="#6A5D50">Real-time calling</text>
+    <text x="18" y="144" font-size="12.5" fill="#6A5D50">WebRTC · call control</text>
+  </g>
+
+  <!-- database -->
+  <g transform="translate(230,560)">
+    <rect width="360" height="96" rx="16" fill="#fff" stroke="#EAE4DA"/>
+    <ellipse cx="52" cy="38" rx="20" ry="8" fill="#E8EFFC"/>
+    <path d="M32 38 v22 a20 8 0 0 0 40 0 v-22" fill="#E8EFFC"/>
+    <ellipse cx="52" cy="38" rx="20" ry="8" fill="#DCE7FB" stroke="#B9CEF6"/>
+    <text x="86" y="46" font-size="17" font-weight="800" fill="#211A14">Cloudflare D1</text>
+    <text x="86" y="70" font-size="13" fill="#7A6E60">edge SQLite · denormalized read model</text>
+  </g>
+
+  <!-- integrations column -->
+  <text x="880" y="302" font-size="14" font-weight="800" letter-spacing="1" fill="#7A6E60">INTEGRATIONS</text>
+  <g font-size="15" font-weight="700" fill="#211A14">
+    <g transform="translate(860,318)"><rect width="280" height="46" rx="12" fill="#fff" stroke="#EAE4DA"/><circle cx="30" cy="23" r="9" fill="#16A34A"/><text x="52" y="28">Telnyx — SMS + Voice</text></g>
+    <g transform="translate(860,374)"><rect width="280" height="46" rx="12" fill="#fff" stroke="#EAE4DA"/><circle cx="30" cy="23" r="9" fill="#2563EB"/><text x="52" y="28">ElasticEmail + Gmail</text></g>
+    <g transform="translate(860,430)"><rect width="280" height="46" rx="12" fill="#fff" stroke="#EAE4DA"/><circle cx="30" cy="23" r="9" fill="#7C3AED"/><text x="52" y="28">OpenAI — AI agent</text></g>
+    <g transform="translate(860,486)"><rect width="280" height="46" rx="12" fill="#fff" stroke="#EAE4DA"/><circle cx="30" cy="23" r="9" fill="#635BFF"/><text x="52" y="28">Stripe — billing</text></g>
+  </g>
+
+  <!-- connectors -->
+  <g stroke="#E0B893" stroke-width="2.2" fill="none">
+    <path d="M210 226 V270" marker-end="url(#a)"/>
+    <path d="M470 520 V560" marker-end="url(#a)"/>
+    <path d="M800 400 H860" marker-end="url(#a)"/>
+  </g>
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#E0B893"/></marker>
+  </defs>
+</svg>

@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="560" fill="#FBF8F3"/>
+  <text x="60" y="64" font-size="30" font-weight="800" fill="#211A14">One metric, three answers</text>
+  <text x="60" y="96" font-size="16" fill="#7A6E60">“Needs Reply” read 0, 2, and 5 at the same time — a denormalized read model out of sync.</text>
+
+  <defs>
+    <marker id="n" markerWidth="12" markerHeight="12" refX="7" refY="6" orient="auto"><path d="M0 0 L11 6 L0 12 z" fill="#F0A868"/></marker>
+  </defs>
+
+  <!-- before: three conflicting -->
+  <text x="120" y="176" font-size="14" font-weight="800" letter-spacing="1" fill="#B91C1C">BEFORE · INCONSISTENT</text>
+  <g>
+    <g transform="translate(90,196)">
+      <rect width="200" height="150" rx="16" fill="#fff" stroke="#F1CACA"/>
+      <text x="24" y="40" font-size="13.5" fill="#7A6E60">Inbox · All view</text>
+      <text x="24" y="104" font-size="52" font-weight="800" fill="#B91C1C">0</text>
+      <text x="24" y="132" font-size="12" fill="#9A8C7C">stale denormalized column</text>
+    </g>
+    <g transform="translate(310,196)">
+      <rect width="200" height="150" rx="16" fill="#fff" stroke="#F1CACA"/>
+      <text x="24" y="40" font-size="13.5" fill="#7A6E60">Inbox · Needs Reply</text>
+      <text x="24" y="104" font-size="52" font-weight="800" fill="#B91C1C">2</text>
+      <text x="24" y="132" font-size="12" fill="#9A8C7C">recomputed from messages</text>
+    </g>
+    <g transform="translate(530,196)">
+      <rect width="200" height="150" rx="16" fill="#fff" stroke="#F1CACA"/>
+      <text x="24" y="40" font-size="13.5" fill="#7A6E60">Dashboard card</text>
+      <text x="24" y="104" font-size="52" font-weight="800" fill="#B91C1C">5</text>
+      <text x="24" y="132" font-size="12" fill="#9A8C7C">a different, broader feed</text>
+    </g>
+  </g>
+
+  <!-- arrow -->
+  <path d="M760 271 H842" stroke="#F0A868" stroke-width="3" fill="none" marker-end="url(#n)"/>
+
+  <!-- after: one -->
+  <text x="900" y="176" font-size="14" font-weight="800" letter-spacing="1" fill="#128A3E">AFTER · ONE LIVE NUMBER</text>
+  <g transform="translate(870,196)">
+    <rect width="240" height="150" rx="16" fill="#E7F6EC" stroke="#BFE6CC"/>
+    <text x="24" y="40" font-size="13.5" fill="#2E7D4F">Everywhere</text>
+    <text x="24" y="108" font-size="56" font-weight="800" fill="#128A3E">2</text>
+    <text x="24" y="136" font-size="12" fill="#2E7D4F">last msg inbound &amp; reachable</text>
+  </g>
+
+  <g transform="translate(90,400)">
+    <rect width="1020" height="118" rx="16" fill="#FFF6EE" stroke="#F5E2CE"/>
+    <text x="28" y="42" font-size="15" font-weight="800" fill="#C0530F">The fix</text>
+    <text x="28" y="72" font-size="13.5" fill="#5C5145">Defined “needs reply” once — last message inbound AND the lead still reachable (not opted out) — and applied it</text>
+    <text x="28" y="94" font-size="13.5" fill="#5C5145">identically across the inbox count, the inbox filter, and the dashboard. Fixed opt-out persistence upstream + backfilled the drift.</text>
+  </g>
+</svg>

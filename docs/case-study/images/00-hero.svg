@@ -1,0 +1,87 @@
+<svg viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF7EF"/>
+      <stop offset="1" stop-color="#FDEEDD"/>
+    </linearGradient>
+    <linearGradient id="or" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FB8B3C"/>
+      <stop offset="1" stop-color="#EA5D0B"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#C0530F" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1060" cy="90" r="220" fill="#F97316" opacity="0.06"/>
+  <circle cx="120" cy="560" r="180" fill="#F97316" opacity="0.05"/>
+
+  <!-- brand mark -->
+  <g transform="translate(90,86)">
+    <rect width="46" height="46" rx="13" fill="url(#or)"/>
+    <path d="M11 15 l6 16 5 -12 5 12 6 -16" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="62" y="30" font-size="24" font-weight="800" fill="#211A14">WarmChats</text>
+  </g>
+
+  <!-- headline -->
+  <text x="90" y="240" font-size="58" font-weight="800" fill="#211A14">An AI Sales Employee</text>
+  <text x="90" y="308" font-size="58" font-weight="800" fill="#C0530F">for Real-Estate Teams</text>
+  <text x="92" y="360" font-size="21" fill="#6A5D50">Replies in seconds · qualifies over SMS &amp; email · books appointments</text>
+  <text x="92" y="390" font-size="21" fill="#6A5D50">— built entirely on a serverless edge stack.</text>
+
+  <!-- chips -->
+  <g font-size="14.5" font-weight="700">
+    <g transform="translate(92,428)">
+      <rect width="176" height="38" rx="19" fill="#fff" stroke="#F0D9C4"/>
+      <text x="20" y="25" fill="#C0530F">Full-stack / AI eng</text>
+    </g>
+    <g transform="translate(284,428)">
+      <rect width="122" height="38" rx="19" fill="#fff" stroke="#F0D9C4"/>
+      <text x="18" y="25" fill="#5C5145">Cloudflare</text>
+    </g>
+    <g transform="translate(422,428)">
+      <rect width="108" height="38" rx="19" fill="#fff" stroke="#F0D9C4"/>
+      <text x="18" y="25" fill="#5C5145">TypeScript</text>
+    </g>
+    <g transform="translate(546,428)">
+      <rect width="98" height="38" rx="19" fill="#fff" stroke="#F0D9C4"/>
+      <text x="18" y="25" fill="#5C5145">OpenAI</text>
+    </g>
+  </g>
+
+  <!-- chat illustration -->
+  <g transform="translate(792,150)" filter="url(#sh)">
+    <rect width="320" height="330" rx="24" fill="#ffffff"/>
+    <rect x="0" y="0" width="320" height="60" rx="24" fill="#fff"/>
+    <rect x="0" y="36" width="320" height="24" fill="#fff"/>
+    <circle cx="34" cy="34" r="15" fill="#FDEBDD"/>
+    <text x="34" y="39" font-size="14" font-weight="800" fill="#C0530F" text-anchor="middle">K</text>
+    <text x="60" y="31" font-size="14.5" font-weight="700" fill="#211A14">New lead · Kisha</text>
+    <text x="60" y="49" font-size="11.5" fill="#8B7E6F">Buyer · Appointment Set</text>
+    <line x1="0" y1="60" x2="320" y2="60" stroke="#F1EBE2"/>
+
+    <!-- inbound -->
+    <g transform="translate(20,80)">
+      <rect width="184" height="42" rx="13" fill="#F3EEE7"/>
+      <text x="16" y="26" font-size="13" fill="#3F362C">Looking up to $1.2M</text>
+    </g>
+    <!-- ai reply -->
+    <g transform="translate(96,136)">
+      <rect width="204" height="58" rx="13" fill="url(#or)"/>
+      <text x="16" y="24" font-size="12.5" fill="#fff">Great — are you pre-approved,</text>
+      <text x="16" y="42" font-size="12.5" fill="#fff">or still figuring financing out?</text>
+    </g>
+    <g transform="translate(20,208)">
+      <rect width="150" height="36" rx="13" fill="#F3EEE7"/>
+      <text x="16" y="23" font-size="13" fill="#3F362C">Not yet, still figuring</text>
+    </g>
+    <!-- ai action -->
+    <g transform="translate(20,258)">
+      <rect width="280" height="52" rx="13" fill="#FEF6EF" stroke="#F7DFC7"/>
+      <circle cx="24" cy="26" r="9" fill="#F97316"/>
+      <path d="M20 26 l3 3 6 -6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="42" y="22" font-size="12" font-weight="700" fill="#C0530F">AI updated the CRM</text>
+      <text x="42" y="39" font-size="11.5" fill="#6A5D50">Budget $1M+ · Pre-approved: Not yet</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,75 @@
+<svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1200" height="640" fill="#FBF8F3"/>
+  <text x="60" y="64" font-size="30" font-weight="800" fill="#211A14">Tech stack</text>
+  <text x="60" y="96" font-size="16" fill="#7A6E60">Edge-native, multi-provider, AI at the core.</text>
+
+  <!-- card generator: 3 cols x 3 rows -->
+  <g font-family="Inter, sans-serif">
+    <!-- row 1 -->
+    <g transform="translate(60,140)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#F97316"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#C0530F">Frontend</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">React · TypeScript</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">TanStack Query</text>
+    </g>
+    <g transform="translate(425,140)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#F97316"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#C0530F">Edge compute</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Cloudflare Pages Functions</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">+ Workers</text>
+    </g>
+    <g transform="translate(790,140)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#7C3AED"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#6D28D9">Real-time / stateful</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Durable Objects (calling)</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">WebSockets</text>
+    </g>
+    <!-- row 2 -->
+    <g transform="translate(60,290)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#F97316"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#C0530F">Scheduling</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Cron Worker — queue drain,</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">sequences, sweeps</text>
+    </g>
+    <g transform="translate(425,290)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#2563EB"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#1D4ED8">Database</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Cloudflare D1 (edge SQLite)</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">denormalized read model</text>
+    </g>
+    <g transform="translate(790,290)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#7C3AED"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#6D28D9">AI</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">OpenAI tool-calling agent</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">+ deterministic rails</text>
+    </g>
+    <!-- row 3 -->
+    <g transform="translate(60,440)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#16A34A"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#128A3E">Messaging</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Telnyx SMS + Voice</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">ElasticEmail · Gmail OAuth</text>
+    </g>
+    <g transform="translate(425,440)">
+      <rect width="350" height="130" rx="16" fill="#fff" stroke="#EAE4DA"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#635BFF"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#4F46E5">Payments</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Stripe — Checkout,</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">Portal, webhooks</text>
+    </g>
+    <g transform="translate(790,440)">
+      <rect width="350" height="130" rx="16" fill="#FFF6EE" stroke="#F5E2CE"/>
+      <rect x="24" y="24" width="10" height="10" rx="3" fill="#C0530F"/>
+      <text x="48" y="34" font-size="15" font-weight="800" fill="#C0530F">Practices</text>
+      <text x="24" y="72" font-size="14" fill="#3F362C">Verification-driven fixes,</text>
+      <text x="24" y="98" font-size="14" fill="#3F362C">adversarial review, tests</text>
+    </g>
+  </g>
+</svg>
