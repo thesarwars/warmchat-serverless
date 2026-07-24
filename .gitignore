@@ -55,5 +55,9 @@ warmchats-export.sql
 # ---- Internal docs, screenshots, QA captures (may contain real lead PII) ----
 docs/
 
+# ---- Private legal / client documents (never publish) ----
+agreement.md
+DISCLAIMER.md
+
 # ---- Misc local artifacts ----
 performance-summary-*.png
