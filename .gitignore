@@ -36,3 +36,24 @@ warmchats-backup.sql
 wc-schema.sql
 wc-data.sql
 warmchats-export.sql
+
+# ---- Secrets: never commit (repo is public) ----
+.env
+.env.*
+!.env.example
+.dev.vars
+**/.dev.vars
+.dev.vars.*
+
+# ---- Local databases / dumps (may contain real lead PII) ----
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ---- Internal docs, screenshots, QA captures (may contain real lead PII) ----
+docs/
+
+# ---- Misc local artifacts ----
+performance-summary-*.png
